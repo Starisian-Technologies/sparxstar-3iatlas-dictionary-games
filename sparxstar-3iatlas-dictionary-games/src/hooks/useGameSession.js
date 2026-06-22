@@ -71,16 +71,12 @@ export function useGameSession() {
 
     /* Safe wrappers — defined before any callback that uses them to avoid TDZ. */
     const safePutRecord = useCallback(async (...args) => {
-        if (typeof putRecord !== 'function') {
-            throw new TypeError('putRecord is not a function');
-        }
+        if (typeof putRecord !== 'function') return false;
         return putRecord(...args);
     }, []);
 
     const safeDeleteRecord = useCallback(async (...args) => {
-        if (typeof deleteRecord !== 'function') {
-            throw new TypeError('deleteRecord is not a function');
-        }
+        if (typeof deleteRecord !== 'function') return;
         return deleteRecord(...args);
     }, []);
 
@@ -153,10 +149,7 @@ export function useGameSession() {
                 typeof PRODUCTION_GAMES.has === 'function' &&
                 PRODUCTION_GAMES.has(current.gameType);
             if (outcome === 'correct' && isProductionGame) {
-                const learnedRecord =
-                    typeof getRecord === 'function'
-                        ? await getRecord('learned-words', LEARNED_KEY)
-                        : null;
+                const learnedRecord = await safeGetRecord('learned-words', LEARNED_KEY);
                 const existing = learnedRecord?.uuids ?? [];
                 if (!existing.includes(wordUuid)) {
                     const next = [...existing, wordUuid];

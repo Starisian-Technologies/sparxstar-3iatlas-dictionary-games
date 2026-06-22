@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Volume2 } from 'lucide-react';
 
 /**
@@ -19,6 +19,14 @@ export default function DomainFlash({ words, language, onResult, onComplete }) {
     const [index, setIndex] = useState(0);
     const [flipped, setFlipped] = useState(false);
     const [answered, setAnswered] = useState(false);
+    const answeredRef = useRef(false);
+    const audioRef = useRef(null);
+
+    useEffect(() => {
+        return () => {
+            if (audioRef.current) audioRef.current.pause();
+        };
+    }, []);
 
     const word = deck[index];
     if (!word) return null;
@@ -28,20 +36,6 @@ export default function DomainFlash({ words, language, onResult, onComplete }) {
 
     const handleReveal = () => setFlipped(true);
 
-    const handleKnew = () => {
-        if (answered) return;
-        setAnswered(true);
-        onResult(word.uuid, 'correct', 1, 5);
-        next();
-    };
-
-    const handleLearning = () => {
-        if (answered) return;
-        setAnswered(true);
-        onResult(word.uuid, 'learning', 1, 0);
-        next();
-    };
-
     const next = () => {
         if (index + 1 >= deck.length) {
             onComplete();
@@ -49,14 +43,34 @@ export default function DomainFlash({ words, language, onResult, onComplete }) {
             setIndex((i) => i + 1);
             setFlipped(false);
             setAnswered(false);
+            answeredRef.current = false;
         }
+    };
+
+    const handleKnew = () => {
+        if (answeredRef.current) return;
+        answeredRef.current = true;
+        setAnswered(true);
+        onResult(word.uuid, 'correct', 1, 5);
+        next();
+    };
+
+    const handleLearning = () => {
+        if (answeredRef.current) return;
+        answeredRef.current = true;
+        setAnswered(true);
+        onResult(word.uuid, 'learning', 1, 0);
+        next();
     };
 
     const playAudio = (e) => {
         e.stopPropagation();
-        if (word.audio_url) {
-            new Audio(word.audio_url).play().catch(() => {});
-        }
+        if (!word.audio_url) return;
+        if (!audioRef.current) audioRef.current = new Audio();
+        audioRef.current.pause();
+        audioRef.current.src = word.audio_url;
+        audioRef.current.currentTime = 0;
+        audioRef.current.play().catch(() => {});
     };
 
     return (

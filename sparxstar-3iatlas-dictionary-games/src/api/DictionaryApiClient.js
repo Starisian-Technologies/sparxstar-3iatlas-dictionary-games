@@ -50,6 +50,9 @@ export class DictionaryApiError extends Error {
  * @returns {import('./dictionary-api').DictionaryApiClient}
  */
 export function createDictionaryApiClient(config) {
+    if (!config.baseUrl) {
+        throw new Error('baseUrl is required in DictionaryApiClient configuration');
+    }
     let pageToken = config.pageToken ?? '';
     const apiKey = config.apiKey ?? '';
     const baseUrl = config.baseUrl.replace(/\/$/, '');
@@ -98,26 +101,34 @@ export function createDictionaryApiClient(config) {
         return json;
     }
 
+    let activeRefreshPromise = null;
+
     /**
      * Refresh the ephemeral page token by calling GET /page-token.
-     * Updates the internal pageToken on success.
+     * Concurrent callers share the same in-flight request.
      *
      * @returns {Promise<boolean>} True if a new token was obtained.
      */
-    async function refreshPageToken() {
-        try {
-            const res = await fetch(`${baseUrl}/page-token`);
-            if (!res.ok) return false;
-            const json = await res.json();
-            const token = json?.data?.token ?? '';
-            if (token) {
-                pageToken = token;
-                return true;
+    function refreshPageToken() {
+        if (activeRefreshPromise) return activeRefreshPromise;
+        activeRefreshPromise = (async () => {
+            try {
+                const res = await fetch(`${baseUrl}/page-token`);
+                if (!res.ok) return false;
+                const json = await res.json();
+                const token = json?.data?.token ?? '';
+                if (token) {
+                    pageToken = token;
+                    return true;
+                }
+            } catch {
+                // Degrade silently — caller handles the error response.
+            } finally {
+                activeRefreshPromise = null;
             }
-        } catch {
-            // Degrade silently — caller handles the error response.
-        }
-        return false;
+            return false;
+        })();
+        return activeRefreshPromise;
     }
 
     /**
