@@ -29,7 +29,7 @@ export default function CompleteSentence({ words, language, onResult, onComplete
                     return (
                         example?.sentence &&
                         w.headword &&
-                        new RegExp(escapeRegex(w.headword), 'i').test(example.sentence)
+                        new RegExp(`(?<![a-zA-Z0-9_ŋɓɗñɲʔ])${escapeRegex(w.headword)}(?![a-zA-Z0-9_ŋɓɗñɲʔ])`, 'i').test(example.sentence)
                     );
                 })
             ),
@@ -65,8 +65,10 @@ export default function CompleteSentence({ words, language, onResult, onComplete
             ? example.translation_fr
             : example?.translation_en ?? '';
 
-    /* Replace first occurrence of the headword (case-insensitive) with blanks. */
-    const regex = new RegExp(`(${escapeRegex(target)})`, 'i');
+    /* Replace first occurrence of the headword (case-insensitive) with blanks.
+     * Lookarounds include Mandinka-specific chars to avoid matching substrings
+     * inside longer words (e.g. 'la' inside 'lavage'). */
+    const regex = new RegExp(`(?<![a-zA-Z0-9_ŋɓɗñɲʔ])(${escapeRegex(target)})(?![a-zA-Z0-9_ŋɓɗñɲʔ])`, 'i');
     const blankDisplay =
         status === 'correct'
             ? target

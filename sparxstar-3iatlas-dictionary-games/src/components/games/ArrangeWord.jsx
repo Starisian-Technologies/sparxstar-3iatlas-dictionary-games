@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Volume2 } from 'lucide-react';
 
 /**
@@ -26,6 +26,13 @@ export default function ArrangeWord({ words, language, onResult, onComplete }) {
     const { pool, answer } = tileState;
     const [shake, setShake] = useState(false);
     const [correct, setCorrect] = useState(false);
+    const audioRef = useRef(null);
+
+    useEffect(() => {
+        return () => {
+            if (audioRef.current) audioRef.current.pause();
+        };
+    }, []);
 
     const word = deck[index];
     const target = word ? word.headword.toLowerCase() : '';
@@ -52,7 +59,13 @@ export default function ArrangeWord({ words, language, onResult, onComplete }) {
             .toLowerCase();
         if (attempt === target) {
             setCorrect(true);
-            if (word.audio_url) new Audio(word.audio_url).play().catch(() => {});
+            if (word.audio_url) {
+                if (!audioRef.current) audioRef.current = new Audio();
+                audioRef.current.pause();
+                audioRef.current.src = word.audio_url;
+                audioRef.current.currentTime = 0;
+                audioRef.current.play().catch(() => {});
+            }
             onResult(word.uuid, 'correct', 1, 5);
             setTimeout(advance, 1200);
         } else {
@@ -193,7 +206,13 @@ export default function ArrangeWord({ words, language, onResult, onComplete }) {
                 <div className="shrink-0 flex justify-center pb-2">
                     <button
                         type="button"
-                        onClick={() => new Audio(word.audio_url).play().catch(() => {})}
+                        onClick={() => {
+                            if (!audioRef.current) audioRef.current = new Audio();
+                            audioRef.current.pause();
+                            audioRef.current.src = word.audio_url;
+                            audioRef.current.currentTime = 0;
+                            audioRef.current.play().catch(() => {});
+                        }}
                         className="p-3 rounded-full"
                         style={{ background: '#FCE4F3', color: '#E91E8C' }}
                         aria-label="Play pronunciation"

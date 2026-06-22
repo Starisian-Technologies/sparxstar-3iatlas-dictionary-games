@@ -12,7 +12,13 @@ import CompleteSentence from './games/CompleteSentence.jsx';
 import ListenWrite from './games/ListenWrite.jsx';
 
 const useGameSet = GameSetHookModule.useGameSet ?? GameSetHookModule.default;
+if (!useGameSet) {
+    throw new Error('useGameSet hook is not exported from useGameSet.js');
+}
 const useGameSession = useGameSessionModule.useGameSession ?? useGameSessionModule.default;
+if (!useGameSession) {
+    throw new Error('useGameSession hook is not exported from useGameSession.js');
+}
 
 /** Word count options available in session setup. */
 const WORD_COUNTS = [10, 20, 30];
@@ -206,46 +212,51 @@ export default function GameShell({
     /* ── When game-set loads (after Start is tapped), kick off the session ── */
     useEffect(() => {
         const load = async () => {
-            if (phase !== 'loading') return;
-            if (gameSetLoading) return;
-            if (gameSetError) {
-                setSetupError(gameSetError);
-                setPhase('setup');
-                return;
-            }
-            if (fetchedWords.length === 0) {
-                setSetupError('No words are available for this game yet.');
-                setPhase('setup');
-                return;
-            }
-
-            const sliced = fetchedWords.slice(0, wordCount);
-            setSetupError(null);
-
             try {
-                await initSession({
-                    gameType: selectedGame,
-                    langSource: sourceLanguage ?? '',
-                    domain: selectedDomain,
-                    words: sliced,
-                });
-            } catch (error) {
-                setSetupError(error?.message ?? 'Unable to start the game session.');
-                setPhase('setup');
-                return;
-            }
-
-            setGameWords(sliced);
-            setPhase('playing');
-
-            /* Fire return-visit event. */
-            const today = new Date().toDateString();
-            const lastVisit = getLocalStorageItem('aiwa-dict-last-play');
-            if (lastVisit.available && lastVisit.value !== today) {
-                const didPersistVisit = setLocalStorageItem('aiwa-dict-last-play', today);
-                if (didPersistVisit) {
-                    await addEvent({ type: 'aiwa_game_return_visit' });
+                if (phase !== 'loading') return;
+                if (gameSetLoading) return;
+                if (gameSetError) {
+                    setSetupError(gameSetError);
+                    setPhase('setup');
+                    return;
                 }
+                if (fetchedWords.length === 0) {
+                    setSetupError('No words are available for this game yet.');
+                    setPhase('setup');
+                    return;
+                }
+
+                const sliced = fetchedWords.slice(0, wordCount);
+                setSetupError(null);
+
+                try {
+                    await initSession({
+                        gameType: selectedGame,
+                        langSource: sourceLanguage ?? '',
+                        domain: selectedDomain,
+                        words: sliced,
+                    });
+                } catch (error) {
+                    setSetupError(error?.message ?? 'Unable to start the game session.');
+                    setPhase('setup');
+                    return;
+                }
+
+                setGameWords(sliced);
+                setPhase('playing');
+
+                /* Fire return-visit event. */
+                const today = new Date().toDateString();
+                const lastVisit = getLocalStorageItem('aiwa-dict-last-play');
+                if (lastVisit.available && lastVisit.value !== today) {
+                    const didPersistVisit = setLocalStorageItem('aiwa-dict-last-play', today);
+                    if (didPersistVisit) {
+                        await addEvent({ type: 'aiwa_game_return_visit' });
+                    }
+                }
+            } catch (error) {
+                setSetupError(error?.message ?? 'An unexpected error occurred');
+                setPhase('setup');
             }
         };
 

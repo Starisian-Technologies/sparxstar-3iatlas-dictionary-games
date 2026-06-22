@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 
 /**
  * MeaningMatch — Game 4.3
@@ -17,6 +17,7 @@ export default function MeaningMatch({ words, language, onResult, onComplete }) 
     const [index, setIndex] = useState(0);
     const [selected, setSelected] = useState(null);
     const [revealed, setRevealed] = useState(false);
+    const revealedRef = useRef(false);
 
     const word = deck[index];
 
@@ -28,7 +29,8 @@ export default function MeaningMatch({ words, language, onResult, onComplete }) 
     if (!word) return null;
 
     const handleSelect = (idx) => {
-        if (revealed) return;
+        if (revealedRef.current) return;
+        revealedRef.current = true;
         setSelected(idx);
         setRevealed(true);
 
@@ -42,6 +44,7 @@ export default function MeaningMatch({ words, language, onResult, onComplete }) 
                 setIndex((i) => i + 1);
                 setSelected(null);
                 setRevealed(false);
+                revealedRef.current = false;
             }
         }, 1500);
     };

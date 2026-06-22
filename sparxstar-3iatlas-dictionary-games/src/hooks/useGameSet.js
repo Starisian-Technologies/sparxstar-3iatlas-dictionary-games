@@ -59,6 +59,7 @@ export function useGameSet({ restUrl, langSource, domain = '', limit = 20, inclu
         }
 
         let cancelled = false;
+        const controller = new AbortController();
 
         async function load() {
             setLoading(true);
@@ -89,6 +90,7 @@ export function useGameSet({ restUrl, langSource, domain = '', limit = 20, inclu
                 const pageToken = typeof window !== 'undefined' ? ( window.sparxstarDictionarySettings?.pageToken ?? '' ) : '';
                 let res = await fetch(`${restUrl}/game-set?${params}`, {
                     headers: { 'X-Page-Token': pageToken },
+                    signal: controller.signal,
                 });
 
                 // On 401, attempt to refresh the token and retry once.
@@ -96,6 +98,7 @@ export function useGameSet({ restUrl, langSource, domain = '', limit = 20, inclu
                     const newToken = await refreshPageToken(restUrl);
                     res = await fetch(`${restUrl}/game-set?${params}`, {
                         headers: { 'X-Page-Token': newToken },
+                        signal: controller.signal,
                     });
                 }
 
@@ -134,6 +137,7 @@ export function useGameSet({ restUrl, langSource, domain = '', limit = 20, inclu
         load();
         return () => {
             cancelled = true;
+            controller.abort();
         };
     }, [restUrl, langSource, domain, limit, normalizedLimit, includeAudio, cacheKey]);
 
