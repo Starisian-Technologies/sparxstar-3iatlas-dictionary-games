@@ -36,10 +36,6 @@
  *   Drop this file into your WordPress plugin that registers the
  *   sparxstar/v1/dictionary REST namespace, or into a must-use plugin,
  *   and ensure it is require_once'd (or auto-loaded) on init.
- *
- * Runtime used: the value of SPARXSTAR_PIPER_RUNTIME is logged to
- * the PHP error log on first synthesis for each word so you can
- * confirm which binary path is active.
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -58,13 +54,9 @@ function sparxstar_register_pronounce_route() {
 			'permission_callback' => 'sparxstar_pronounce_permissions',
 			'args'                => [
 				'word' => [
-					'required'          => true,
-					'type'              => 'string',
-					'sanitize_callback' => function( $raw ) {
-						// Trim whitespace only — preserve diacritics, Twi
-						// characters, and all valid UTF-8 graphemes exactly.
-						return trim( $raw );
-					},
+					'required' => true,
+					'type'     => 'string',
+					// Validate before sanitize: reject invalid input first.
 					'validate_callback' => function( $value ) {
 						$v = trim( $value );
 						if ( $v === '' ) {
@@ -74,6 +66,11 @@ function sparxstar_register_pronounce_route() {
 							return new WP_Error( 'word_too_long', 'word exceeds 256 characters.', [ 'status' => 400 ] );
 						}
 						return true;
+					},
+					'sanitize_callback' => function( $raw ) {
+						// Trim whitespace only — preserve diacritics, Twi
+						// characters, and all valid UTF-8 graphemes exactly.
+						return trim( $raw );
 					},
 				],
 			],
@@ -85,14 +82,36 @@ function sparxstar_register_pronounce_route() {
  * Allow access if the request carries a valid page-token or API key.
  * Reuses the same Webster auth check as every other browse endpoint.
  *
- * Falls back to returning true if the parent plugin's auth helper isn't
- * available (e.g. this file is loaded standalone for testing).
+ * Fails closed when the auth helper is absent — never grants open access
+ * to the synthesis endpoint if the parent plugin is not loaded.
  */
 function sparxstar_pronounce_permissions( WP_REST_Request $request ) {
 	if ( function_exists( 'sparxstar_verify_webster_auth' ) ) {
 		return sparxstar_verify_webster_auth( $request );
 	}
-	return true; // degrade gracefully when helper is absent
+	// Auth helper unavailable: fail closed rather than granting unauthenticated
+	// access to the TTS synthesis endpoint.
+	return new WP_Error(
+		'auth_unavailable',
+		'Authentication service is unavailable.',
+		[ 'status' => 503 ]
+	);
+}
+
+/**
+ * Validate that a path constant is a plain absolute path with no null bytes.
+ * The path is passed as a proc_open array argument so it is never
+ * shell-interpolated, but we validate defensively anyway.
+ *
+ * @param string $path  Value of a define()'d path constant.
+ * @return bool
+ */
+function sparxstar_validate_path( string $path ): bool {
+	if ( $path === '' || strpos( $path, "\0" ) !== false ) {
+		return false;
+	}
+	// Must be an absolute path (Unix) or Windows drive path.
+	return $path[0] === '/' || (bool) preg_match( '/^[A-Za-z]:[\\\\\/]/', $path );
 }
 
 /**
@@ -107,17 +126,32 @@ function sparxstar_pronounce_handler( WP_REST_Request $request ) {
 	$model_path = defined( 'SPARXSTAR_TWI_MODEL' ) ? SPARXSTAR_TWI_MODEL : '';
 	$model_json = defined( 'SPARXSTAR_TWI_MODEL_JSON' ) ? SPARXSTAR_TWI_MODEL_JSON : '';
 
-	if ( $model_path === '' || ! file_exists( $model_path ) ) {
+	if ( ! sparxstar_validate_path( $model_path ) ) {
 		return new WP_Error(
 			'model_not_configured',
-			'Twi TTS model path is not configured or the file does not exist.',
+			'Twi TTS model path is not configured or contains invalid characters.',
 			[ 'status' => 503 ]
 		);
 	}
-	if ( $model_json === '' || ! file_exists( $model_json ) ) {
+	if ( ! file_exists( $model_path ) || ! is_readable( $model_path ) ) {
+		return new WP_Error(
+			'model_not_found',
+			'Twi TTS model file does not exist or is not readable.',
+			[ 'status' => 503 ]
+		);
+	}
+
+	if ( ! sparxstar_validate_path( $model_json ) ) {
 		return new WP_Error(
 			'model_json_not_configured',
-			'Twi TTS model config (.onnx.json) is not configured or the file does not exist.',
+			'Twi TTS model config path is not configured or contains invalid characters.',
+			[ 'status' => 503 ]
+		);
+	}
+	if ( ! file_exists( $model_json ) || ! is_readable( $model_json ) ) {
+		return new WP_Error(
+			'model_json_not_found',
+			'Twi TTS model config (.onnx.json) does not exist or is not readable.',
 			[ 'status' => 503 ]
 		);
 	}
@@ -128,9 +162,15 @@ function sparxstar_pronounce_handler( WP_REST_Request $request ) {
 
 	// WordPress transients transparently use Redis / Memcached / APCu /
 	// database — whatever object cache drop-in is active on the host.
-	$cached_wav = get_transient( $cache_key );
-	if ( $cached_wav !== false ) {
-		return sparxstar_wav_response( $cached_wav );
+	// Binary WAV is stored base64-encoded to survive UTF-8 transient backends.
+	$cached = get_transient( $cache_key );
+	if ( $cached !== false ) {
+		$wav = base64_decode( $cached, true );
+		if ( $wav !== false ) {
+			return sparxstar_wav_response( $wav );
+		}
+		// Corrupt cache entry — delete and re-synthesise.
+		delete_transient( $cache_key );
 	}
 
 	// Not cached — synthesise now.
@@ -140,13 +180,13 @@ function sparxstar_pronounce_handler( WP_REST_Request $request ) {
 	}
 
 	$ttl = defined( 'SPARXSTAR_PRONOUNCE_CACHE_TTL' ) ? (int) SPARXSTAR_PRONOUNCE_CACHE_TTL : 2592000;
-	set_transient( $cache_key, $wav, $ttl );
+	set_transient( $cache_key, base64_encode( $wav ), $ttl );
 
 	return sparxstar_wav_response( $wav );
 }
 
 /**
- * Run Piper TTS and return the raw WAV bytes, or a WP_Error on failure.
+ * Run Piper TTS and return the WAV bytes, or a WP_Error on failure.
  *
  * The headword is written to stdin of the Piper process so that it is
  * never interpolated into the shell command string — no injection risk.
@@ -154,20 +194,38 @@ function sparxstar_pronounce_handler( WP_REST_Request $request ) {
  * @param string $word        UTF-8 headword text.
  * @param string $model_path  Absolute path to .onnx model file.
  * @param string $model_json  Absolute path to .onnx.json config file.
- * @return string|WP_Error    Raw WAV bytes on success.
+ * @return string|WP_Error    WAV bytes on success.
  */
 function sparxstar_synthesise_twi( string $word, string $model_path, string $model_json ) {
 	$runtime = defined( 'SPARXSTAR_PIPER_RUNTIME' ) ? SPARXSTAR_PIPER_RUNTIME : 'python';
 
 	if ( $runtime === 'binary' ) {
 		$piper_bin = defined( 'SPARXSTAR_PIPER_BINARY' ) ? SPARXSTAR_PIPER_BINARY : 'piper';
-		if ( ! file_exists( $piper_bin ) && ! sparxstar_command_exists( $piper_bin ) ) {
+
+		// If it looks like an absolute path, validate and check readable.
+		if ( strpos( $piper_bin, '/' ) !== false ) {
+			if ( ! sparxstar_validate_path( $piper_bin ) ) {
+				return new WP_Error(
+					'piper_binary_invalid',
+					'SPARXSTAR_PIPER_BINARY contains invalid characters.',
+					[ 'status' => 503 ]
+				);
+			}
+			if ( ! file_exists( $piper_bin ) || ! is_readable( $piper_bin ) ) {
+				return new WP_Error(
+					'piper_binary_not_found',
+					sprintf( 'Piper binary not found or not readable at "%s".', $piper_bin ),
+					[ 'status' => 503 ]
+				);
+			}
+		} elseif ( ! sparxstar_command_exists( $piper_bin ) ) {
 			return new WP_Error(
 				'piper_binary_not_found',
-				sprintf( 'Piper binary not found at "%s".', $piper_bin ),
+				sprintf( 'Piper binary "%s" not found on PATH.', $piper_bin ),
 				[ 'status' => 503 ]
 			);
 		}
+
 		$cmd = [
 			$piper_bin,
 			'--model', $model_path,
@@ -178,6 +236,14 @@ function sparxstar_synthesise_twi( string $word, string $model_path, string $mod
 	} else {
 		// Default: pip-installed piper-tts (`python3 -m piper`)
 		$python_bin = defined( 'SPARXSTAR_PYTHON_BIN' ) ? SPARXSTAR_PYTHON_BIN : 'python3';
+
+		if ( strpos( $python_bin, '/' ) !== false && ! sparxstar_validate_path( $python_bin ) ) {
+			return new WP_Error(
+				'python_binary_invalid',
+				'SPARXSTAR_PYTHON_BIN contains invalid characters.',
+				[ 'status' => 503 ]
+			);
+		}
 		$cmd = [
 			$python_bin, '-m', 'piper',
 			'--model', $model_path,
@@ -187,7 +253,6 @@ function sparxstar_synthesise_twi( string $word, string $model_path, string $mod
 		error_log( sprintf( 'sparxstar_pronounce: synthesising via python "%s -m piper"', $python_bin ) );
 	}
 
-	// Build descriptor spec: stdin (pipe in), stdout (pipe out), stderr (pipe for capture).
 	$descriptors = [
 		0 => [ 'pipe', 'r' ],
 		1 => [ 'pipe', 'w' ],
@@ -195,16 +260,21 @@ function sparxstar_synthesise_twi( string $word, string $model_path, string $mod
 	];
 
 	// proc_open accepts an array command on PHP ≥ 7.4, which skips shell
-	// interpolation entirely — no escaping required for model path or word.
+	// interpolation entirely — model path and word are never shell-expanded.
 	$proc = proc_open( $cmd, $descriptors, $pipes );
 	if ( ! is_resource( $proc ) ) {
 		return new WP_Error( 'piper_failed', 'Failed to start Piper TTS process.', [ 'status' => 500 ] );
 	}
 
-	// Write the headword as UTF-8 to stdin and close the pipe so Piper
-	// sees EOF and begins synthesis. No shell involvement — safe.
-	fwrite( $pipes[0], $word );
+	$written = fwrite( $pipes[0], $word );
 	fclose( $pipes[0] );
+
+	if ( $written === false ) {
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+		proc_close( $proc );
+		return new WP_Error( 'piper_stdin_failed', 'Failed to write headword to Piper stdin.', [ 'status' => 500 ] );
+	}
 
 	$raw_audio = stream_get_contents( $pipes[1] );
 	$stderr    = stream_get_contents( $pipes[2] );
@@ -213,11 +283,24 @@ function sparxstar_synthesise_twi( string $word, string $model_path, string $mod
 
 	$exit_code = proc_close( $proc );
 
-	if ( $exit_code !== 0 || $raw_audio === false || $raw_audio === '' ) {
+	if ( $raw_audio === false ) {
+		error_log( sprintf(
+			'sparxstar_pronounce: failed to read Piper stdout. exit=%d stderr=%s',
+			$exit_code,
+			substr( (string) $stderr, 0, 512 )
+		) );
+		return new WP_Error(
+			'piper_read_failed',
+			'Failed to read TTS audio output. Check server logs for details.',
+			[ 'status' => 500 ]
+		);
+	}
+
+	if ( $exit_code !== 0 || $raw_audio === '' ) {
 		error_log( sprintf(
 			'sparxstar_pronounce: Piper exited %d. stderr: %s',
 			$exit_code,
-			substr( $stderr, 0, 512 )
+			substr( (string) $stderr, 0, 512 )
 		) );
 		return new WP_Error(
 			'piper_synthesis_failed',
@@ -226,8 +309,6 @@ function sparxstar_synthesise_twi( string $word, string $model_path, string $mod
 		);
 	}
 
-	// --output-raw produces a headerless PCM stream; wrap it in a minimal
-	// WAV container so browsers can decode it with <Audio> or fetch().
 	return sparxstar_pcm_to_wav( $raw_audio );
 }
 
@@ -236,8 +317,6 @@ function sparxstar_synthesise_twi( string $word, string $model_path, string $mod
  *
  * Piper's --output-raw flag produces 16-bit signed little-endian mono
  * PCM at the model's native sample rate (22050 Hz for Kasanoma Twi).
- * Browsers cannot play headerless PCM; this function prepends the
- * 44-byte RIFF/WAV header so the audio is self-describing.
  *
  * @param string $pcm  Raw PCM bytes from Piper.
  * @param int $rate    Sample rate in Hz (default 22050, Kasanoma Twi native).
@@ -271,45 +350,80 @@ function sparxstar_pcm_to_wav( string $pcm, int $rate = 22050 ): string {
 }
 
 /**
- * Return a raw WP_REST_Response that streams WAV bytes with the correct
+ * Return a WP_REST_Response that streams WAV bytes with the correct
  * Content-Type so browsers receive a playable audio file.
  *
- * WP_REST_Response does not natively support binary responses, so we
- * hook into `rest_pre_serve_request` to emit the bytes and headers
- * directly, then short-circuit normal JSON serialisation.
+ * The filter self-removes after firing and only intercepts the specific
+ * response instance it was created for — safe in long-lived PHP processes.
  *
  * @param string $wav  Complete WAV file bytes.
  * @return WP_REST_Response
  */
 function sparxstar_wav_response( string $wav ): WP_REST_Response {
-	// Capture $wav in the closure; hook fires once and then removes itself.
-	add_filter(
-		'rest_pre_serve_request',
-		function( $served ) use ( $wav ) {
-			if ( $served ) {
-				return $served;
-			}
-			header( 'Content-Type: audio/wav' );
-			header( 'Content-Length: ' . strlen( $wav ) );
-			header( 'Cache-Control: public, max-age=2592000, immutable' );
-			header( 'X-Content-Type-Options: nosniff' );
-			echo $wav; // phpcs:ignore WordPress.Security.EscapeOutput
-			return true;
-		},
-		10,
-		1
-	);
+	$response = new WP_REST_Response( null, 200 );
 
-	return new WP_REST_Response( null, 200 );
+	$filter = null;
+	$filter = function( $served, $result ) use ( $wav, $response, &$filter ) {
+		// Only intercept the specific response this closure was created for.
+		if ( $result !== $response ) {
+			return $served;
+		}
+		// Self-remove before emitting output to prevent accumulation.
+		remove_filter( 'rest_pre_serve_request', $filter, 10 );
+
+		if ( $served ) {
+			return $served;
+		}
+		header( 'Content-Type: audio/wav' );
+		header( 'Content-Length: ' . strlen( $wav ) );
+		header( 'Cache-Control: public, max-age=2592000, immutable' );
+		header( 'X-Content-Type-Options: nosniff' );
+		echo $wav; // phpcs:ignore WordPress.Security.EscapeOutput
+		return true;
+	};
+
+	add_filter( 'rest_pre_serve_request', $filter, 10, 2 );
+
+	return $response;
 }
 
 /**
  * Check whether a command name resolves on the system PATH.
  *
- * @param string $command  Command name (not a path).
+ * Uses proc_open rather than shell_exec (which may be in disable_functions)
+ * so this works regardless of the host's PHP security configuration.
+ *
+ * @param string $command  Command name (not an absolute path).
  * @return bool
  */
 function sparxstar_command_exists( string $command ): bool {
-	$output = shell_exec( 'command -v ' . escapeshellarg( $command ) . ' 2>/dev/null' );
-	return ! empty( $output );
+	$descriptors = [
+		0 => [ 'pipe', 'r' ],
+		1 => [ 'pipe', 'w' ],
+		2 => [ 'pipe', 'w' ],
+	];
+
+	// Try `which` first; fall back to `command -v` via sh.
+	$candidates = [
+		[ 'which', $command ],
+		[ 'sh', '-c', 'command -v ' . escapeshellarg( $command ) ],
+	];
+
+	foreach ( $candidates as $cmd ) {
+		$proc = @proc_open( $cmd, $descriptors, $pipes );
+		if ( ! is_resource( $proc ) ) {
+			continue;
+		}
+		fclose( $pipes[0] );
+		$output = stream_get_contents( $pipes[1] );
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+		$exit = proc_close( $proc );
+
+		if ( $exit === 0 && trim( (string) $output ) !== '' ) {
+			return true;
+		}
+	}
+
+	return false;
 }
