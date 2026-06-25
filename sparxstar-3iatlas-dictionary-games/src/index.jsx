@@ -1,9 +1,11 @@
 export { default as GameShell } from "./components/GameShell.jsx";
 export { default as AccessoryBar } from "./components/AccessoryBar.jsx";
 export { default as SessionComplete } from "./components/SessionComplete.jsx";
+export { default as PronounceButton } from "./components/PronounceButton.jsx";
 export { useGameSet } from "./hooks/useGameSet.js";
 export { useGameSession } from "./hooks/useGameSession.js";
 export { useProgressSync } from "./hooks/useProgressSync.js";
+export { usePronounce } from "./hooks/usePronounce.js";
 export {
   openDB,
   getRecord,

@@ -436,6 +436,7 @@ export default function GameShell({
           language,
           handleWordResult,
           handleComplete,
+          restUrl,
         )}
       </div>
     );
@@ -619,8 +620,8 @@ export default function GameShell({
 }
 
 /** Route to the correct game component based on game type. */
-function renderGame(gameType, words, language, onResult, onComplete) {
-  const props = { words, language, onResult, onComplete };
+function renderGame(gameType, words, language, onResult, onComplete, restUrl) {
+  const props = { words, language, onResult, onComplete, restUrl };
 
   switch (gameType) {
     case "listen_write":

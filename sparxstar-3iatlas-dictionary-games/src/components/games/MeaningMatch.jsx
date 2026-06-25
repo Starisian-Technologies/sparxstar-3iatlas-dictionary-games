@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef } from "react";
+import PronounceButton from "../PronounceButton.jsx";
 
 /**
  * MeaningMatch — Game 4.3
@@ -11,12 +12,14 @@ import React, { useState, useMemo, useRef } from "react";
  *   language   {string}   'en' | 'fr'
  *   onResult   {Function} (uuid, outcome, attempts, xp) => void
  *   onComplete {Function} () => void
+ *   restUrl    {string}   Base REST URL — enables TTS pronunciation button
  */
 export default function MeaningMatch({
   words,
   language,
   onResult,
   onComplete,
+  restUrl,
 }) {
   const deck = useMemo(() => shuffle(words), [words]);
   const [index, setIndex] = useState(0);
@@ -80,9 +83,14 @@ export default function MeaningMatch({
 
       {/* Headword display */}
       <div className="shrink-0 text-center py-4">
-        <p className="text-4xl font-bold text-gray-900 dark:text-gray-100">
-          {word.headword}
-        </p>
+        <div className="flex items-center justify-center gap-3">
+          <p className="text-4xl font-bold text-gray-900 dark:text-gray-100">
+            {word.headword}
+          </p>
+          {restUrl && (
+            <PronounceButton restUrl={restUrl} word={word.headword} size={20} />
+          )}
+        </div>
         {word.ipa && (
           <p className="text-sm font-mono text-gray-400 mt-2">/{word.ipa}/</p>
         )}
