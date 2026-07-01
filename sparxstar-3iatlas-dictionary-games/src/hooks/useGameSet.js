@@ -97,6 +97,7 @@ export function useGameSet({ restUrl, langSource, domain = '', limit = 20, inclu
                 if (res.status === 401) {
                     const newToken = await refreshPageToken(restUrl);
                     res = await fetch(`${restUrl}/game-set?${params}`, {
+                    res = await fetch(`${restUrl}/game-set?${params}`, {
                         headers: { 'X-Page-Token': newToken },
                         signal: controller.signal,
                     });
