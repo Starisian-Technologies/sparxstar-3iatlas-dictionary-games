@@ -417,15 +417,16 @@ function sparxstar_wav_response( string $wav ): WP_REST_Response {
 	$filter = null;
 	$filter = function( $served, $result ) use ( $wav, $response, &$filter ) {
 		// Only intercept the specific response this closure was created for.
-		if ( $result !== $response ) {
-			return $served;
-		}
-		// Self-remove before emitting output to prevent accumulation.
-		remove_filter( 'rest_pre_serve_request', $filter, 10 );
-
+function sparxstar_wav_response( string $wav ): WP_REST_Response {
+	// Create a one-time filter that serves the response and removes itself
+	$filter_callback = null;
+	$filter_callback = function( $served ) use ( $wav, &$filter_callback ) {
 		if ( $served ) {
 			return $served;
 		}
+		// Remove this filter immediately to prevent reuse
+		remove_filter( 'rest_pre_serve_request', $filter_callback, 10 );
+		
 		header( 'Content-Type: audio/wav' );
 		header( 'Content-Length: ' . strlen( $wav ) );
 		header( 'Cache-Control: public, max-age=2592000, immutable' );
@@ -433,10 +434,10 @@ function sparxstar_wav_response( string $wav ): WP_REST_Response {
 		echo $wav; // phpcs:ignore WordPress.Security.EscapeOutput
 		return true;
 	};
+	
+	add_filter( 'rest_pre_serve_request', $filter_callback, 10, 1 );
 
-	add_filter( 'rest_pre_serve_request', $filter, 10, 2 );
-
-	return $response;
+	return new WP_REST_Response( null, 200 );
 }
 
 /**
