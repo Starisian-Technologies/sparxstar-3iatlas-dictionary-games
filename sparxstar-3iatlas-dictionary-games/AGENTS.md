@@ -52,16 +52,16 @@ src/
 ## Game Shell Usage
 
 ```jsx
-import { GameShell } from 'sparxstar-rlc-games';
+import { GameShell } from "sparxstar-rlc-games";
 
 <GameShell
   restUrl="https://example.com/wp-json/sparxstar/v1/dictionary"
   language="en"
   sourceLanguage="mandinka"
-  languages={[{ slug: 'mandinka', name: 'Mandinka' }]}
+  languages={[{ slug: "mandinka", name: "Mandinka" }]}
   onSourceLanguage={(slug) => setSourceLanguage(slug)}
-  onBrowse={() => setTab('browse')}
-/>
+  onBrowse={() => setTab("browse")}
+/>;
 ```
 
 ---
@@ -69,20 +69,20 @@ import { GameShell } from 'sparxstar-rlc-games';
 ## API Client Usage
 
 ```js
-import { createDictionaryApiClient } from 'sparxstar-rlc-games';
+import { createDictionaryApiClient } from "sparxstar-rlc-games";
 
 // Consumer API key (WordPad, S2S, server-side):
 const dict = createDictionaryApiClient({
-  baseUrl: 'https://example.com/wp-json/sparxstar/v1/dictionary',
-  apiKey: 'sk_...',
+  baseUrl: "https://example.com/wp-json/sparxstar/v1/dictionary",
+  apiKey: "sk_...",
 });
-const wordlist = await dict.wordlist({ lang_source: 'mandinka' });
+const wordlist = await dict.wordlist({ lang_source: "mandinka" });
 
 // Same-origin browser app (page-token flow):
 const dict = createDictionaryApiClient({ baseUrl: restUrl });
 const tokenRes = await dict.getPageToken();
 dict.setPageToken(tokenRes.data.token);
-const result = await dict.lookup({ slug: 'my-word' });
+const result = await dict.lookup({ slug: "my-word" });
 ```
 
 ---
@@ -90,6 +90,7 @@ const result = await dict.lookup({ slug: 'my-word' });
 ## Dictionary API Constraints
 
 The game service is a **strict-mode consumer**:
+
 - Always sends `lang_source` — never uses `mode=ecology` or `mode=cross_language`
 - `/game-set` returns only primary-language entries for the requested language
 - `/wordlist` requires a consumer API key (API key, not ephemeral page token)
@@ -99,10 +100,10 @@ The game service is a **strict-mode consumer**:
 
 ## Authentication Model (Webster)
 
-| Credential | Header | Scope |
-|---|---|---|
-| Ephemeral page token | `X-Page-Token` | Browse endpoints, same-origin apps |
-| Consumer API key | `X-Api-Key` | All endpoints including `/wordlist` |
+| Credential           | Header         | Scope                               |
+| -------------------- | -------------- | ----------------------------------- |
+| Ephemeral page token | `X-Page-Token` | Browse endpoints, same-origin apps  |
+| Consumer API key     | `X-Api-Key`    | All endpoints including `/wordlist` |
 
 - `/wordlist` rejects ephemeral page tokens with 403 — API key only
 - `GET /page-token` requires no credentials
@@ -113,12 +114,12 @@ The game service is a **strict-mode consumer**:
 
 ## IndexedDB Stores
 
-| Store | Purpose |
-|---|---|
-| `game-sets` | Cached /game-set responses (3-day TTL, keyed by lang+domain+limit+audio) |
-| `game-sessions` | Current session state (persisted on every word result) |
-| `progress-outbox` | Event queue for Helios sync (pending OQ-G1) |
-| `learned-words` | Cumulative set of UUIDs the player has correctly written |
+| Store             | Purpose                                                                  |
+| ----------------- | ------------------------------------------------------------------------ |
+| `game-sets`       | Cached /game-set responses (3-day TTL, keyed by lang+domain+limit+audio) |
+| `game-sessions`   | Current session state (persisted on every word result)                   |
+| `progress-outbox` | Event queue for Helios sync (pending OQ-G1)                              |
+| `learned-words`   | Cumulative set of UUIDs the player has correctly written                 |
 
 ---
 
@@ -132,12 +133,12 @@ Only production games contribute to the "words you can write" count shown in `Se
 
 ## Open Questions
 
-| ID | Description |
-|---|---|
-| OQ-G1 | Helios token source — `useProgressSync.syncNow()` is a no-op until resolved |
+| ID    | Description                                                                      |
+| ----- | -------------------------------------------------------------------------------- |
+| OQ-G1 | Helios token source — `useProgressSync.syncNow()` is a no-op until resolved      |
 | OQ-G3 | LetterReveal pottery animation — emoji placeholder, awaiting AIWA-approved asset |
-| OQ-G4 | DomainFlash "I knew it" hook confirmation |
-| OQ-I3 | Guest device progress merge — blocked on Game Service intake spec |
+| OQ-G4 | DomainFlash "I knew it" hook confirmation                                        |
+| OQ-I3 | Guest device progress merge — blocked on Game Service intake spec                |
 
 ---
 
@@ -152,10 +153,10 @@ Only production games contribute to the "words you can write" count shown in `Se
 
 ## Spec References
 
-| Document | Location (dictionary repo) |
-|---|---|
-| API contract | `src/js/api/dictionary-api.d.ts` |
-| Role and pipeline | `.github/instructions/3IATLAS-DICTIONARY-ROLE-AND-PIPELINE-SPEC-v1.0.md` |
-| Multilanguage model | `.github/instructions/3IATLAS-DICTIONARY-MULTILANGUAGE-MODEL-SPEC-v1.0.md` |
-| Enrichment fields | `.github/instructions/3IATLAS-DICTIONARY-ENRICHMENT-FIELDS-SPEC-v1.0.md` |
-| Approved entry format | `.github/instructions/3IATLAS-DICTIONARY-APPROVED-ENTRY-SPEC-v1.0.md` |
+| Document              | Location (dictionary repo)                                                 |
+| --------------------- | -------------------------------------------------------------------------- |
+| API contract          | `src/js/api/dictionary-api.d.ts`                                           |
+| Role and pipeline     | `.github/instructions/3IATLAS-DICTIONARY-ROLE-AND-PIPELINE-SPEC-v1.0.md`   |
+| Multilanguage model   | `.github/instructions/3IATLAS-DICTIONARY-MULTILANGUAGE-MODEL-SPEC-v1.0.md` |
+| Enrichment fields     | `.github/instructions/3IATLAS-DICTIONARY-ENRICHMENT-FIELDS-SPEC-v1.0.md`   |
+| Approved entry format | `.github/instructions/3IATLAS-DICTIONARY-APPROVED-ENTRY-SPEC-v1.0.md`      |
