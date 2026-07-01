@@ -66,18 +66,19 @@ export function useGameSession() {
         load();
         return () => {
             cancelled = true;
-        };
-    }, []);
-
-    /* Safe wrappers — defined before any callback that uses them to avoid TDZ. */
     const safePutRecord = useCallback(async (...args) => {
-        if (typeof putRecord !== 'function') return false;
-        return putRecord(...args);
+        if (typeof putRecord === 'function') {
+            return putRecord(...args);
+        }
+        console.warn('putRecord is not available');
+        return false;
     }, []);
 
     const safeDeleteRecord = useCallback(async (...args) => {
-        if (typeof deleteRecord !== 'function') return;
-        return deleteRecord(...args);
+        if (typeof deleteRecord === 'function') {
+            return deleteRecord(...args);
+        }
+        console.warn('deleteRecord is not available');
     }, []);
 
     /**
