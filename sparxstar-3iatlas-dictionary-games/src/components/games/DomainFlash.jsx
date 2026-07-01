@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { Volume2 } from "lucide-react";
+import PronounceButton from "../PronounceButton.jsx";
 
 /**
  * DomainFlash — Game 4.6
@@ -13,8 +14,15 @@ import { Volume2 } from "lucide-react";
  *   language   {string}   'en' | 'fr'
  *   onResult   {Function} (uuid, outcome, attempts, xp) => void
  *   onComplete {Function} () => void
+ *   restUrl    {string}   Base REST URL — enables TTS pronunciation button
  */
-export default function DomainFlash({ words, language, onResult, onComplete }) {
+export default function DomainFlash({
+  words,
+  language,
+  onResult,
+  onComplete,
+  restUrl,
+}) {
   const deck = useMemo(() => shuffle(words), [words]);
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
@@ -131,7 +139,16 @@ export default function DomainFlash({ words, language, onResult, onComplete }) {
                 /{word.ipa}/
               </p>
             )}
-            {word.audio_url && (
+            {restUrl ? (
+              /* TTS pronunciation — available for every word */
+              <PronounceButton
+                restUrl={restUrl}
+                word={word.headword}
+                size={22}
+                style={{ marginBottom: 16, width: 48, height: 48 }}
+              />
+            ) : word.audio_url ? (
+              /* Fallback: pre-recorded audio URL from the API */
               <button
                 type="button"
                 onClick={playAudio}
@@ -141,7 +158,7 @@ export default function DomainFlash({ words, language, onResult, onComplete }) {
               >
                 <Volume2 size={22} aria-hidden="true" />
               </button>
-            )}
+            ) : null}
             <div className="flex gap-3 mt-4 w-full max-w-xs">
               <button
                 type="button"
