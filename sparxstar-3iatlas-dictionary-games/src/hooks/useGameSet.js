@@ -140,6 +140,7 @@ export function useGameSet({ restUrl, langSource, domain = '', limit = 20, inclu
 
         load();
         return () => {
+        return () => {
             cancelled = true;
             controller.abort();
         };
