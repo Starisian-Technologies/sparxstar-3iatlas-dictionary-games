@@ -6,10 +6,11 @@ Questions raised during initial repo setup. Please answer inline or in a follow-
 
 ## Q1 — Composer / PHP
 
-The problem statement mentioned setting up Composer. This repo contains only React/JS source — no PHP, WordPress plugin files, or server-side code (confirmed by `AGENTS.md`: *"pure consumer of the dictionary REST API. It does not contain WordPress code, PHP, or any server-side logic"*).
+The problem statement mentioned setting up Composer. This repo contains only React/JS source — no PHP, WordPress plugin files, or server-side code (confirmed by `AGENTS.md`: _"pure consumer of the dictionary REST API. It does not contain WordPress code, PHP, or any server-side logic"_).
 
 **Is a Composer setup needed?**
 Options:
+
 - a) No — this repo is JS-only; Composer belongs in the consuming WordPress plugin repo.
 - b) Yes — a `composer.json` is needed (e.g. to publish as a Packagist package, or because a `plugin.php` wrapper will be added here).
 
