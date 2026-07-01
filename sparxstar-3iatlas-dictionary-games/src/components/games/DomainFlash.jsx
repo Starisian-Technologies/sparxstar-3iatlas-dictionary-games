@@ -19,6 +19,7 @@ export default function DomainFlash({ words, language, onResult, onComplete }) {
     const [index, setIndex] = useState(0);
     const [flipped, setFlipped] = useState(false);
     const [answered, setAnswered] = useState(false);
+    const answeredRef = React.useRef(false);
     const answeredRef = useRef(false);
     const audioRef = useRef(null);
 
