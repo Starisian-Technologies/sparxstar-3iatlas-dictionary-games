@@ -26,6 +26,7 @@ export default function ArrangeWord({ words, language, onResult, onComplete }) {
     const { pool, answer } = tileState;
     const [shake, setShake] = useState(false);
     const [correct, setCorrect] = useState(false);
+    const audioRef = React.useRef(null);
     const audioRef = useRef(null);
 
     useEffect(() => {
