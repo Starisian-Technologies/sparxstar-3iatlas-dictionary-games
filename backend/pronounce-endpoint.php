@@ -54,15 +54,19 @@ function sparxstar_register_pronounce_route() {
 			'permission_callback' => 'sparxstar_pronounce_permissions',
 			'args'                => [
 				'word' => [
-					'required' => true,
-					'type'     => 'string',
-					// Validate before sanitize: reject invalid input first.
-					'validate_callback' => function( $value ) {
-						$v = trim( $value );
-						if ( $v === '' ) {
+				'word' => [
+					'required'          => true,
+					'type'              => 'string',
+					'validate_callback' => function( $value, $request, $param ) {
+						// Validate raw value before sanitization
+						if ( ! is_string( $value ) ) {
+							return new WP_Error( 'invalid_type', 'word must be a string.', [ 'status' => 400 ] );
+						}
+						$trimmed = trim( $value );
+						if ( $trimmed === '' ) {
 							return new WP_Error( 'empty_word', 'word must not be empty.', [ 'status' => 400 ] );
 						}
-						if ( mb_strlen( $v, 'UTF-8' ) > 256 ) {
+						if ( mb_strlen( $trimmed, 'UTF-8' ) > 256 ) {
 							return new WP_Error( 'word_too_long', 'word exceeds 256 characters.', [ 'status' => 400 ] );
 						}
 						return true;
