@@ -54,7 +54,6 @@ function sparxstar_register_pronounce_route() {
 			'permission_callback' => 'sparxstar_pronounce_permissions',
 			'args'                => [
 				'word' => [
-				'word' => [
 					'required'          => true,
 					'type'              => 'string',
 					'validate_callback' => function( $value, $request, $param ) {
@@ -94,17 +93,11 @@ function sparxstar_pronounce_permissions( WP_REST_Request $request ) {
 	if ( function_exists( 'sparxstar_verify_webster_auth' ) ) {
 		return sparxstar_verify_webster_auth( $request );
 	}
-	// Auth helper unavailable: fail closed rather than granting unauthenticated
-	// access to the TTS synthesis endpoint.
-	return new WP_Error(
-		'auth_unavailable',
-		'Authentication service is unavailable.',
-		[ 'status' => 503 ]
-	);
+	return current_user_can( 'manage_options' ); // Prevent unauthenticated DoS on CPU-heavy TTS
 }
 
 /**
- * Validate that a path constant is a plain absolute path with no null bytes.
+ * Validate that a path constant is a plain path with no null bytes.
  * The path is passed as a proc_open array argument so it is never
  * shell-interpolated, but we validate defensively anyway.
  *
@@ -112,16 +105,13 @@ function sparxstar_pronounce_permissions( WP_REST_Request $request ) {
  * @return bool
  */
 function sparxstar_validate_path( string $path ): bool {
-function sparxstar_pronounce_permissions( WP_REST_Request $request ) {
-	if ( function_exists( 'sparxstar_verify_webster_auth' ) ) {
-		return sparxstar_verify_webster_auth( $request );
+	if ( $path === '' ) {
+		return false;
 	}
-	// Fail closed: deny access if auth helper is not available
-	return new WP_Error(
-		'auth_unavailable',
-		'Authentication system is not available.',
-		[ 'status' => 503 ]
-	);
+	if ( strpos( $path, "\0" ) !== false ) {
+		return false;
+	}
+	return true;
 }
 
 /**
@@ -245,65 +235,39 @@ function sparxstar_synthesise_twi( string $word, string $model_path, string $mod
 		];
 		error_log( sprintf( 'sparxstar_pronounce: synthesising via binary "%s"', $piper_bin ) );
 	} else {
-	if ( $runtime === 'binary' ) {
-		$piper_bin = defined( 'SPARXSTAR_PIPER_BINARY' ) ? SPARXSTAR_PIPER_BINARY : 'piper';
-		// Validate binary path to prevent command injection
-		if ( strpos( $piper_bin, "\0" ) !== false || preg_match( '/[;&|`$()]/', $piper_bin ) ) {
+		// Default: pip-installed piper-tts (`python3 -m piper`)
+		$python_bin = defined( 'SPARXSTAR_PYTHON_BIN' ) ? SPARXSTAR_PYTHON_BIN : 'python3';
+
+		// If it looks like an absolute path, validate and check readable.
+		if ( strpos( $python_bin, '/' ) !== false ) {
+			if ( ! sparxstar_validate_path( $python_bin ) ) {
+				return new WP_Error(
+					'python_binary_invalid',
+					'SPARXSTAR_PYTHON_BIN contains invalid characters.',
+					[ 'status' => 503 ]
+				);
+			}
+			if ( ! file_exists( $python_bin ) || ! is_readable( $python_bin ) ) {
+				return new WP_Error(
+					'python_binary_not_found',
+					sprintf( 'Python binary not found or not readable at "%s".', $python_bin ),
+					[ 'status' => 503 ]
+				);
+			}
+		} elseif ( ! sparxstar_command_exists( $python_bin ) ) {
 			return new WP_Error(
-				'invalid_piper_path',
-				'Invalid characters in Piper binary path.',
-				[ 'status' => 500 ]
-			);
-		}
-		if ( ! file_exists( $piper_bin ) && ! sparxstar_command_exists( $piper_bin ) ) {
-			return new WP_Error(
-				'piper_binary_not_found',
-				sprintf( 'Piper binary not found at "%s".', $piper_bin ),
+				'python_binary_not_found',
+				sprintf( 'Python binary "%s" not found on PATH.', $python_bin ),
 				[ 'status' => 503 ]
 			);
 		}
-		// Validate model paths
-		if ( strpos( $model_path, "\0" ) !== false || strpos( $model_json, "\0" ) !== false ) {
-			return new WP_Error(
-				'invalid_model_path',
-				'Invalid characters in model path.',
-				[ 'status' => 500 ]
-			);
-		}
-		$cmd = [
-			$piper_bin,
-			'--model', $model_path,
-			'--config', $model_json,
-			'--output-raw',
-		];
-		error_log( sprintf( 'sparxstar_pronounce: synthesising via binary "%s"', $piper_bin ) );
-	} else {
-		// Default: pip-installed piper-tts (`python3 -m piper`)
-		$python_bin = defined( 'SPARXSTAR_PYTHON_BIN' ) ? SPARXSTAR_PYTHON_BIN : 'python3';
-		// Validate python path to prevent command injection
-		if ( strpos( $python_bin, "\0" ) !== false || preg_match( '/[;&|`$()]/', $python_bin ) ) {
-			return new WP_Error(
-				'invalid_python_path',
-				'Invalid characters in Python binary path.',
-				[ 'status' => 500 ]
-			);
-		}
-		// Validate model paths
-		if ( strpos( $model_path, "\0" ) !== false || strpos( $model_json, "\0" ) !== false ) {
-			return new WP_Error(
-				'invalid_model_path',
-				'Invalid characters in model path.',
-				[ 'status' => 500 ]
-			);
-		}
+
 		$cmd = [
 			$python_bin, '-m', 'piper',
 			'--model', $model_path,
 			'--config', $model_json,
 			'--output-raw',
 		];
-		error_log( sprintf( 'sparxstar_pronounce: synthesising via python "%s -m piper"', $python_bin ) );
-	}
 		error_log( sprintf( 'sparxstar_pronounce: synthesising via python "%s -m piper"', $python_bin ) );
 	}
 
@@ -320,6 +284,8 @@ function sparxstar_synthesise_twi( string $word, string $model_path, string $mod
 		return new WP_Error( 'piper_failed', 'Failed to start Piper TTS process.', [ 'status' => 500 ] );
 	}
 
+	// Write the headword as UTF-8 to stdin and close the pipe so Piper
+	// sees EOF and begins synthesis. No shell involvement — safe.
 	$written = fwrite( $pipes[0], $word );
 	fclose( $pipes[0] );
 
@@ -337,17 +303,9 @@ function sparxstar_synthesise_twi( string $word, string $model_path, string $mod
 
 	$exit_code = proc_close( $proc );
 
-	if ( $raw_audio === false ) {
-		error_log( sprintf(
-			'sparxstar_pronounce: failed to read Piper stdout. exit=%d stderr=%s',
-			$exit_code,
-			substr( (string) $stderr, 0, 512 )
-		) );
-		return new WP_Error(
-			'piper_read_failed',
-			'Failed to read TTS audio output. Check server logs for details.',
-			[ 'status' => 500 ]
-		);
+	if ( $raw_audio === false || $stderr === false ) {
+		error_log( 'sparxstar_pronounce: Failed to read Piper output streams.' );
+		return new WP_Error( 'piper_output_failed', 'Failed to read Piper process output.', [ 'status' => 500 ] );
 	}
 
 	if ( $exit_code !== 0 || $raw_audio === '' ) {
@@ -411,6 +369,7 @@ function sparxstar_pcm_to_wav( string $pcm, int $rate = 22050 ): string {
  * response instance it was created for — safe in long-lived PHP processes.
  *
  * @param string $wav  Complete WAV file bytes.
+ * @param int    $ttl  Cache TTL in seconds (used for Cache-Control max-age).
  * @return WP_REST_Response
  */
 function sparxstar_wav_response( string $wav, int $ttl = 2592000 ): WP_REST_Response {
@@ -444,30 +403,24 @@ function sparxstar_wav_response( string $wav, int $ttl = 2592000 ): WP_REST_Resp
 /**
  * Check whether a command name resolves on the system PATH.
  *
- * Uses proc_open rather than shell_exec (which may be in disable_functions)
- * so this works regardless of the host's PHP security configuration.
+ * Uses proc_open (without a shell) as primary check, then falls back to
+ * scanning the PATH environment variable directly. No shell is invoked at
+ * any point, so this works regardless of the host's PHP security
+ * configuration (e.g. shell_exec or system in disable_functions).
  *
  * @param string $command  Command name (not an absolute path).
  * @return bool
  */
 function sparxstar_command_exists( string $command ): bool {
+	// Primary: run `which` via proc_open — no shell involved.
 	$descriptors = [
 		0 => [ 'pipe', 'r' ],
 		1 => [ 'pipe', 'w' ],
 		2 => [ 'pipe', 'w' ],
 	];
 
-	// Try `which` first; fall back to `command -v` via sh.
-	$candidates = [
-		[ 'which', $command ],
-		[ 'sh', '-c', 'command -v ' . escapeshellarg( $command ) ],
-	];
-
-	foreach ( $candidates as $cmd ) {
-		$proc = @proc_open( $cmd, $descriptors, $pipes );
-		if ( ! is_resource( $proc ) ) {
-			continue;
-		}
+	$proc = @proc_open( [ 'which', $command ], $descriptors, $pipes );
+	if ( is_resource( $proc ) ) {
 		fclose( $pipes[0] );
 		$output = stream_get_contents( $pipes[1] );
 		fclose( $pipes[1] );
@@ -476,6 +429,17 @@ function sparxstar_command_exists( string $command ): bool {
 
 		if ( $exit === 0 && trim( (string) $output ) !== '' ) {
 			return true;
+		}
+	}
+
+	// Fallback: search the PATH environment variable directly — no shell.
+	$path_env = getenv( 'PATH' );
+	if ( $path_env ) {
+		foreach ( explode( PATH_SEPARATOR, $path_env ) as $dir ) {
+			$file = rtrim( $dir, DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR . $command;
+			if ( @is_executable( $file ) ) {
+				return true;
+			}
 		}
 	}
 
