@@ -50,6 +50,13 @@ export class DictionaryApiError extends Error {
  * @returns {import('./dictionary-api').DictionaryApiClient}
  */
 export function createDictionaryApiClient(config) {
+    if (!config || typeof config.baseUrl !== 'string') {
+        throw new DictionaryApiError(
+            'invalid_config',
+            'A configuration object with a string baseUrl is required',
+            0
+        );
+    }
     let pageToken = config.pageToken ?? '';
     const apiKey = config.apiKey ?? '';
     const baseUrl = config.baseUrl.replace(/\/$/, '');
