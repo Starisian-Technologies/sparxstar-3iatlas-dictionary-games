@@ -55,6 +55,9 @@ export function createDictionaryApiClient(config) {
     }
     let pageToken = config.pageToken ?? '';
     const apiKey = config.apiKey ?? '';
+    if (!config.baseUrl) {
+        throw new Error('baseUrl is required in DictionaryApiClient configuration');
+    }
     const baseUrl = config.baseUrl.replace(/\/$/, '');
 
     /**
