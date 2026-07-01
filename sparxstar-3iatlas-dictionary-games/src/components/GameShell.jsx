@@ -14,8 +14,14 @@ import ListenWrite from './games/ListenWrite.jsx';
 const useGameSet = GameSetHookModule.useGameSet ?? GameSetHookModule.default;
 if (!useGameSet) {
     throw new Error('useGameSet hook is not exported from useGameSet.js');
+const useGameSet = GameSetHookModule.useGameSet ?? GameSetHookModule.default;
+if (!useGameSet) {
+    throw new Error('useGameSet hook is not exported from useGameSet.js');
 }
 const useGameSession = useGameSessionModule.useGameSession ?? useGameSessionModule.default;
+if (!useGameSession) {
+    throw new Error('useGameSession hook is not exported from useGameSession.js');
+}
 if (!useGameSession) {
     throw new Error('useGameSession hook is not exported from useGameSession.js');
 }
