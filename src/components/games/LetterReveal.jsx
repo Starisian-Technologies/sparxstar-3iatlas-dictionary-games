@@ -107,9 +107,12 @@ export default function LetterReveal({ words, language, onResult, onComplete }) 
         }
     };
 
-    /* Determine which letters are in the word (to include Mandinka chars in pool). */
-    const wordLetterSet = new Set(letters);
-    const extraMandinka = MANDINKA_CHARS.filter((c) => wordLetterSet.has(c));
+    /* Word characters that are in neither the standard alphabet nor the fixed
+     * Mandinka row (e.g. accented vowels) — surface them in the tap pool so the
+     * word can actually be completed rather than soft-locking. */
+    const extraMandinka = letters.filter(
+        (c) => !STANDARD_ALPHABET.includes(c) && !MANDINKA_CHARS.includes(c)
+    );
 
     return (
         <div className="flex flex-col h-full p-4 gap-3">
@@ -212,10 +215,7 @@ export default function LetterReveal({ words, language, onResult, onComplete }) 
 
                 {/* Mandinka-specific character row — always shown. */}
                 <div className="flex flex-wrap gap-1.5 justify-center">
-                    {[
-                        ...MANDINKA_CHARS,
-                        ...extraMandinka.filter((c) => !MANDINKA_CHARS.includes(c)),
-                    ].map((letter) => (
+                    {[...MANDINKA_CHARS, ...Array.from(new Set(extraMandinka))].map((letter) => (
                         <LetterButton
                             key={letter}
                             letter={letter}

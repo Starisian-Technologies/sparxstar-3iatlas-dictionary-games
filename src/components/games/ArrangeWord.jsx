@@ -74,7 +74,9 @@ export default function ArrangeWord({ words, language, onResult, onComplete }) {
      * guard `idx === -1` prevents the same tile being picked twice. */
     const pickFromPool = useCallback(
         (tileId) => {
-            if (correct || !word) return;
+            /* Ignore taps during the shake animation — the answer row is reset
+             * when the shake timeout completes, which would silently discard them. */
+            if (correct || shake || !word) return;
             setTileState((prev) => {
                 const idx = prev.pool.findIndex((t) => t.id === tileId);
                 if (idx === -1) return prev; /* guard: already picked */
@@ -86,7 +88,7 @@ export default function ArrangeWord({ words, language, onResult, onComplete }) {
                 };
             });
         },
-        [correct, word]
+        [correct, shake, word]
     );
 
     /* Return a placed tile back to the pool. */

@@ -1,0 +1,44 @@
+name: CI
+
+# Self-contained lint / format / build / test for this package.
+#
+# INTERIM: the platform `standards.yml` calls the org reusable workflows in
+# starisian-technologies-coding-standards. Once those are published and green,
+# they supersede this file — remove the overlapping jobs here to avoid
+# duplicate enforcement (see the governance setup instructions, section 2).
+
+on:
+    pull_request:
+    push:
+        branches: [main]
+
+permissions:
+    contents: read
+
+jobs:
+    build-and-test:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: pnpm/action-setup@v4
+
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: '20'
+                  cache: pnpm
+
+            - name: Install dependencies
+              run: pnpm install --frozen-lockfile
+
+            - name: Format check
+              run: pnpm run format:check
+
+            - name: Lint
+              run: pnpm run lint:ci
+
+            - name: Build
+              run: pnpm run build
+
+            - name: Test
+              run: pnpm test

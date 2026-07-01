@@ -54,18 +54,18 @@ in `AGENTS.md`.
   `mini-css-extract-plugin` and processed with PostCSS/Tailwind utilities; the
   host is expected to supply the Tailwind runtime/utility classes.
 - **Runtime layering:**
-  - `index.jsx` — public exports.
-  - `components/GameShell.jsx` — orchestrates the three phases
-    (setup → playing → complete), language selection, and game routing.
-  - `components/games/*` — one component per game; each reports per-word results
-    upward via callbacks.
-  - `components/AccessoryBar.jsx` — floating Mandinka special-character input bar
-    (positions above the on-screen keyboard via `window.visualViewport`).
-  - `components/SessionComplete.jsx` — end-of-session summary.
-  - `hooks/*` — data fetching (`useGameSet`), session lifecycle
-    (`useGameSession`), progress queue (`useProgressSync`), IndexedDB primitives
-    (`idbUtils`).
-  - `api/*` — `createDictionaryApiClient` factory + TypeScript contract.
+    - `index.jsx` — public exports.
+    - `components/GameShell.jsx` — orchestrates the three phases
+      (setup → playing → complete), language selection, and game routing.
+    - `components/games/*` — one component per game; each reports per-word results
+      upward via callbacks.
+    - `components/AccessoryBar.jsx` — floating Mandinka special-character input bar
+      (positions above the on-screen keyboard via `window.visualViewport`).
+    - `components/SessionComplete.jsx` — end-of-session summary.
+    - `hooks/*` — data fetching (`useGameSet`), session lifecycle
+      (`useGameSession`), progress queue (`useProgressSync`), IndexedDB primitives
+      (`idbUtils`).
+    - `api/*` — `createDictionaryApiClient` factory + TypeScript contract.
 - **Data flow:** `GameShell` → `useGameSet` → REST `/game-set` (cached in
   IndexedDB, 3-day TTL) → game components → `useGameSession.recordResult` →
   IndexedDB session + learned-words → `useProgressSync.addEvent` → outbox
@@ -76,12 +76,12 @@ in `AGENTS.md`.
 - **IndexedDB database:** `aiwa-games-db`, version 1, key path `key` on every
   store.
 
-  | Store             | Contents                                                       |
-  |-------------------|----------------------------------------------------------------|
-  | `game-sets`       | Cached `/game-set` responses, keyed by lang+domain+limit+audio; 3-day TTL |
-  | `game-sessions`   | Current session (`game-session:current`), persisted per word result |
-  | `progress-outbox` | Pending event queue (`progress-outbox:pending`)                |
-  | `learned-words`   | Cumulative correctly-written UUIDs (`learned-words:production`) |
+    | Store             | Contents                                                                  |
+    | ----------------- | ------------------------------------------------------------------------- |
+    | `game-sets`       | Cached `/game-set` responses, keyed by lang+domain+limit+audio; 3-day TTL |
+    | `game-sessions`   | Current session (`game-session:current`), persisted per word result       |
+    | `progress-outbox` | Pending event queue (`progress-outbox:pending`)                           |
+    | `learned-words`   | Cumulative correctly-written UUIDs (`learned-words:production`)           |
 
 - **Core API types** (`src/api/dictionary-api.d.ts`): `DictionaryEntry`,
   `ExampleSentence`, `SearchItem`, `WordlistEntry`, `LanguageTerm`, `DomainTerm`,
@@ -89,7 +89,7 @@ in `AGENTS.md`.
   `WordOfDayData`. Success envelope: `{ success, data, meta }`; error:
   `{ code, message, data: { status } }`.
 - **Production vs recognition:** `PRODUCTION_GAMES =
-  { listen_write, arrange_word, complete_sentence, letter_reveal }`. Only these
+{ listen_write, arrange_word, complete_sentence, letter_reveal }`. Only these
   increment the learned-words count; `meaning_match` and `domain_flash` are
   recognition-only.
 
@@ -97,17 +97,17 @@ in `AGENTS.md`.
 
 ### 6a. Consumed REST endpoints (namespace `sparxstar/v1/dictionary`)
 
-| Method | Path           | Auth                         | Used by                  |
-|--------|----------------|------------------------------|--------------------------|
-| GET    | `/lookup`      | page token or API key        | client `lookup()`        |
-| GET    | `/search`      | page token or API key        | client `search()`        |
-| GET    | `/wordlist`    | API key only (page token → 403) | client `wordlist()`   |
-| GET    | `/languages`   | page token or API key        | client `languages()`     |
-| GET    | `/domains`     | page token or API key        | client `domains()`       |
-| GET    | `/game-set`    | page token or API key        | `useGameSet`, `gameSet()`|
-| GET    | `/word-of-day` | page token or API key        | client `wordOfDay()`     |
-| POST   | `/spell`       | page token or API key        | client `spell()`         |
-| GET    | `/page-token`  | none                         | token bootstrap/refresh  |
+| Method | Path           | Auth                            | Used by                   |
+| ------ | -------------- | ------------------------------- | ------------------------- |
+| GET    | `/lookup`      | page token or API key           | client `lookup()`         |
+| GET    | `/search`      | page token or API key           | client `search()`         |
+| GET    | `/wordlist`    | API key only (page token → 403) | client `wordlist()`       |
+| GET    | `/languages`   | page token or API key           | client `languages()`      |
+| GET    | `/domains`     | page token or API key           | client `domains()`        |
+| GET    | `/game-set`    | page token or API key           | `useGameSet`, `gameSet()` |
+| GET    | `/word-of-day` | page token or API key           | client `wordOfDay()`      |
+| POST   | `/spell`       | page token or API key           | client `spell()`          |
+| GET    | `/page-token`  | none                            | token bootstrap/refresh   |
 
 Quirks the client encodes: `/spell` duplicates results at `data.results`
 (canonical) and top-level `results` (legacy) — always read `data.results`.
@@ -160,12 +160,12 @@ page-token refresh and retry.
   `/wordlist`. `GET /page-token` is unauthenticated. Keys are SHA-256 hashed
   server-side.
 - **Hard red lines:**
-  - `syncNow()` must not post to the network until the Game-Service intake spec
-    is committed and OQ-G1 resolves with an approved token-delivery mechanism.
-  - Never read Helios Bearer tokens from `localStorage` (XSS exposure).
-  - Never emit `Access-Control-Allow-Credentials`.
-  - No WordPress auth (`is_user_logged_in()`) on game endpoints.
-  - Never send an ephemeral page token to `/wordlist`.
+    - `syncNow()` must not post to the network until the Game-Service intake spec
+      is committed and OQ-G1 resolves with an approved token-delivery mechanism.
+    - Never read Helios Bearer tokens from `localStorage` (XSS exposure).
+    - Never emit `Access-Control-Allow-Credentials`.
+    - No WordPress auth (`is_user_logged_in()`) on game endpoints.
+    - Never send an ephemeral page token to `/wordlist`.
 - **Privacy:** all learner progress is local (IndexedDB) until an approved sync
   path exists. No PII is collected by this layer.
 
@@ -183,14 +183,14 @@ page-token refresh and retry.
 
 ## 11. Open items
 
-| ID     | Description                                                                 |
-|--------|-----------------------------------------------------------------------------|
-| OQ-G1  | Helios token source — network progress sync blocked until resolved          |
-| OQ-G3  | LetterReveal pottery animation — awaiting AIWA-approved asset                |
-| OQ-G4  | DomainFlash "I knew it" hook confirmation                                    |
-| OQ-I3  | Guest device progress merge — blocked on Game Service intake spec            |
-| —      | Add a test suite; confirm Tailwind/PostCSS ownership (host vs package)       |
-| —      | Reconcile npm package name (`sparxstar-rlc-games`) with repo name if desired |
+| ID    | Description                                                                  |
+| ----- | ---------------------------------------------------------------------------- |
+| OQ-G1 | Helios token source — network progress sync blocked until resolved           |
+| OQ-G3 | LetterReveal pottery animation — awaiting AIWA-approved asset                |
+| OQ-G4 | DomainFlash "I knew it" hook confirmation                                    |
+| OQ-I3 | Guest device progress merge — blocked on Game Service intake spec            |
+| —     | Add a test suite; confirm Tailwind/PostCSS ownership (host vs package)       |
+| —     | Reconcile npm package name (`sparxstar-rlc-games`) with repo name if desired |
 
 ## 12. Changelog
 

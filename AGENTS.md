@@ -72,10 +72,10 @@ The game service is a **strict-mode consumer**:
 
 ### Authentication model (Webster)
 
-| Credential            | Header         | Scope                                      |
-|-----------------------|----------------|--------------------------------------------|
-| Ephemeral page token  | `X-Page-Token` | Browse endpoints, same-origin apps         |
-| Consumer API key      | `X-Api-Key`    | All endpoints, including `/wordlist`        |
+| Credential           | Header         | Scope                                |
+| -------------------- | -------------- | ------------------------------------ |
+| Ephemeral page token | `X-Page-Token` | Browse endpoints, same-origin apps   |
+| Consumer API key     | `X-Api-Key`    | All endpoints, including `/wordlist` |
 
 - `GET /page-token` requires no credentials.
 - Keys are stored SHA-256 hashed server-side — plaintext is never stored.
@@ -83,12 +83,12 @@ The game service is a **strict-mode consumer**:
 
 ### IndexedDB stores (`aiwa-games-db`)
 
-| Store             | Purpose                                                          |
-|-------------------|-----------------------------------------------------------------|
+| Store             | Purpose                                                                    |
+| ----------------- | -------------------------------------------------------------------------- |
 | `game-sets`       | Cached `/game-set` responses (3-day TTL, keyed by lang+domain+limit+audio) |
-| `game-sessions`   | Current session state (persisted on every word result)          |
-| `progress-outbox` | Event queue for Helios sync (pending OQ-G1)                      |
-| `learned-words`   | Cumulative set of UUIDs the player has correctly written        |
+| `game-sessions`   | Current session state (persisted on every word result)                     |
+| `progress-outbox` | Event queue for Helios sync (pending OQ-G1)                                |
+| `learned-words`   | Cumulative set of UUIDs the player has correctly written                   |
 
 ### Production vs recognition games
 
@@ -108,12 +108,12 @@ do not increment `learnedCount`.
 
 ### Open questions tracked by this repo
 
-| ID     | Description                                                              |
-|--------|-------------------------------------------------------------------------|
-| OQ-G1  | Helios token source — `useProgressSync.syncNow()` is a no-op until resolved |
-| OQ-G3  | LetterReveal pottery animation — emoji placeholder, awaiting approved asset |
-| OQ-G4  | DomainFlash "I knew it" hook confirmation                               |
-| OQ-I3  | Guest device progress merge — blocked on Game Service intake spec       |
+| ID    | Description                                                                 |
+| ----- | --------------------------------------------------------------------------- |
+| OQ-G1 | Helios token source — `useProgressSync.syncNow()` is a no-op until resolved |
+| OQ-G3 | LetterReveal pottery animation — emoji placeholder, awaiting approved asset |
+| OQ-G4 | DomainFlash "I knew it" hook confirmation                                   |
+| OQ-I3 | Guest device progress merge — blocked on Game Service intake spec           |
 
 ### Upstream spec references (in the dictionary repo)
 

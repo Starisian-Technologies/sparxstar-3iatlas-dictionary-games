@@ -20,7 +20,7 @@ export default function AccessoryBar() {
             const el = e.target;
             if (
                 (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') &&
-                el.dataset.aiwaInput === 'true'
+                el.dataset?.aiwaInput === 'true'
             ) {
                 setActiveInput(el);
             }

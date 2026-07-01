@@ -142,11 +142,15 @@ export interface ApiError {
 export type LookupErrorCode = 'not_found' | 'missing_param';
 
 /** GET /lookup?slug=&uuid=&[include_audio=true] */
-export interface LookupData { word: DictionaryEntry }
+export interface LookupData {
+    word: DictionaryEntry;
+}
 export type LookupResponse = ApiSuccess<LookupData>;
 
 /** GET /search?q=&[lang_source=]&[per_page=] */
-export interface SearchData { results: SearchItem[] }
+export interface SearchData {
+    results: SearchItem[];
+}
 export type SearchResponse = ApiSuccess<SearchData>;
 
 /**
@@ -154,15 +158,21 @@ export type SearchResponse = ApiSuccess<SearchData>;
  *
  * Consumer API key required. Ephemeral page token is rejected with 403.
  */
-export interface WordlistData { words: WordlistEntry[] }
+export interface WordlistData {
+    words: WordlistEntry[];
+}
 export type WordlistResponse = ApiSuccess<WordlistData>;
 
 /** GET /languages */
-export interface LanguagesData { languages: LanguageTerm[] }
+export interface LanguagesData {
+    languages: LanguageTerm[];
+}
 export type LanguagesResponse = ApiSuccess<LanguagesData>;
 
 /** GET /domains */
-export interface DomainsData { domains: DomainTerm[] }
+export interface DomainsData {
+    domains: DomainTerm[];
+}
 export type DomainsResponse = ApiSuccess<DomainsData>;
 
 /**
@@ -176,7 +186,9 @@ export interface GameSetMeta {
     domain: string;
     include_audio: boolean;
 }
-export interface GameSetData { words: GameWord[] }
+export interface GameSetData {
+    words: GameWord[];
+}
 export type GameSetResponse = ApiSuccess<GameSetData, GameSetMeta>;
 
 /** GET /word-of-day */
@@ -188,7 +200,9 @@ export type WordOfDayResponse = ApiSuccess<WordOfDayData>;
  * QUIRK: results are duplicated at both response.data.results (canonical envelope)
  * and response.results (legacy top-level field). Always read from response.data.results.
  */
-export interface SpellData { results: SpellResult[] }
+export interface SpellData {
+    results: SpellResult[];
+}
 export type SpellResponse = ApiSuccess<SpellData> & {
     /** @deprecated Legacy field — duplicate of data.results. Read data.results instead. */
     results?: SpellResult[];
