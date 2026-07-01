@@ -44,12 +44,20 @@ export default function ListenWrite({ words, language, onResult, onComplete }) {
 
     if (deck.length === 0) {
         return (
-            <div className="flex-1 flex items-center justify-center p-8 text-center">
+            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center gap-4">
                 <p className="text-gray-400 italic text-sm">
                     No words with audio in this set.
                     <br />
                     Try a different domain or language.
                 </p>
+                <button
+                    type="button"
+                    onClick={onComplete}
+                    className="px-4 py-2 rounded-xl font-semibold text-sm text-white transition-colors"
+                    style={{ background: '#E91E8C' }}
+                >
+                    Return to Menu
+                </button>
             </div>
         );
     }

@@ -52,21 +52,24 @@ export default function LetterReveal({ words, language, onResult, onComplete }) 
         }
 
         if (uniqueLetters.has(letter)) {
-            setRevealed((prev) => {
-                const next = new Set(prev).add(letter);
-                revealedRef.current = next;
+            /*
+             * Update the ref synchronously BEFORE scheduling the state update.
+             * Doing it inside the setRevealed updater leaves revealedRef.current
+             * stale until React flushes, so a rapid double-tap of the same letter
+             * passes the guard twice — duplicate onResult + overlapping timeouts.
+             */
+            const next = new Set(revealedRef.current).add(letter);
+            revealedRef.current = next;
+            setRevealed(next);
 
-                /* Check if word is fully revealed. */
-                const complete = [...uniqueLetters].every((l) => next.has(l));
-                if (complete) {
-                    doneRef.current = true;
-                    setDone(true);
-                    onResult(word.uuid, 'correct', 1, 5);
-                    setTimeout(() => advance(), 1200);
-                }
-
-                return next;
-            });
+            /* Check if word is fully revealed. */
+            const complete = [...uniqueLetters].every((l) => next.has(l));
+            if (complete) {
+                doneRef.current = true;
+                setDone(true);
+                onResult(word.uuid, 'correct', 1, 5);
+                setTimeout(() => advance(), 1200);
+            }
         } else {
             const nextWrong = wrongGuessesRef.current + 1;
             const nextWrongLetters = new Set(wrongLettersRef.current).add(letter);
