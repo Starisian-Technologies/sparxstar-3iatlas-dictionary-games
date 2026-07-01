@@ -71,7 +71,7 @@ export default function CompleteSentence({ words, language, onResult, onComplete
     const sentenceTranslation =
         language === 'fr' && example?.translation_fr
             ? example.translation_fr
-            : example?.translation_en ?? '';
+            : (example?.translation_en ?? '');
 
     /* Replace first occurrence of the headword (case-insensitive) with blanks. */
     const regex = new RegExp(`(${escapeRegex(target)})`, 'i');
