@@ -89,6 +89,9 @@ export function useGameSet({ restUrl, langSource, domain = '', limit = 20, inclu
 
                 const pageToken = typeof window !== 'undefined' ? ( window.sparxstarDictionarySettings?.pageToken ?? '' ) : '';
                 let res = await fetch(`${restUrl}/game-set?${params}`, {
+                const controller = new AbortController();
+                const pageToken = typeof window !== 'undefined' ? ( window.sparxstarDictionarySettings?.pageToken ?? '' ) : '';
+                let res = await fetch(`${restUrl}/game-set?${params}`, {
                     headers: { 'X-Page-Token': pageToken },
                     signal: controller.signal,
                 });
