@@ -20,7 +20,7 @@ export default function AccessoryBar() {
             const el = e.target;
             if (
                 (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') &&
-                el.dataset.aiwaInput === 'true'
+                el.dataset?.aiwaInput === 'true'
             ) {
                 setActiveInput(el);
             }
@@ -64,8 +64,22 @@ export default function AccessoryBar() {
     const insertChar = (char) => {
         if (!activeInput) return;
 
-        const start = activeInput.selectionStart ?? activeInput.value.length;
-        const end = activeInput.selectionEnd ?? activeInput.value.length;
+        /*
+         * Reading selectionStart/selectionEnd throws a DOMException on input
+         * types that don't support text selection (e.g. email, number) in
+         * Chrome/Firefox. A host could tag such an input with data-aiwa-input,
+         * so guard the access and fall back to appending at the end.
+         */
+        let start = activeInput.value.length;
+        let end = activeInput.value.length;
+        try {
+            if (typeof activeInput.selectionStart === 'number') {
+                start = activeInput.selectionStart;
+                end = activeInput.selectionEnd;
+            }
+        } catch {
+            /* Input type does not support selection — append at the end. */
+        }
         const newValue =
             activeInput.value.substring(0, start) + char + activeInput.value.substring(end);
 
@@ -87,8 +101,12 @@ export default function AccessoryBar() {
         activeInput.dispatchEvent(new Event('input', { bubbles: true }));
 
         const newCursor = start + char.length;
-        activeInput.selectionStart = newCursor;
-        activeInput.selectionEnd = newCursor;
+        try {
+            activeInput.selectionStart = newCursor;
+            activeInput.selectionEnd = newCursor;
+        } catch {
+            /* Input type does not support selection — cursor stays as-is. */
+        }
         activeInput.focus();
     };
 

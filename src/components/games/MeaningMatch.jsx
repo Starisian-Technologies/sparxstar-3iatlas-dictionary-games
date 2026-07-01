@@ -142,9 +142,7 @@ function buildOptions(deck, currentIndex, language) {
 
     /* Prefer distractors from same domain, then fall back to any other word. */
     const sameDomain = deck.filter((w, i) => i !== currentIndex && w.domain === word.domain);
-    const others = deck.filter(
-        (w, i) => i !== currentIndex && w.domain !== word.domain
-    );
+    const others = deck.filter((w, i) => i !== currentIndex && w.domain !== word.domain);
 
     const seenTexts = new Set([correctText]);
     const distractors = [];
@@ -160,10 +158,7 @@ function buildOptions(deck, currentIndex, language) {
         if (distractors.length === 2) break;
     }
 
-    return shuffle([
-        { text: correctText, isCorrect: true },
-        ...distractors,
-    ]);
+    return shuffle([{ text: correctText, isCorrect: true }, ...distractors]);
 }
 
 function ProgressBar({ current, total }) {

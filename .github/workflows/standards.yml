@@ -1,0 +1,29 @@
+name: Platform Standards
+
+on:
+    pull_request:
+    push:
+        branches: [main]
+
+jobs:
+    # This repo has package.json.
+    pnpm:
+        uses: Starisian-Technologies/starisian-technologies-coding-standards/.github/workflows/pnpm-enforcement.yml@v1
+        with:
+            mode: development
+        secrets: inherit
+
+    # This repo has JS/JSX (React).
+    js:
+        uses: Starisian-Technologies/starisian-technologies-coding-standards/.github/workflows/js-standards.yml@v1
+        secrets: inherit
+
+    # This repo ships Tailwind utility classes / CSS handled by the bundler.
+    css:
+        uses: Starisian-Technologies/starisian-technologies-coding-standards/.github/workflows/css-standards.yml@v1
+        secrets: inherit
+
+    # Always.
+    formatting:
+        uses: Starisian-Technologies/starisian-technologies-coding-standards/.github/workflows/formatting.yml@v1
+        secrets: inherit

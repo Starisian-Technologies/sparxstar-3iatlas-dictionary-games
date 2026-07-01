@@ -50,9 +50,30 @@ export class DictionaryApiError extends Error {
  * @returns {import('./dictionary-api').DictionaryApiClient}
  */
 export function createDictionaryApiClient(config) {
+    if (!config || typeof config.baseUrl !== 'string') {
+        throw new DictionaryApiError(
+            'invalid_config',
+            'A configuration object with a string baseUrl is required',
+            0
+        );
+    }
     let pageToken = config.pageToken ?? '';
     const apiKey = config.apiKey ?? '';
     const baseUrl = config.baseUrl.replace(/\/$/, '');
+
+    /*
+     * baseUrl is trusted app config, not user input, so this is defense in
+     * depth rather than an open-redirect fix. Reject an explicit non-http(s)
+     * scheme (e.g. javascript:, data:) while still allowing relative URLs used
+     * by same-origin browser apps.
+     */
+    if (/^[a-z][a-z0-9+.-]*:/i.test(baseUrl) && !/^https?:\/\//i.test(baseUrl)) {
+        throw new DictionaryApiError(
+            'invalid_base_url',
+            'baseUrl must use the http or https protocol',
+            0
+        );
+    }
 
     /**
      * Build request headers.
@@ -174,7 +195,7 @@ export function createDictionaryApiClient(config) {
             if (slug) p.set('slug', slug);
             if (uuid) p.set('uuid', uuid);
             if (include_audio) p.set('include_audio', 'true');
-            return /** @type {any} */ (get('/lookup', p));
+            return /** @type {any} */ (get('/lookup', p.toString() ? p : null));
         },
 
         /**

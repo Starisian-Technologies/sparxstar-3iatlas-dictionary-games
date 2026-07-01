@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Loader2, ChevronDown } from 'lucide-react';
-import * as GameSetHookModule from '../hooks/useGameSet.js';
-import * as useGameSessionModule from '../hooks/useGameSession.js';
-import * as useProgressSyncModule from '../hooks/useProgressSync.js';
+import { useGameSet } from '../hooks/useGameSet.js';
+import { useGameSession } from '../hooks/useGameSession.js';
+import { useProgressSync } from '../hooks/useProgressSync.js';
 import SessionComplete from './SessionComplete.jsx';
 import DomainFlash from './games/DomainFlash.jsx';
 import MeaningMatch from './games/MeaningMatch.jsx';
@@ -10,9 +10,6 @@ import ArrangeWord from './games/ArrangeWord.jsx';
 import LetterReveal from './games/LetterReveal.jsx';
 import CompleteSentence from './games/CompleteSentence.jsx';
 import ListenWrite from './games/ListenWrite.jsx';
-
-const useGameSet = GameSetHookModule.useGameSet ?? GameSetHookModule.default;
-const useGameSession = useGameSessionModule.useGameSession ?? useGameSessionModule.default;
 
 /** Word count options available in session setup. */
 const WORD_COUNTS = [10, 20, 30];
@@ -138,7 +135,6 @@ export default function GameShell({
     const { session, learnedCount, initSession, recordResult, completeSession, clearSession } =
         useGameSession();
 
-    const useProgressSync = useProgressSyncModule.useProgressSync || useProgressSyncModule.default;
     const { addEvent, syncNow } = useProgressSync({ restUrl });
 
     /*
@@ -271,55 +267,67 @@ export default function GameShell({
              * (e.g. the final onResult + onComplete pair in DomainFlash) are serialized.
              * handleComplete awaits this chain before calling completeSession().
              */
-            pendingResultRef.current = pendingResultRef.current.then(async () => {
-                const updatedSession = await recordResult(uuid, outcome, attempts, xp);
+            pendingResultRef.current = pendingResultRef.current
+                .then(async () => {
+                    const updatedSession = await recordResult(uuid, outcome, attempts, xp);
 
-                /* Queue MyCred events. */
-                if (outcome === 'correct') {
-                    /* Check if this is the first time practicing this word. */
-                    const practiceKey = `aiwa-dict-practiced:${uuid}`;
-                    let practiceMarker = null;
-                    let canPersistPracticeMarker = true;
-                    try {
-                        practiceMarker = window.localStorage.getItem(practiceKey);
-                    } catch {
-                        canPersistPracticeMarker = false;
-                    }
-                    const shouldQueueFirstPracticeEvent = practiceMarker === null;
+                    /* Queue MyCred events. */
+                    if (outcome === 'correct') {
+                        /* Check if this is the first time practicing this word. */
+                        const practiceKey = `aiwa-dict-practiced:${uuid}`;
+                        let practiceMarker = null;
+                        let canPersistPracticeMarker = true;
+                        try {
+                            practiceMarker = window.localStorage.getItem(practiceKey);
+                        } catch {
+                            canPersistPracticeMarker = false;
+                        }
+                        const shouldQueueFirstPracticeEvent = practiceMarker === null;
 
-                    if (shouldQueueFirstPracticeEvent) {
-                        if (canPersistPracticeMarker) {
-                            setLocalStorageItem(practiceKey, '1');
+                        if (shouldQueueFirstPracticeEvent) {
+                            if (canPersistPracticeMarker) {
+                                setLocalStorageItem(practiceKey, '1');
+                            }
+
+                            await addEvent({
+                                type: 'aiwa_game_new_word_practiced',
+                                word_uuid: uuid,
+                            });
                         }
 
-                        await addEvent({ type: 'aiwa_game_new_word_practiced', word_uuid: uuid });
-                    }
+                        if (selectedGame === 'listen_write') {
+                            await addEvent({
+                                type: 'aiwa_game_listen_write_correct',
+                                word_uuid: uuid,
+                                game: selectedGame,
+                            });
+                        } else {
+                            await addEvent({
+                                type: 'aiwa_game_word_correct',
+                                word_uuid: uuid,
+                                game: selectedGame,
+                            });
+                        }
 
-                    if (selectedGame === 'listen_write') {
-                        await addEvent({
-                            type: 'aiwa_game_listen_write_correct',
-                            word_uuid: uuid,
-                            game: selectedGame,
-                        });
-                    } else {
-                        await addEvent({
-                            type: 'aiwa_game_word_correct',
-                            word_uuid: uuid,
-                            game: selectedGame,
-                        });
-                    }
-
-                    /* Streak detection: use updatedSession.results (already includes
-                     * the result just recorded) rather than the stale session state
-                     * closure, which is typically one result behind at this point. */
-                    if (updatedSession) {
-                        const recent = updatedSession.results.slice(-3);
-                        if (recent.length === 3 && recent.every((r) => r.outcome === 'correct')) {
-                            await addEvent({ type: 'aiwa_game_streak_3' });
+                        /* Streak detection: use updatedSession.results (already includes
+                         * the result just recorded) rather than the stale session state
+                         * closure, which is typically one result behind at this point. */
+                        if (updatedSession) {
+                            const recent = updatedSession.results.slice(-3);
+                            if (
+                                recent.length === 3 &&
+                                recent.every((r) => r.outcome === 'correct')
+                            ) {
+                                await addEvent({ type: 'aiwa_game_streak_3' });
+                            }
                         }
                     }
-                }
-            });
+                })
+                .catch((error) => {
+                    /* Keep the chain alive — a single failed write (quota, IDB error)
+                     * must not stop the rest of the session from recording. */
+                    console.error('Failed to record word result:', error);
+                });
         },
         [recordResult, addEvent, selectedGame]
     );

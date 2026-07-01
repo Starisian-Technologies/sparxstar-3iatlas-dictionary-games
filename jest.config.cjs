@@ -1,14 +1,8 @@
-'use strict';
-
+/* Jest config — jsdom for the React components; CSS imports stubbed. */
 module.exports = {
     testEnvironment: 'jsdom',
-    transform: {
-        '^.+\\.(js|jsx)$': 'babel-jest',
-    },
     moduleNameMapper: {
-        '\\.css$': '<rootDir>/__mocks__/styleMock.cjs',
+        '\\.(css|less|scss)$': '<rootDir>/__mocks__/styleMock.cjs',
     },
-    testMatch: ['**/__tests__/**/*.[jt]s?(x)', '**/?(*.)+(spec|test).[jt]s?(x)'],
-    coverageDirectory: 'coverage',
-    collectCoverageFrom: ['src/**/*.{js,jsx}', '!src/**/*.d.ts'],
+    testMatch: ['**/__tests__/**/*.{js,jsx}', '**/*.test.{js,jsx}'],
 };

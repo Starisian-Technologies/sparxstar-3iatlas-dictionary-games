@@ -50,7 +50,7 @@ export function openDB() {
 export async function getRecord(storeName, key) {
     try {
         const db = await openDB();
-        return new Promise((resolve) => {
+        return await new Promise((resolve) => {
             const tx = db.transaction(storeName, 'readonly');
             const req = tx.objectStore(storeName).get(key);
             req.onsuccess = () => resolve(req.result ?? null);
@@ -70,7 +70,7 @@ export async function getRecord(storeName, key) {
 export async function putRecord(storeName, record) {
     try {
         const db = await openDB();
-        return new Promise((resolve) => {
+        return await new Promise((resolve) => {
             const tx = db.transaction(storeName, 'readwrite');
             const req = tx.objectStore(storeName).put(record);
             req.onsuccess = () => resolve(true);
@@ -88,7 +88,7 @@ export async function putRecord(storeName, record) {
 export async function getAllRecords(storeName) {
     try {
         const db = await openDB();
-        return new Promise((resolve) => {
+        return await new Promise((resolve) => {
             const tx = db.transaction(storeName, 'readonly');
             const req = tx.objectStore(storeName).getAll();
             req.onsuccess = () => resolve(req.result ?? []);
@@ -103,7 +103,7 @@ export async function getAllRecords(storeName) {
 export async function deleteRecord(storeName, key) {
     try {
         const db = await openDB();
-        return new Promise((resolve) => {
+        return await new Promise((resolve) => {
             const tx = db.transaction(storeName, 'readwrite');
             tx.objectStore(storeName).delete(key);
             tx.oncomplete = () => resolve();

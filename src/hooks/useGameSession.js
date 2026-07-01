@@ -47,19 +47,27 @@ export function useGameSession() {
         let cancelled = false;
 
         async function load() {
-            const [saved, learnedRecord] = await Promise.all([
-                safeGetRecord('game-sessions', SESSION_KEY),
-                safeGetRecord('learned-words', LEARNED_KEY),
-            ]);
+            try {
+                const [saved, learnedRecord] = await Promise.all([
+                    safeGetRecord('game-sessions', SESSION_KEY),
+                    safeGetRecord('learned-words', LEARNED_KEY),
+                ]);
 
-            if (cancelled) return;
+                if (cancelled) return;
 
-            if (saved && saved.completedAt === null) {
-                sessionRef.current = saved;
-                setSession(saved);
-            }
-            if (learnedRecord && Array.isArray(learnedRecord.uuids)) {
-                setLearnedCount(learnedRecord.uuids.length);
+                if (saved && saved.completedAt === null) {
+                    sessionRef.current = saved;
+                    setSession(saved);
+                }
+                if (learnedRecord && Array.isArray(learnedRecord.uuids)) {
+                    setLearnedCount(learnedRecord.uuids.length);
+                }
+            } catch (error) {
+                /* IndexedDB unavailable (quota, private mode, open failure) —
+                 * degrade to a fresh session instead of crashing on mount. */
+                if (!cancelled) {
+                    console.warn('Failed to load saved game session:', error);
+                }
             }
         }
 
