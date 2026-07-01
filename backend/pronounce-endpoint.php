@@ -234,14 +234,55 @@ function sparxstar_synthesise_twi( string $word, string $model_path, string $mod
 		];
 		error_log( sprintf( 'sparxstar_pronounce: synthesising via binary "%s"', $piper_bin ) );
 	} else {
+	if ( $runtime === 'binary' ) {
+		$piper_bin = defined( 'SPARXSTAR_PIPER_BINARY' ) ? SPARXSTAR_PIPER_BINARY : 'piper';
+		// Validate binary path to prevent command injection
+		if ( strpos( $piper_bin, "\0" ) !== false || preg_match( '/[;&|`$()]/', $piper_bin ) ) {
+			return new WP_Error(
+				'invalid_piper_path',
+				'Invalid characters in Piper binary path.',
+				[ 'status' => 500 ]
+			);
+		}
+		if ( ! file_exists( $piper_bin ) && ! sparxstar_command_exists( $piper_bin ) ) {
+			return new WP_Error(
+				'piper_binary_not_found',
+				sprintf( 'Piper binary not found at "%s".', $piper_bin ),
+				[ 'status' => 503 ]
+			);
+		}
+		// Validate model paths
+		if ( strpos( $model_path, "\0" ) !== false || strpos( $model_json, "\0" ) !== false ) {
+			return new WP_Error(
+				'invalid_model_path',
+				'Invalid characters in model path.',
+				[ 'status' => 500 ]
+			);
+		}
+		$cmd = [
+			$piper_bin,
+			'--model', $model_path,
+			'--config', $model_json,
+			'--output-raw',
+		];
+		error_log( sprintf( 'sparxstar_pronounce: synthesising via binary "%s"', $piper_bin ) );
+	} else {
 		// Default: pip-installed piper-tts (`python3 -m piper`)
 		$python_bin = defined( 'SPARXSTAR_PYTHON_BIN' ) ? SPARXSTAR_PYTHON_BIN : 'python3';
-
-		if ( strpos( $python_bin, '/' ) !== false && ! sparxstar_validate_path( $python_bin ) ) {
+		// Validate python path to prevent command injection
+		if ( strpos( $python_bin, "\0" ) !== false || preg_match( '/[;&|`$()]/', $python_bin ) ) {
 			return new WP_Error(
-				'python_binary_invalid',
-				'SPARXSTAR_PYTHON_BIN contains invalid characters.',
-				[ 'status' => 503 ]
+				'invalid_python_path',
+				'Invalid characters in Python binary path.',
+				[ 'status' => 500 ]
+			);
+		}
+		// Validate model paths
+		if ( strpos( $model_path, "\0" ) !== false || strpos( $model_json, "\0" ) !== false ) {
+			return new WP_Error(
+				'invalid_model_path',
+				'Invalid characters in model path.',
+				[ 'status' => 500 ]
 			);
 		}
 		$cmd = [
@@ -250,6 +291,8 @@ function sparxstar_synthesise_twi( string $word, string $model_path, string $mod
 			'--config', $model_json,
 			'--output-raw',
 		];
+		error_log( sprintf( 'sparxstar_pronounce: synthesising via python "%s -m piper"', $python_bin ) );
+	}
 		error_log( sprintf( 'sparxstar_pronounce: synthesising via python "%s -m piper"', $python_bin ) );
 	}
 
