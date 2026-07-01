@@ -17,6 +17,7 @@ export default function MeaningMatch({ words, language, onResult, onComplete }) 
     const [index, setIndex] = useState(0);
     const [selected, setSelected] = useState(null);
     const [revealed, setRevealed] = useState(false);
+    const revealedRef = React.useRef(false);
     const revealedRef = useRef(false);
 
     const word = deck[index];
