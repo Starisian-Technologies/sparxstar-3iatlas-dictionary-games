@@ -107,11 +107,16 @@ function sparxstar_pronounce_permissions( WP_REST_Request $request ) {
  * @return bool
  */
 function sparxstar_validate_path( string $path ): bool {
-	if ( $path === '' || strpos( $path, "\0" ) !== false ) {
-		return false;
+function sparxstar_pronounce_permissions( WP_REST_Request $request ) {
+	if ( function_exists( 'sparxstar_verify_webster_auth' ) ) {
+		return sparxstar_verify_webster_auth( $request );
 	}
-	// Must be an absolute path (Unix) or Windows drive path.
-	return $path[0] === '/' || (bool) preg_match( '/^[A-Za-z]:[\\\\\/]/', $path );
+	// Fail closed: deny access if auth helper is not available
+	return new WP_Error(
+		'auth_unavailable',
+		'Authentication system is not available.',
+		[ 'status' => 503 ]
+	);
 }
 
 /**
