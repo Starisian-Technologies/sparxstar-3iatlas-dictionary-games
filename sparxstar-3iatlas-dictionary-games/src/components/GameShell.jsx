@@ -222,6 +222,11 @@ export default function GameShell({
                 if (phase !== 'loading') return;
                 if (gameSetLoading) return;
                 if (gameSetError) {
+        const load = async () => {
+            try {
+                if (phase !== 'loading') return;
+                if (gameSetLoading) return;
+                if (gameSetError) {
                     setSetupError(gameSetError);
                     setPhase('setup');
                     return;
