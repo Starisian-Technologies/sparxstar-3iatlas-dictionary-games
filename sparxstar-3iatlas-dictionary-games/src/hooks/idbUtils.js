@@ -34,8 +34,9 @@ export function openDB() {
             req.onsuccess = (e) => resolve(e.target.result);
 
             req.onerror = (e) => {
+                const error = e.target.error;
                 _dbPromise = null;
-                reject(e.target.error);
+                reject(error);
             };
         });
     } catch (error) {
