@@ -66,7 +66,8 @@ function sparxstar_register_pronounce_route() {
 						if ( $trimmed === '' ) {
 							return new WP_Error( 'empty_word', 'word must not be empty.', [ 'status' => 400 ] );
 						}
-						if ( mb_strlen( $trimmed, 'UTF-8' ) > 256 ) {
+						$char_len = function_exists( 'mb_strlen' ) ? mb_strlen( $trimmed, 'UTF-8' ) : strlen( $trimmed );
+						if ( $char_len > 256 ) {
 							return new WP_Error( 'word_too_long', 'word exceeds 256 characters.', [ 'status' => 400 ] );
 						}
 						return true;
@@ -169,6 +170,8 @@ function sparxstar_pronounce_handler( WP_REST_Request $request ) {
 	// prefixed to avoid collision with other transient namespaces.
 	$cache_key = 'sparxstar_twi_' . hash( 'sha256', $word );
 
+	$ttl = defined( 'SPARXSTAR_PRONOUNCE_CACHE_TTL' ) ? (int) SPARXSTAR_PRONOUNCE_CACHE_TTL : 2592000;
+
 	// WordPress transients transparently use Redis / Memcached / APCu /
 	// database — whatever object cache drop-in is active on the host.
 	// Binary WAV is stored base64-encoded to survive UTF-8 transient backends.
@@ -176,7 +179,7 @@ function sparxstar_pronounce_handler( WP_REST_Request $request ) {
 	if ( $cached !== false ) {
 		$wav = base64_decode( $cached, true );
 		if ( $wav !== false ) {
-			return sparxstar_wav_response( $wav );
+			return sparxstar_wav_response( $wav, $ttl );
 		}
 		// Corrupt cache entry — delete and re-synthesise.
 		delete_transient( $cache_key );
@@ -188,10 +191,9 @@ function sparxstar_pronounce_handler( WP_REST_Request $request ) {
 		return $wav;
 	}
 
-	$ttl = defined( 'SPARXSTAR_PRONOUNCE_CACHE_TTL' ) ? (int) SPARXSTAR_PRONOUNCE_CACHE_TTL : 2592000;
 	set_transient( $cache_key, base64_encode( $wav ), $ttl );
 
-	return sparxstar_wav_response( $wav );
+	return sparxstar_wav_response( $wav, $ttl );
 }
 
 /**
@@ -411,33 +413,32 @@ function sparxstar_pcm_to_wav( string $pcm, int $rate = 22050 ): string {
  * @param string $wav  Complete WAV file bytes.
  * @return WP_REST_Response
  */
-function sparxstar_wav_response( string $wav ): WP_REST_Response {
+function sparxstar_wav_response( string $wav, int $ttl = 2592000 ): WP_REST_Response {
 	$response = new WP_REST_Response( null, 200 );
 
 	$filter = null;
-	$filter = function( $served, $result ) use ( $wav, $response, &$filter ) {
+	$filter = function( $served, $result ) use ( $wav, $ttl, $response, &$filter ) {
 		// Only intercept the specific response this closure was created for.
-function sparxstar_wav_response( string $wav ): WP_REST_Response {
-	// Create a one-time filter that serves the response and removes itself
-	$filter_callback = null;
-	$filter_callback = function( $served ) use ( $wav, &$filter_callback ) {
+		if ( $result !== $response ) {
+			return $served;
+		}
+		// Self-remove before emitting output to prevent accumulation.
+		remove_filter( 'rest_pre_serve_request', $filter, 10 );
+
 		if ( $served ) {
 			return $served;
 		}
-		// Remove this filter immediately to prevent reuse
-		remove_filter( 'rest_pre_serve_request', $filter_callback, 10 );
-		
 		header( 'Content-Type: audio/wav' );
 		header( 'Content-Length: ' . strlen( $wav ) );
-		header( 'Cache-Control: public, max-age=2592000, immutable' );
+		header( 'Cache-Control: public, max-age=' . $ttl . ', immutable' );
 		header( 'X-Content-Type-Options: nosniff' );
 		echo $wav; // phpcs:ignore WordPress.Security.EscapeOutput
 		return true;
 	};
-	
-	add_filter( 'rest_pre_serve_request', $filter_callback, 10, 1 );
 
-	return new WP_REST_Response( null, 200 );
+	add_filter( 'rest_pre_serve_request', $filter, 10, 2 );
+
+	return $response;
 }
 
 /**
