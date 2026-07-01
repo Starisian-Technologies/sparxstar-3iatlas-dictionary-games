@@ -30,13 +30,16 @@ _production_ games and contribute to the learner's "words you can write" count.
 
 ## Install & build
 
+This repo uses **pnpm** (`packageManager` is pinned in `package.json`; enable it
+with `corepack enable`).
+
 ```bash
-npm install
-npm run build      # webpack → dist/js/rlc-games.min.js (UMD global RlcGames)
-npm run watch      # rebuild on change
-npm run lint       # eslint --fix
-npm run format     # prettier --write
-npm test           # jest --passWithNoTests
+pnpm install
+pnpm run build      # webpack → dist/js/rlc-games.min.js (UMD global RlcGames)
+pnpm run watch      # rebuild on change
+pnpm run lint       # eslint --fix
+pnpm run format     # prettier --write
+pnpm test           # jest --passWithNoTests
 ```
 
 `react` and `react-dom` are webpack externals — the host application provides

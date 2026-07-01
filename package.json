@@ -6,6 +6,7 @@
     "author": "Starisian Technologies <support@starisian.com>",
     "license": "proprietary",
     "type": "commonjs",
+    "packageManager": "pnpm@9.15.9",
     "repository": {
         "type": "git",
         "url": "git+https://github.com/Starisian-Technologies/sparxstar-3iatlas-dictionary-games.git"
