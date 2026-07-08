@@ -7,3 +7,4 @@ export { useProgressSync } from './hooks/useProgressSync.js';
 export { openDB, getRecord, putRecord, getAllRecords, deleteRecord } from './hooks/idbUtils.js';
 export { PRODUCTION_GAMES } from './constants.js';
 export { createDictionaryApiClient, DictionaryApiError } from './api/DictionaryApiClient.js';
+export { buildGameServiceEvent, buildGameServiceBatch } from './api/gameServiceEventContract.js';

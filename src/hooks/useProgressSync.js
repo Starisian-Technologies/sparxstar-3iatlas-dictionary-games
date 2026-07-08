@@ -1,19 +1,28 @@
 /**
  * useProgressSync — queues game progress events in IndexedDB.
  *
- * Events are held in IndexedDB until Helios token introspection is
- * implemented (OQ-G1). syncNow() is intentionally a no-op for the
- * network POST until that open question is resolved. Events are written
- * to the outbox on a best-effort basis — writes may fail if IndexedDB is
- * unavailable (e.g. quota exceeded or private-browsing mode), and failures
- * are logged as warnings.
+ * Events are held in IndexedDB until a suite-token source exists. Per
+ * 3IATLAS-IDENTITY-AND-GAME-SERVICES-DECISION-v1.0 §3, the sync target is
+ * the RLC Node Engine (promoted to the suite's 3iAtlas Game Service), not
+ * WordPress — but the suite Identity Service that mints the required token
+ * has not been built yet (own repo, not yet created; see decision doc §2,
+ * §7 OQ-I3/OQ-I4), so syncNow() is intentionally a no-op for the network
+ * POST until that token source exists. Events are written to the outbox on
+ * a best-effort basis — writes may fail if IndexedDB is unavailable (e.g.
+ * quota exceeded or private-browsing mode), and failures are logged as
+ * warnings.
  *
- * SECURITY NOTE: Reading a Helios Bearer token from localStorage would
+ * The frozen wire schema syncNow() will eventually POST is already
+ * implemented in `api/gameServiceEventContract.js` (`buildGameServiceBatch`)
+ * — see that module for the drop-in call once a token source lands.
+ *
+ * SECURITY NOTE: Reading a suite/Helios Bearer token from localStorage would
  * expose it to any injected script (XSS), undermining the platform's
- * token-integrity guarantee. The network sync path MUST NOT ship until
- * OQ-G1 is resolved with an approved token-delivery mechanism.
+ * token-integrity guarantee. The network sync path MUST NOT ship until an
+ * approved token-delivery mechanism exists.
  *
- * // TODO: Replace with Helios token introspection when available (OQ-G1).
+ * // TODO: Wire buildGameServiceBatch() into a real POST once the suite
+ * // Identity Service (or an approved interim token source) exists.
  */
 
 import { useCallback, useEffect } from 'react';
@@ -63,19 +72,22 @@ export function useProgressSync({ restUrl: _restUrl }) {
     }, []);
 
     /**
-     * Network sync is intentionally disabled until OQ-G1 (Helios auth) is
-     * resolved. Events accumulate in the IndexedDB outbox on a best-effort
-     * basis (writes may fail if storage is unavailable; failures are logged).
+     * Network sync is intentionally disabled until the suite Identity
+     * Service (or an approved interim token source) exists. Events
+     * accumulate in the IndexedDB outbox on a best-effort basis (writes may
+     * fail if storage is unavailable; failures are logged).
      *
-     * // TODO: Replace with Helios token introspection when available (OQ-G1).
+     * // TODO: POST buildGameServiceBatch(session) to the Game Service once
+     * // a suite token source is available.
      */
     const syncNow = useCallback(async () => {
-        /* No-op: network POST is blocked until Helios token source is approved.
-         * See OQ-G1. The IndexedDB outbox is the durable store for now. */
+        /* No-op: network POST is blocked until a suite token source is
+         * approved (3IATLAS-IDENTITY-AND-GAME-SERVICES-DECISION-v1.0 §2, §7).
+         * The IndexedDB outbox is the durable store for now. */
     }, []);
 
     /* Re-attempt sync on reconnect — currently a no-op; wired up for when
-     * OQ-G1 is resolved so the listener is already in place. */
+     * a token source lands so the listener is already in place. */
     useEffect(() => {
         const handler = () => syncNow();
         window.addEventListener('online', handler);
