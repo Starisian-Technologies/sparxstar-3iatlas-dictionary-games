@@ -25,9 +25,12 @@ REST API.
   Owned by `Starisian-Technologies/sparxstar-3iatlas-dictionary`. This repo
   only calls those endpoints; it never defines them. The `.d.ts` here mirrors
   the server's published contract — the server is the source of truth.
-- **Helios identity and token issuance.** Progress sync is blocked on OQ-G1
-  until an approved token-delivery mechanism exists. This repo must not read
-  Helios Bearer tokens from `localStorage` or ship a network sync path.
+- **Helios identity and token issuance.** Progress sync is blocked until an
+  approved token-delivery mechanism exists for anonymous/guest game clients —
+  see `docs/dictionary-games-tech-spec.md` §11 for the blocker in plain
+  language (no longer cited via the retired "OQ-G1" label; see the note
+  there). This repo must not read Helios Bearer tokens from `localStorage` or
+  ship a network sync path.
 - **Audio asset generation** and **dictionary entry enrichment** — owned by
   the dictionary pipeline.
 - **WordPress / PHP / server-side logic** — this is a browser package only.
@@ -56,5 +59,7 @@ REST API.
 Platform decisions, invariants, and open questions live in the governance
 snapshot at `.github/instructions/governance/` (auto-synced; read-only) and in
 the registries cited from `AGENTS.md`. Cite ADRs and invariants by number —
-do not restate them here. Open questions tracked by this repo: **OQ-G1**,
-**OQ-G3**, **OQ-G4**, **OQ-I3** (see `AGENTS.md`).
+do not restate them here. Open questions tracked by this repo: **OQ-G3**,
+**OQ-G4**, **OQ-I3** (see `AGENTS.md`); the progress-sync blocker previously
+cited as "OQ-G1" is now stated in plain language in
+`docs/dictionary-games-tech-spec.md` §11 (see the retirement note there).

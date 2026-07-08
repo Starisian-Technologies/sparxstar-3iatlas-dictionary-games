@@ -1,19 +1,26 @@
 /**
  * useProgressSync — queues game progress events in IndexedDB.
  *
- * Events are held in IndexedDB until Helios token introspection is
- * implemented (OQ-G1). syncNow() is intentionally a no-op for the
- * network POST until that open question is resolved. Events are written
- * to the outbox on a best-effort basis — writes may fail if IndexedDB is
- * unavailable (e.g. quota exceeded or private-browsing mode), and failures
- * are logged as warnings.
+ * Events are held in IndexedDB until a token-issuance mechanism exists for
+ * anonymous/guest game clients (not a Helios JWT — that's for authenticated
+ * staff/platform users; not an RLC-style session-participant token — that
+ * requires an active RLC session, which this games layer doesn't have). See
+ * docs/dictionary-games-tech-spec.md §11 for the current blocker in plain
+ * language. syncNow() is intentionally a no-op for the network POST until
+ * that is resolved. Events are written to the outbox on a best-effort basis
+ * — writes may fail if IndexedDB is unavailable (e.g. quota exceeded or
+ * private-browsing mode), and failures are logged as warnings.
  *
  * SECURITY NOTE: Reading a Helios Bearer token from localStorage would
  * expose it to any injected script (XSS), undermining the platform's
- * token-integrity guarantee. The network sync path MUST NOT ship until
- * OQ-G1 is resolved with an approved token-delivery mechanism.
+ * token-integrity guarantee. The network sync path MUST NOT ship until an
+ * approved token-delivery mechanism exists for this class of client (see
+ * tech spec §11 — this blocker was previously miscited as "OQ-G1"; that
+ * label has drifted/disagreed across repos and is retired as a citation,
+ * see the note in §11).
  *
- * // TODO: Replace with Helios token introspection when available (OQ-G1).
+ * // TODO: Replace with real token introspection once a guest-client
+ * // token-issuance mechanism is defined (tech spec §11).
  */
 
 import { useCallback, useEffect } from 'react';
@@ -63,19 +70,24 @@ export function useProgressSync({ restUrl: _restUrl }) {
     }, []);
 
     /**
-     * Network sync is intentionally disabled until OQ-G1 (Helios auth) is
-     * resolved. Events accumulate in the IndexedDB outbox on a best-effort
-     * basis (writes may fail if storage is unavailable; failures are logged).
+     * Network sync is intentionally disabled until a guest-client
+     * token-issuance mechanism is defined (tech spec §11). Events accumulate
+     * in the IndexedDB outbox on a best-effort basis (writes may fail if
+     * storage is unavailable; failures are logged).
      *
-     * // TODO: Replace with Helios token introspection when available (OQ-G1).
+     * // TODO: Replace with real token introspection once a guest-client
+     * // token-issuance mechanism is defined (tech spec §11).
      */
     const syncNow = useCallback(async () => {
-        /* No-op: network POST is blocked until Helios token source is approved.
-         * See OQ-G1. The IndexedDB outbox is the durable store for now. */
+        /* No-op: network POST is blocked until an approved token-issuance
+         * mechanism exists for anonymous/guest game clients. See
+         * docs/dictionary-games-tech-spec.md §11. The IndexedDB outbox is
+         * the durable store for now. */
     }, []);
 
     /* Re-attempt sync on reconnect — currently a no-op; wired up for when
-     * OQ-G1 is resolved so the listener is already in place. */
+     * the guest-client token-issuance blocker (tech spec §11) is resolved so
+     * the listener is already in place. */
     useEffect(() => {
         const handler = () => syncNow();
         window.addEventListener('online', handler);

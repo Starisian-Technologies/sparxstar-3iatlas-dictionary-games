@@ -33,87 +33,45 @@ the dictionary API client. Extracted from `sparxstar-3iatlas-dictionary`. It is
 a **pure consumer** of the dictionary REST API. It contains no WordPress code,
 no PHP, and no server-side logic. See `ROLE.md` for the full boundary.
 
-### Repo structure
+### Repo structure, API constraints, auth model, and data model
 
-```
-src/
-  index.jsx                  — public exports (components, hooks, API client)
-  constants.js               — PRODUCTION_GAMES set
-  components/
-    GameShell.jsx            — top-level orchestrator (setup → playing → complete)
-    AccessoryBar.jsx         — Mandinka special-character insertion bar (floating)
-    SessionComplete.jsx      — post-session summary screen
-    games/
-      ListenWrite.jsx        — Game 4.1 — audio plays, player writes the word
-      ArrangeWord.jsx        — Game 4.2 — scrambled tiles, tap to build the word
-      MeaningMatch.jsx       — Game 4.3 — headword shown, choose correct meaning
-      CompleteSentence.jsx   — Game 4.4 — fill the blank in a real example sentence
-      LetterReveal.jsx       — Game 4.5 — blank tiles, tap letters to uncover
-      DomainFlash.jsx        — Game 4.6 — flashcards through a semantic domain
-  hooks/
-    idbUtils.js              — IndexedDB open/get/put/getAll/delete helpers
-    useGameSet.js            — fetches /game-set with 3-day IndexedDB cache
-    useGameSession.js        — session persistence, result recording, XP tracking
-    useProgressSync.js       — progress event outbox (network sync pending OQ-G1)
-  api/
-    DictionaryApiClient.js   — ES module REST client factory
-    dictionary-api.d.ts      — TypeScript type contract (mirror of server contract)
-```
+`docs/dictionary-games-tech-spec.md` is the single canonical technical
+specification for this repo and is kept current against the source code. See:
 
-### Dictionary API constraints
+- §4 (Architecture) for the runtime layering / file-by-file repo structure.
+- §6a (Consumed REST endpoints) for the dictionary API constraints
+  (`lang_source`-only strict-mode consumer, `/wordlist` API-key-only, etc).
+- §9 (Security and privacy) for the full authentication model (Webster page
+  token vs consumer API key).
+- §5 (Data model) for the `aiwa-games-db` IndexedDB stores and the
+  production-vs-recognition game split (`PRODUCTION_GAMES`).
 
-The game service is a **strict-mode consumer**:
-
-- Always sends `lang_source` — never uses `mode=ecology` or `mode=cross_language`.
-- `/game-set` returns only primary-language entries for the requested language.
-- `/wordlist` requires a consumer **API key** (`X-Api-Key`), not an ephemeral
-  page token; sending a page token returns 403.
-- `mode=strict` is the default and the only mode the game layer uses.
-
-### Authentication model (Webster)
-
-| Credential           | Header         | Scope                                |
-| -------------------- | -------------- | ------------------------------------ |
-| Ephemeral page token | `X-Page-Token` | Browse endpoints, same-origin apps   |
-| Consumer API key     | `X-Api-Key`    | All endpoints, including `/wordlist` |
-
-- `GET /page-token` requires no credentials.
-- Keys are stored SHA-256 hashed server-side — plaintext is never stored.
-- Never use `is_user_logged_in()` or WordPress auth on game endpoints.
-
-### IndexedDB stores (`aiwa-games-db`)
-
-| Store             | Purpose                                                                    |
-| ----------------- | -------------------------------------------------------------------------- |
-| `game-sets`       | Cached `/game-set` responses (3-day TTL, keyed by lang+domain+limit+audio) |
-| `game-sessions`   | Current session state (persisted on every word result)                     |
-| `progress-outbox` | Event queue for Helios sync (pending OQ-G1)                                |
-| `learned-words`   | Cumulative set of UUIDs the player has correctly written                   |
-
-### Production vs recognition games
-
-`PRODUCTION_GAMES = { listen_write, arrange_word, complete_sentence, letter_reveal }`.
-Only production games contribute to the "words you can write" count shown in
-`SessionComplete`. `DomainFlash` and `MeaningMatch` are recognition-only — they
-do not increment `learnedCount`.
+Do not restate that content here — update the tech spec instead so there is
+one place to keep in sync with the code.
 
 ### Security rules (hard requirements)
 
-- `useProgressSync.syncNow()` MUST NOT post to the network until the
-  Game-Service intake spec is committed and **OQ-G1** is resolved with an
-  approved token-delivery mechanism. It is a deliberate no-op today.
+- `useProgressSync.syncNow()` MUST NOT post to the network until a
+  Game-Service intake spec is committed and a token-issuance mechanism exists
+  for anonymous/guest game clients. It is a deliberate no-op today. See
+  `docs/dictionary-games-tech-spec.md` §11 for the current blocker stated in
+  plain language — it is **no longer cited via the "OQ-G1" label**. That
+  label drifted and now disagrees between this repo and
+  `sparxstar-3iatlas-dictionary`'s governance docs, and no GitHub Issue backs
+  it in either repo, so it has been retired as a citation (see the note in
+  §11 for the full explanation).
 - Do not read Helios Bearer tokens from `localStorage` (XSS exposure).
 - Never emit `Access-Control-Allow-Credentials`.
 - WordPress authentication is prohibited for all game endpoints.
 
 ### Open questions tracked by this repo
 
-| ID    | Description                                                                 |
-| ----- | --------------------------------------------------------------------------- |
-| OQ-G1 | Helios token source — `useProgressSync.syncNow()` is a no-op until resolved |
-| OQ-G3 | LetterReveal pottery animation — emoji placeholder, awaiting approved asset |
-| OQ-G4 | DomainFlash "I knew it" hook confirmation                                   |
-| OQ-I3 | Guest device progress merge — blocked on Game Service intake spec           |
+| ID    | Description                                                                                                                                                                                              |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| —     | Progress-sync token-issuance blocker for anonymous/guest game clients — stated in plain language in `docs/dictionary-games-tech-spec.md` §11. No longer cited as "OQ-G1"; see the retirement note there. |
+| OQ-G3 | LetterReveal pottery animation — emoji placeholder, awaiting approved asset                                                                                                                              |
+| OQ-G4 | DomainFlash "I knew it" hook confirmation                                                                                                                                                                |
+| OQ-I3 | Guest device progress merge — blocked on Game Service intake spec                                                                                                                                        |
 
 ### Upstream spec references (in the dictionary repo)
 
