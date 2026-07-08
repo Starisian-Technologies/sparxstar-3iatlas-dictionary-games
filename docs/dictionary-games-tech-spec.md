@@ -121,7 +121,7 @@ page-token refresh and retry.
 `GameShell`, `AccessoryBar`, `SessionComplete`, `useGameSet`, `useGameSession`,
 `useProgressSync`, `openDB`, `getRecord`, `putRecord`, `getAllRecords`,
 `deleteRecord`, `PRODUCTION_GAMES`, `createDictionaryApiClient`,
-`DictionaryApiError`, `buildGameServiceEvent`, `buildGameServiceBatch`.
+`DictionaryApiError`.
 
 `<GameShell />` props: `restUrl`, `language`, `sourceLanguage`, `languages`,
 `onSourceLanguage`, `onBrowse`.
@@ -176,43 +176,44 @@ page-token refresh and retry.
   exported. The package builds to a UMD bundle. Verified against the live
   `sparxstar-3iatlas-dictionary` REST controller: all 9 consumed routes, auth
   headers, and response envelopes match.
-- Progress sync is intentionally local-only (`syncNow()` is a no-op). The
-  outbound wire payload for when it isn't is already implemented —
-  `api/gameServiceEventContract.js` (`buildGameServiceEvent`,
-  `buildGameServiceBatch`) builds the frozen event schema from
-  3IATLAS-IDENTITY-AND-GAME-SERVICES-DECISION-v1.0 §3
-  (`word_uuid, game_type, outcome, attempts, xp, timestamp,
-production_vs_recognition`) from a completed `useGameSession` session. It is
-  pure (no network I/O) and unit-tested; `syncNow()` does not call it yet —
-  wiring it into a real POST needs the suite Identity Service (§9) or an
-  approved interim token source, neither of which exists yet.
+- Progress sync is intentionally local-only (`syncNow()` is a no-op). There is
+  no wire schema to build against yet: 3IATLAS-IDENTITY-AND-GAME-SERVICES-DECISION-v1.0
+  §3 describes a "frozen event schema" for the eventual Game Service POST, but
+  its citation (`GH-ISSUE-dictionary-PR59-fixes.md` "Fix 2") does not exist in
+  this repo or in `sparxstar-3iatlas-dictionary` — treat that schema as
+  unverified, not as a real contract, until GAME-SERVICE-INTAKE-SPEC-v1.0 is
+  actually written. The only verified precedent is the ad-hoc shape
+  `addEvent()` already writes to the outbox (`{ type, word_uuid?, game?,
+domain?, ts }`), which mirrors what the retired WordPress `/progress/sync`
+  handler used to parse.
 - LetterReveal uses an emoji placeholder for the pottery animation pending an
   approved asset (OQ-G3).
-- Tests: `api/gameServiceEventContract.test.js` (jest + jsdom). No other test
-  suites committed yet.
+- Tests: `jest --passWithNoTests` (no test suites committed yet).
 - Styling assumes the host supplies the Tailwind runtime; no Tailwind/PostCSS
   config or CSS entry is vendored in this repo.
 
 ## 11. Open items
 
-| ID    | Description                                                                                               |
-| ----- | --------------------------------------------------------------------------------------------------------- |
-| —     | Suite Identity Service (token source) does not exist yet — network progress sync blocked until it does    |
-| OQ-G3 | LetterReveal pottery animation — awaiting AIWA-approved asset                                             |
-| OQ-G4 | DomainFlash "I knew it" hook confirmation                                                                 |
-| OQ-I3 | Guest device progress merge — blocked on Game-Service-Intake spec (unwritten)                             |
-| —     | Expand test suite beyond the event-contract builder; confirm Tailwind/PostCSS ownership (host vs package) |
-| —     | Reconcile npm package name (`sparxstar-rlc-games`) with repo name if desired                              |
+| ID    | Description                                                                                                                                                                                              |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| —     | Suite Identity Service (token source) does not exist yet — network progress sync blocked until it does                                                                                                   |
+| —     | GAME-SERVICE-INTAKE-SPEC-v1.0 (wire schema for the eventual Game Service POST) is unwritten — do not build a payload builder against the decision doc's §3 schema, whose citation does not exist in-repo |
+| OQ-G3 | LetterReveal pottery animation — awaiting AIWA-approved asset                                                                                                                                            |
+| OQ-G4 | DomainFlash "I knew it" hook confirmation                                                                                                                                                                |
+| OQ-I3 | Guest device progress merge — blocked on Game-Service-Intake spec (unwritten)                                                                                                                            |
+| —     | Add a test suite; confirm Tailwind/PostCSS ownership (host vs package)                                                                                                                                   |
+| —     | Reconcile npm package name (`sparxstar-rlc-games`) with repo name if desired                                                                                                                             |
 
 ## 12. Changelog
 
 - **2026-07-08** — Verified the REST client against the live dictionary
-  controller (no drift found). Added `api/gameServiceEventContract.js`
-  (`buildGameServiceEvent`, `buildGameServiceBatch`) — a pure, unit-tested
-  builder for the frozen Game Service event schema
-  (3IATLAS-IDENTITY-AND-GAME-SERVICES-DECISION-v1.0 §3), exported from
-  `src/index.jsx`, so `syncNow()` has a ready drop-in once a suite token
-  source exists. No network behavior changed; `syncNow()` remains a no-op.
+  controller (no drift found); confirmed GraphQL is a content-authoring
+  surface only, not a games consumer. A payload builder for the decision
+  doc's §3 "frozen event schema" was drafted and then removed from this
+  branch after discovering its citation (`GH-ISSUE-dictionary-PR59-fixes.md`
+  "Fix 2") does not exist in either this repo or the dictionary repo — see
+  the note in §10/§11. No network behavior changed; `syncNow()` remains a
+  no-op with no wire-schema assumption baked in.
 - **2026-06-29** — Initial spec. Repo restructured out of the extracted archive
   into a standard layout; governance, standards workflow, and AI-agent
   instruction files added.
