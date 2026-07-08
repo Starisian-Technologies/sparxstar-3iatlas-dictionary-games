@@ -182,7 +182,7 @@ page-token refresh and retry.
   `buildGameServiceBatch`) builds the frozen event schema from
   3IATLAS-IDENTITY-AND-GAME-SERVICES-DECISION-v1.0 §3
   (`word_uuid, game_type, outcome, attempts, xp, timestamp,
-  production_vs_recognition`) from a completed `useGameSession` session. It is
+production_vs_recognition`) from a completed `useGameSession` session. It is
   pure (no network I/O) and unit-tested; `syncNow()` does not call it yet —
   wiring it into a real POST needs the suite Identity Service (§9) or an
   approved interim token source, neither of which exists yet.
@@ -195,14 +195,14 @@ page-token refresh and retry.
 
 ## 11. Open items
 
-| ID    | Description                                                                  |
-| ----- | ---------------------------------------------------------------------------- |
-| —     | Suite Identity Service (token source) does not exist yet — network progress sync blocked until it does |
-| OQ-G3 | LetterReveal pottery animation — awaiting AIWA-approved asset                |
-| OQ-G4 | DomainFlash "I knew it" hook confirmation                                    |
-| OQ-I3 | Guest device progress merge — blocked on Game-Service-Intake spec (unwritten) |
+| ID    | Description                                                                                               |
+| ----- | --------------------------------------------------------------------------------------------------------- |
+| —     | Suite Identity Service (token source) does not exist yet — network progress sync blocked until it does    |
+| OQ-G3 | LetterReveal pottery animation — awaiting AIWA-approved asset                                             |
+| OQ-G4 | DomainFlash "I knew it" hook confirmation                                                                 |
+| OQ-I3 | Guest device progress merge — blocked on Game-Service-Intake spec (unwritten)                             |
 | —     | Expand test suite beyond the event-contract builder; confirm Tailwind/PostCSS ownership (host vs package) |
-| —     | Reconcile npm package name (`sparxstar-rlc-games`) with repo name if desired |
+| —     | Reconcile npm package name (`sparxstar-rlc-games`) with repo name if desired                              |
 
 ## 12. Changelog
 

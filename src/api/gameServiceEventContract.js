@@ -25,6 +25,26 @@
 
 import { PRODUCTION_GAMES } from '../constants.js';
 
+/** Required numeric/string fields on a well-formed result entry. */
+const REQUIRED_STRING_FIELDS = ['wordUuid', 'outcome'];
+const REQUIRED_NUMBER_FIELDS = ['attempts', 'xp', 'ts'];
+
+/**
+ * True if `result` has every field buildGameServiceEvent needs, correctly typed.
+ *
+ * @param {unknown} result
+ * @returns {boolean}
+ */
+function isWellFormedResult(result) {
+    if (!result || typeof result !== 'object') return false;
+    return (
+        REQUIRED_STRING_FIELDS.every((f) => typeof result[f] === 'string' && result[f] !== '') &&
+        REQUIRED_NUMBER_FIELDS.every(
+            (f) => typeof result[f] === 'number' && Number.isFinite(result[f])
+        )
+    );
+}
+
 /**
  * Build one frozen-schema event from a useGameSession result entry.
  *
@@ -33,11 +53,19 @@ import { PRODUCTION_GAMES } from '../constants.js';
  * `production_vs_recognition` here is this repo's best-effort field name and
  * may need to be renamed once that spec lands.
  *
+ * Malformed input (e.g. a corrupted IndexedDB record) returns null rather
+ * than throwing — consistent with this package's existing IndexedDB/session
+ * code (useGameSession, idbUtils), which degrades gracefully instead of
+ * crashing the game loop on bad local storage state. Callers filter nulls
+ * (see buildGameServiceBatch).
+ *
  * @param {{ wordUuid: string, outcome: 'correct'|'learning', attempts: number, xp: number, ts: number }} result
  * @param {string} gameType
- * @returns {{ word_uuid: string, game_type: string, outcome: string, attempts: number, xp: number, timestamp: number, production_vs_recognition: 'production'|'recognition' }}
+ * @returns {{ word_uuid: string, game_type: string, outcome: string, attempts: number, xp: number, timestamp: number, production_vs_recognition: 'production'|'recognition' }|null}
  */
 export function buildGameServiceEvent(result, gameType) {
+    if (!isWellFormedResult(result) || typeof gameType !== 'string' || gameType === '') return null;
+
     return {
         word_uuid: result.wordUuid,
         game_type: gameType,
@@ -51,12 +79,16 @@ export function buildGameServiceEvent(result, gameType) {
 
 /**
  * Build the full frozen-schema event batch for a session, ready to POST as
- * `{ events: [...] }` once the Game Service auth path exists.
+ * `{ events: [...] }` once the Game Service auth path exists. Malformed
+ * per-word entries are dropped rather than propagating a crash or a
+ * broken payload into that future POST.
  *
  * @param {{ gameType: string, results: Array<{ wordUuid: string, outcome: string, attempts: number, xp: number, ts: number }> }|null} session
  * @returns {object[]}
  */
 export function buildGameServiceBatch(session) {
     if (!session || !Array.isArray(session.results)) return [];
-    return session.results.map((result) => buildGameServiceEvent(result, session.gameType));
+    return session.results
+        .map((result) => buildGameServiceEvent(result, session.gameType))
+        .filter(Boolean);
 }

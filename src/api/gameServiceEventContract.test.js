@@ -2,7 +2,13 @@ import { buildGameServiceEvent, buildGameServiceBatch } from './gameServiceEvent
 
 describe('buildGameServiceEvent', () => {
     it('maps a production-game result onto the frozen schema', () => {
-        const result = { wordUuid: 'uuid-1', outcome: 'correct', attempts: 1, xp: 10, ts: 1720000000000 };
+        const result = {
+            wordUuid: 'uuid-1',
+            outcome: 'correct',
+            attempts: 1,
+            xp: 10,
+            ts: 1720000000000,
+        };
 
         expect(buildGameServiceEvent(result, 'listen_write')).toEqual({
             word_uuid: 'uuid-1',
@@ -16,7 +22,13 @@ describe('buildGameServiceEvent', () => {
     });
 
     it('flags recognition-only games (meaning_match, domain_flash)', () => {
-        const result = { wordUuid: 'uuid-2', outcome: 'correct', attempts: 1, xp: 5, ts: 1720000001000 };
+        const result = {
+            wordUuid: 'uuid-2',
+            outcome: 'correct',
+            attempts: 1,
+            xp: 5,
+            ts: 1720000001000,
+        };
 
         expect(buildGameServiceEvent(result, 'meaning_match').production_vs_recognition).toBe(
             'recognition'
@@ -27,12 +39,39 @@ describe('buildGameServiceEvent', () => {
     });
 
     it('flags all four production games correctly', () => {
-        for (const gameType of ['listen_write', 'arrange_word', 'complete_sentence', 'letter_reveal']) {
+        for (const gameType of [
+            'listen_write',
+            'arrange_word',
+            'complete_sentence',
+            'letter_reveal',
+        ]) {
             const result = { wordUuid: 'uuid-3', outcome: 'learning', attempts: 3, xp: 0, ts: 1 };
             expect(buildGameServiceEvent(result, gameType).production_vs_recognition).toBe(
                 'production'
             );
         }
+    });
+
+    it('returns null for a null or non-object result', () => {
+        expect(buildGameServiceEvent(null, 'listen_write')).toBeNull();
+        expect(buildGameServiceEvent(undefined, 'listen_write')).toBeNull();
+        expect(buildGameServiceEvent('not-an-object', 'listen_write')).toBeNull();
+    });
+
+    it('returns null when a required field is missing or mistyped', () => {
+        const base = { wordUuid: 'uuid-4', outcome: 'correct', attempts: 1, xp: 10, ts: 1 };
+        expect(buildGameServiceEvent({ ...base, wordUuid: undefined }, 'listen_write')).toBeNull();
+        expect(buildGameServiceEvent({ ...base, wordUuid: '' }, 'listen_write')).toBeNull();
+        expect(buildGameServiceEvent({ ...base, outcome: undefined }, 'listen_write')).toBeNull();
+        expect(buildGameServiceEvent({ ...base, attempts: '1' }, 'listen_write')).toBeNull();
+        expect(buildGameServiceEvent({ ...base, xp: NaN }, 'listen_write')).toBeNull();
+        expect(buildGameServiceEvent({ ...base, ts: undefined }, 'listen_write')).toBeNull();
+    });
+
+    it('returns null for a missing or empty gameType', () => {
+        const result = { wordUuid: 'uuid-5', outcome: 'correct', attempts: 1, xp: 10, ts: 1 };
+        expect(buildGameServiceEvent(result, '')).toBeNull();
+        expect(buildGameServiceEvent(result, undefined)).toBeNull();
     });
 });
 
@@ -49,8 +88,16 @@ describe('buildGameServiceBatch', () => {
         const batch = buildGameServiceBatch(session);
 
         expect(batch).toHaveLength(2);
-        expect(batch[0]).toMatchObject({ word_uuid: 'a', game_type: 'arrange_word', outcome: 'correct' });
-        expect(batch[1]).toMatchObject({ word_uuid: 'b', game_type: 'arrange_word', outcome: 'learning' });
+        expect(batch[0]).toMatchObject({
+            word_uuid: 'a',
+            game_type: 'arrange_word',
+            outcome: 'correct',
+        });
+        expect(batch[1]).toMatchObject({
+            word_uuid: 'b',
+            game_type: 'arrange_word',
+            outcome: 'learning',
+        });
     });
 
     it('returns an empty array for a null session', () => {
@@ -59,10 +106,29 @@ describe('buildGameServiceBatch', () => {
 
     it('returns an empty array when results is missing or not an array', () => {
         expect(buildGameServiceBatch({ gameType: 'listen_write' })).toEqual([]);
-        expect(buildGameServiceBatch({ gameType: 'listen_write', results: 'not-an-array' })).toEqual([]);
+        expect(
+            buildGameServiceBatch({ gameType: 'listen_write', results: 'not-an-array' })
+        ).toEqual([]);
     });
 
     it('returns an empty array for a session with no recorded results yet', () => {
         expect(buildGameServiceBatch({ gameType: 'listen_write', results: [] })).toEqual([]);
+    });
+
+    it('drops malformed entries instead of propagating null into the batch', () => {
+        const session = {
+            gameType: 'arrange_word',
+            results: [
+                { wordUuid: 'a', outcome: 'correct', attempts: 1, xp: 10, ts: 1 },
+                { wordUuid: undefined, outcome: 'correct', attempts: 1, xp: 10, ts: 2 },
+                null,
+                { wordUuid: 'b', outcome: 'learning', attempts: 3, xp: 0, ts: 3 },
+            ],
+        };
+
+        const batch = buildGameServiceBatch(session);
+
+        expect(batch).toHaveLength(2);
+        expect(batch.map((e) => e.word_uuid)).toEqual(['a', 'b']);
     });
 });
