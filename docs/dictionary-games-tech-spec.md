@@ -41,10 +41,13 @@ This repo follows the platform governance snapshot at
 read-only, auto-synced). Cite ADRs and invariants by number from that snapshot;
 do not restate them here.
 
-Open questions this repo is bound by: **OQ-G1** (Helios token source), **OQ-G3**
-(LetterReveal asset), **OQ-G4** (DomainFlash confirmation hook), **OQ-I3** (guest
-device progress merge). Upstream dictionary specs are referenced (not vendored)
-in `AGENTS.md`.
+Open questions this repo is bound by: **OQ-G3** (LetterReveal asset), **OQ-G4**
+(DomainFlash confirmation hook), **OQ-I3** (guest device progress merge).
+(OQ-G1 — Helios token source for the retired WordPress `/progress/sync` route
+— was closed May 2026 per 3IATLAS-IDENTITY-AND-GAME-SERVICES-DECISION-v1.0
+§5/§7; it does not describe the current network-sync blocker, which is
+untracked by any open-question ID — see §10/§11.) Upstream dictionary specs
+are referenced (not vendored) in `AGENTS.md`.
 
 ## 4. Architecture
 
@@ -69,7 +72,7 @@ in `AGENTS.md`.
 - **Data flow:** `GameShell` → `useGameSet` → REST `/game-set` (cached in
   IndexedDB, 3-day TTL) → game components → `useGameSession.recordResult` →
   IndexedDB session + learned-words → `useProgressSync.addEvent` → outbox
-  (network sync deferred to OQ-G1).
+  (network sync deferred — no token source or intake spec exists yet, §10/§11).
 
 ## 5. Data model
 
@@ -137,7 +140,8 @@ page-token refresh and retry.
 - **Persistence seam:** `idbUtils` is the only IndexedDB access point; all hooks
   go through it and degrade gracefully when IndexedDB is unavailable.
 - **Progress seam (deferred):** `useProgressSync.addEvent` writes to the outbox;
-  `syncNow()` is the future network seam, gated on OQ-G1.
+  `syncNow()` is the future network seam, gated on a suite token source and an
+  actual Game-Service-Intake spec (neither exists yet — §10/§11).
 - **Global config seam:** `window.sparxstarDictionarySettings` (`restUrl`,
   `pageToken`) is read/refreshed by `useGameSet`.
 
@@ -206,6 +210,11 @@ domain?, ts }`), which mirrors what the retired WordPress `/progress/sync`
 
 ## 12. Changelog
 
+- **2026-07-09** — Doc-consistency fixes from PR review: removed the stale
+  **OQ-G1** citations in §3/§4/§7 (OQ-G1 was closed May 2026 and only ever
+  covered WP-nonce auth for the retired `/progress/sync` route — it does not
+  describe the current network-sync blocker) and fixed a Markdown list
+  continuation-line indentation bug in §10. No code or behavior changes.
 - **2026-07-08** — Verified the REST client against the live dictionary
   controller (no drift found); confirmed GraphQL is a content-authoring
   surface only, not a games consumer. A payload builder for the decision
