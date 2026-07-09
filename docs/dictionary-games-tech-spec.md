@@ -76,11 +76,15 @@ as a citation. Upstream dictionary specs are referenced (not vendored) in
   **zero current connection to any game-node-engine backend.** There is no
   socket.io/WebSocket client anywhere in `src/`, no HTTP client calling a
   node-engine or Game Service endpoint, and no such package in the
-  `dependencies`/`devDependencies` of `package.json` (§8). The only network
-  client in this repo, `DictionaryApiClient.js`, talks exclusively to the
-  separate Webster Dictionary WordPress REST API (`sparxstar/v1/dictionary`,
-  §6a) for word lists and lookups — this is unrelated to game state or
-  backend authority. Game session state, scoring, and progress are computed
+  `dependencies`/`devDependencies` of `package.json` (§8). All network traffic
+  in this repo — whether through `DictionaryApiClient.js` or the direct
+  `fetch()` calls in `useGameSet.js` (`/page-token`, `/game-set`) and
+  `GameShell.jsx` (`/domains`) — targets the same separate Webster Dictionary
+  WordPress REST API (`sparxstar/v1/dictionary`, §6a) for word lists and
+  lookups; there is no single funneling client class, but there is also no
+  destination other than that one REST namespace, and none of it is related
+  to game state or backend authority. Game session state, scoring, and
+  progress are computed
   and persisted **entirely client-side in IndexedDB** (§5); there is no
   backend game-state authority today. `sparxstar-3iatlas-rlc-node-engine` is
   the _intended_ future Game Service for this layer (per that repo's own
