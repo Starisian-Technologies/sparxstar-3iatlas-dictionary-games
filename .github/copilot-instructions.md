@@ -19,7 +19,9 @@ Flag any PR that:
 
 - Contradicts an ADR or invariant
 - Assumes an answer to an open question (OQ in OPEN state) — in particular,
-  OQ-G1 (Helios token source), OQ-G3, OQ-G4, OQ-I3
+  the progress-sync guest-client token-issuance blocker (see
+  `docs/dictionary-games-tech-spec.md` §11; no longer cited as "OQ-G1" — see
+  the retirement note there), OQ-G3, OQ-G4, OQ-I3
 - Violates a coding standard
 - Changes a contract interface without updating the README
 - Changes behavior that contradicts the product spec
@@ -28,8 +30,10 @@ Flag any PR that:
 
 ## Repo-specific red lines (this is a browser-only consumer package)
 
-- Network progress sync (`useProgressSync.syncNow()`) shipping before OQ-G1 is
-  resolved — it must remain a no-op.
+- Network progress sync (`useProgressSync.syncNow()`) shipping before an
+  approved token-issuance mechanism exists for anonymous/guest game clients
+  (see `docs/dictionary-games-tech-spec.md` §11 — no longer cited as
+  "OQ-G1") — it must remain a no-op.
 - Reading a Helios Bearer token from `localStorage` (XSS exposure).
 - Emitting `Access-Control-Allow-Credentials`.
 - Any WordPress / PHP / server-side auth on game endpoints
