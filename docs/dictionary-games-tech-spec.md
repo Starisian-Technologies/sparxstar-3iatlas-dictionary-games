@@ -205,10 +205,22 @@ page-token refresh and retry.
 ## 10. Current state
 
 - Six games, the shell, hooks, IndexedDB layer, and REST client are present and
-  exported. The package builds to a UMD bundle.
+  exported. The package builds to a UMD bundle. Verified against the live
+  `sparxstar-3iatlas-dictionary` REST controller: all 9 consumed routes, auth
+  headers, and response envelopes match; confirmed GraphQL (WPGraphQL + SCF)
+  in that repo is a content-authoring surface only, not something this
+  package needs to call.
 - Progress sync is intentionally local-only (`syncNow()` is a no-op) pending
   resolution of the guest-client token-issuance blocker described in §11
-  (previously miscited as "OQ-G1"; see the note there).
+  (previously miscited as "OQ-G1"; see the note there). There is also no wire
+  schema to build against yet — a "frozen event schema" mentioned in
+  3IATLAS-IDENTITY-AND-GAME-SERVICES-DECISION-v1.0 §3 cites a document,
+  `GH-ISSUE-dictionary-PR59-fixes.md` ("Fix 2"), that does not exist in this
+  repo or in `sparxstar-3iatlas-dictionary`; treat that schema as unverified
+  until GAME-SERVICE-INTAKE-SPEC-v1.0 is actually written. The only verified
+  precedent is the ad-hoc shape `addEvent()` already writes to the outbox
+  (`{ type, word_uuid?, game?, domain?, ts }`), which mirrors what the
+  retired WordPress `/progress/sync` handler used to parse.
 - LetterReveal uses an emoji placeholder for the pottery animation pending an
   approved asset (OQ-G3).
 - Tests: `jest --passWithNoTests` (no test suites committed yet).
@@ -220,6 +232,7 @@ page-token refresh and retry.
 | ID    | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | —     | **Progress-sync blocker (see note below — no longer cited as "OQ-G1"):** anonymous/guest game clients have no token-issuance mechanism that fits. Not a Helios JWT (that's for authenticated staff/platform users). Not an RLC-style session-participant token (that requires an active RLC session, which this games layer doesn't have). Network sync cannot ship until the node engine (or another game service) defines an intake mechanism for this class of client. |
+| —     | GAME-SERVICE-INTAKE-SPEC-v1.0 (wire schema for the eventual Game Service POST) is unwritten — do not build a payload builder against the decision doc's §3 "frozen event schema"; its citation (`GH-ISSUE-dictionary-PR59-fixes.md` "Fix 2") does not exist in-repo, so there is nothing to build against yet                                                                                                                                                             |
 | OQ-G3 | LetterReveal pottery animation — awaiting AIWA-approved asset                                                                                                                                                                                                                                                                                                                                                                                                             |
 | OQ-G4 | DomainFlash "I knew it" hook confirmation                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | OQ-I3 | Guest device progress merge — blocked on Game Service intake spec                                                                                                                                                                                                                                                                                                                                                                                                         |
@@ -242,17 +255,29 @@ page-token refresh and retry.
 > authoritative source (this repo's own
 > `.github/instructions/governance/README.md` confirms the governance sync
 > has never run here, so there is no compiled `open-questions.compiled.md` to
-> resolve the drift against either). Rather than continue citing a label
-> whose meaning has drifted and disagrees across repos, this document states
-> the blocker directly, in plain language, in the table above. The "OQ-G1"
-> number is retired as a citation — this note preserves the historical fact
-> that it once existed, but it should not be treated as a stable or
-> resolvable cross-repo pointer going forward. Do not reintroduce "OQ-G1" as
-> a citation without first establishing a single authoritative source for it
-> across both repos.
+> resolve the drift against either). The "frozen event schema" cited
+> alongside OQ-G1 in the decision doc has the identical problem: its named
+> source, `GH-ISSUE-dictionary-PR59-fixes.md` "Fix 2," does not exist in
+> either repo either — the same pattern of an unverifiable citation, not a
+> coincidence. Rather than continue citing a label whose meaning has drifted
+> and disagrees across repos, this document states the blocker directly, in
+> plain language, in the table above. The "OQ-G1" number is retired as a
+> citation — this note preserves the historical fact that it once existed,
+> but it should not be treated as a stable or resolvable cross-repo pointer
+> going forward. Do not reintroduce "OQ-G1" as a citation without first
+> establishing a single authoritative source for it across both repos.
 
 ## 12. Changelog
 
+- **2026-07-09** — Verified the REST client against the live dictionary
+  controller (no drift found) and confirmed GraphQL is a content-authoring
+  surface only, not a games consumer. A payload builder for the decision
+  doc's §3 "frozen event schema" was drafted and then removed after
+  discovering its citation (`GH-ISSUE-dictionary-PR59-fixes.md` "Fix 2")
+  does not exist in either this repo or the dictionary repo — folded into
+  the note below rather than kept as a separate finding. No network
+  behavior changed; `syncNow()` remains a no-op with no wire-schema
+  assumption baked in.
 - **2026-07-08** — Documentation consolidation and correction pass. Re-verified
   every claim in this document against current source code
   (`useProgressSync.js`, `useGameSet.js`, `useGameSession.js`,

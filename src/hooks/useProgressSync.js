@@ -6,12 +6,21 @@
  * staff/platform users; not an RLC-style session-participant token — that
  * requires an active RLC session, which this games layer doesn't have). See
  * docs/dictionary-games-tech-spec.md §11 for the current blocker in plain
- * language. syncNow() is intentionally a no-op for the network POST until
- * that is resolved. Events are written to the outbox on a best-effort basis
- * — writes may fail if IndexedDB is unavailable (e.g. quota exceeded or
- * private-browsing mode), and failures are logged as warnings.
+ * language, including why the "frozen event schema" once cited in
+ * 3IATLAS-IDENTITY-AND-GAME-SERVICES-DECISION-v1.0 §3 is also unverified (its
+ * source, GH-ISSUE-dictionary-PR59-fixes.md "Fix 2," does not exist in
+ * either repo). syncNow() is intentionally a no-op for the network POST
+ * until that is resolved. Events are written to the outbox on a best-effort
+ * basis — writes may fail if IndexedDB is unavailable (e.g. quota exceeded
+ * or private-browsing mode), and failures are logged as warnings.
  *
- * SECURITY NOTE: Reading a Helios Bearer token from localStorage would
+ * The event shape actually written to the outbox today mirrors what this
+ * repo's old WordPress `/progress/sync` handler parsed (now retired, but
+ * its shape is the only verified precedent):
+ * `{ type, word_uuid?, game?, domain?, ts }`. This is not a contract —
+ * just the ad-hoc shape addEvent() calls happen to use below.
+ *
+ * SECURITY NOTE: Reading a suite/Helios Bearer token from localStorage would
  * expose it to any injected script (XSS), undermining the platform's
  * token-integrity guarantee. The network sync path MUST NOT ship until an
  * approved token-delivery mechanism exists for this class of client (see
