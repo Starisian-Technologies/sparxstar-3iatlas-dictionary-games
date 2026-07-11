@@ -42,12 +42,11 @@ read-only, auto-synced). Cite ADRs and invariants by number from that snapshot;
 do not restate them here.
 
 Open questions this repo is bound by: **OQ-G3** (LetterReveal asset), **OQ-G4**
-(DomainFlash confirmation hook), **OQ-I3** (guest device progress merge).
-(OQ-G1 — Helios token source for the retired WordPress `/progress/sync` route
-— was closed May 2026 per 3IATLAS-IDENTITY-AND-GAME-SERVICES-DECISION-v1.0
-§5/§7; it does not describe the current network-sync blocker, which is
-untracked by any open-question ID — see §10/§11.) Upstream dictionary specs
-are referenced (not vendored) in `AGENTS.md`.
+(DomainFlash confirmation hook), **OQ-I3** (guest device progress merge). The
+progress-sync blocker previously cited here as "OQ-G1" is now stated directly,
+in plain language, in §11 — see the note there for why that label is retired
+as a citation. Upstream dictionary specs are referenced (not vendored) in
+`AGENTS.md`.
 
 ## 4. Architecture
 
@@ -72,7 +71,25 @@ are referenced (not vendored) in `AGENTS.md`.
 - **Data flow:** `GameShell` → `useGameSet` → REST `/game-set` (cached in
   IndexedDB, 3-day TTL) → game components → `useGameSession.recordResult` →
   IndexedDB session + learned-words → `useProgressSync.addEvent` → outbox
-  (network sync deferred — no token source or intake spec exists yet, §10/§11).
+  (network sync deferred — see §11 for the current blocker).
+- **Backend connectivity (verified against current code):** this repo has
+  **zero current connection to any game-node-engine backend.** There is no
+  socket.io/WebSocket client anywhere in `src/`, no HTTP client calling a
+  node-engine or Game Service endpoint, and no such package in the
+  `dependencies`/`devDependencies` of `package.json` (§8). All network traffic
+  in this repo — whether through `DictionaryApiClient.js` or the direct
+  `fetch()` calls in `useGameSet.js` (`/page-token`, `/game-set`) and
+  `GameShell.jsx` (`/domains`) — targets the same separate Webster Dictionary
+  WordPress REST API (`sparxstar/v1/dictionary`, §6a) for word lists and
+  lookups; there is no single funneling client class, but there is also no
+  destination other than that one REST namespace, and none of it is related
+  to game state or backend authority. Game session state, scoring, and
+  progress are computed
+  and persisted **entirely client-side in IndexedDB** (§5); there is no
+  backend game-state authority today. `sparxstar-3iatlas-rlc-node-engine` is
+  the _intended_ future Game Service for this layer (per that repo's own
+  planning docs), but that integration (tenant API, device-identity tokens,
+  event contract) is not yet implemented on either side — see §8 and §11.
 
 ## 5. Data model
 
@@ -140,8 +157,9 @@ page-token refresh and retry.
 - **Persistence seam:** `idbUtils` is the only IndexedDB access point; all hooks
   go through it and degrade gracefully when IndexedDB is unavailable.
 - **Progress seam (deferred):** `useProgressSync.addEvent` writes to the outbox;
-  `syncNow()` is the future network seam, gated on a suite token source and an
-  actual Game-Service-Intake spec (neither exists yet — §10/§11).
+  `syncNow()` is the future network seam, gated on the guest-client
+  token-issuance blocker described in §11 (previously miscited here as
+  "OQ-G1"; see the note in §11).
 - **Global config seam:** `window.sparxstarDictionarySettings` (`restUrl`,
   `pageToken`) is read/refreshed by `useGameSet`.
 
@@ -154,6 +172,15 @@ page-token refresh and retry.
   `terser-webpack-plugin`, PostCSS, Tailwind 3, ESLint 8, Prettier 3, Jest 29.
 - **Upstream service:** the 3iAtlas dictionary REST API
   (`sparxstar-3iatlas-dictionary`).
+- **Intended future game service (not yet a dependency):**
+  `sparxstar-3iatlas-rlc-node-engine` has, per its own planning docs, named
+  itself as the intended eventual "Game Service" that would receive progress
+  events from this layer. That integration — a tenant API, device-identity
+  tokens, and an event contract — is explicitly **not yet implemented** on
+  either side. This repo currently has no runtime or build dependency on the
+  node engine: no HTTP/WebSocket client, no npm package, nothing in the
+  `dependencies`/`devDependencies` list above. Treat this as a description of
+  intended direction, not current integration status.
 - **No PHP / Composer dependencies** — this repo pulls no private Composer
   packages, so it needs no composer-resolver auth in CI.
 
@@ -164,9 +191,10 @@ page-token refresh and retry.
   `/wordlist`. `GET /page-token` is unauthenticated. Keys are SHA-256 hashed
   server-side.
 - **Hard red lines:**
-    - `syncNow()` must not post to the network until the Game-Service intake spec
-      is committed and a suite token source (Identity Service, per
-      3IATLAS-IDENTITY-AND-GAME-SERVICES-DECISION-v1.0 §2) exists.
+    - `syncNow()` must not post to the network until a Game-Service intake spec
+      is committed _and_ a token-issuance mechanism exists for anonymous/guest
+      game clients (see §11 for the current blocker in plain language; this is
+      no longer cited via the retired "OQ-G1" label).
     - Never read Helios Bearer tokens from `localStorage` (XSS exposure).
     - Never emit `Access-Control-Allow-Credentials`.
     - No WordPress auth (`is_user_logged_in()`) on game endpoints.
@@ -179,17 +207,20 @@ page-token refresh and retry.
 - Six games, the shell, hooks, IndexedDB layer, and REST client are present and
   exported. The package builds to a UMD bundle. Verified against the live
   `sparxstar-3iatlas-dictionary` REST controller: all 9 consumed routes, auth
-  headers, and response envelopes match.
-- Progress sync is intentionally local-only (`syncNow()` is a no-op). There is
-  no wire schema to build against yet: 3IATLAS-IDENTITY-AND-GAME-SERVICES-DECISION-v1.0
-  §3 describes a "frozen event schema" for the eventual Game Service POST, but
-  its citation (`GH-ISSUE-dictionary-PR59-fixes.md` "Fix 2") does not exist in
-  this repo or in `sparxstar-3iatlas-dictionary` — treat that schema as
-  unverified, not as a real contract, until GAME-SERVICE-INTAKE-SPEC-v1.0 is
-  actually written. The only verified precedent is the ad-hoc shape
-  `addEvent()` already writes to the outbox (`{ type, word_uuid?, game?,
-domain?, ts }`), which mirrors what the retired WordPress `/progress/sync`
-  handler used to parse.
+  headers, and response envelopes match; confirmed GraphQL (WPGraphQL + SCF)
+  in that repo is a content-authoring surface only, not something this
+  package needs to call.
+- Progress sync is intentionally local-only (`syncNow()` is a no-op) pending
+  resolution of the guest-client token-issuance blocker described in §11
+  (previously miscited as "OQ-G1"; see the note there). There is also no wire
+  schema to build against yet — a "frozen event schema" mentioned in
+  3IATLAS-IDENTITY-AND-GAME-SERVICES-DECISION-v1.0 §3 cites a document,
+  `GH-ISSUE-dictionary-PR59-fixes.md` ("Fix 2"), that does not exist in this
+  repo or in `sparxstar-3iatlas-dictionary`; treat that schema as unverified
+  until GAME-SERVICE-INTAKE-SPEC-v1.0 is actually written. The only verified
+  precedent is the ad-hoc shape `addEvent()` already writes to the outbox
+  (`{ type, word_uuid?, game?, domain?, ts }`), which mirrors what the
+  retired WordPress `/progress/sync` handler used to parse.
 - LetterReveal uses an emoji placeholder for the pottery animation pending an
   approved asset (OQ-G3).
 - Tests: `jest --passWithNoTests` (no test suites committed yet).
@@ -198,31 +229,73 @@ domain?, ts }`), which mirrors what the retired WordPress `/progress/sync`
 
 ## 11. Open items
 
-| ID    | Description                                                                                                                                                                                              |
-| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| —     | Suite Identity Service (token source) does not exist yet — network progress sync blocked until it does                                                                                                   |
-| —     | GAME-SERVICE-INTAKE-SPEC-v1.0 (wire schema for the eventual Game Service POST) is unwritten — do not build a payload builder against the decision doc's §3 schema, whose citation does not exist in-repo |
-| OQ-G3 | LetterReveal pottery animation — awaiting AIWA-approved asset                                                                                                                                            |
-| OQ-G4 | DomainFlash "I knew it" hook confirmation                                                                                                                                                                |
-| OQ-I3 | Guest device progress merge — blocked on Game-Service-Intake spec (unwritten)                                                                                                                            |
-| —     | Add a test suite; confirm Tailwind/PostCSS ownership (host vs package)                                                                                                                                   |
-| —     | Reconcile npm package name (`sparxstar-rlc-games`) with repo name if desired                                                                                                                             |
+| ID    | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| —     | **Progress-sync blocker (see note below — no longer cited as "OQ-G1"):** anonymous/guest game clients have no token-issuance mechanism that fits. Not a Helios JWT (that's for authenticated staff/platform users). Not an RLC-style session-participant token (that requires an active RLC session, which this games layer doesn't have). Network sync cannot ship until the node engine (or another game service) defines an intake mechanism for this class of client. |
+| —     | GAME-SERVICE-INTAKE-SPEC-v1.0 (wire schema for the eventual Game Service POST) is unwritten — do not build a payload builder against the decision doc's §3 "frozen event schema"; its citation (`GH-ISSUE-dictionary-PR59-fixes.md` "Fix 2") does not exist in-repo, so there is nothing to build against yet                                                                                                                                                             |
+| OQ-G3 | LetterReveal pottery animation — awaiting AIWA-approved asset                                                                                                                                                                                                                                                                                                                                                                                                             |
+| OQ-G4 | DomainFlash "I knew it" hook confirmation                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| OQ-I3 | Guest device progress merge — blocked on Game Service intake spec                                                                                                                                                                                                                                                                                                                                                                                                         |
+| —     | Add a test suite; confirm Tailwind/PostCSS ownership (host vs package)                                                                                                                                                                                                                                                                                                                                                                                                    |
+| —     | Reconcile npm package name (`sparxstar-rlc-games`) with repo name if desired                                                                                                                                                                                                                                                                                                                                                                                              |
+
+> **Note on the retired "OQ-G1" citation.** Earlier versions of this
+> document, `AGENTS.md`, and `.github/copilot-instructions.md` cited "OQ-G1"
+> as the tracking ID for the progress-sync blocker above, described as
+> "Helios token source." Cross-repo verification found that "OQ-G1" is not a
+> stable, agreed-upon reference: the sibling `sparxstar-3iatlas-dictionary`
+> repo's own governance docs describe an OQ-G1 that was later redefined and
+> marked "closed (historical)" — but that redefined/closed version concerns
+> WP-nonce authentication for a since-deprecated `/progress/sync` endpoint, a
+> _different_ sub-question from what this document originally meant by
+> OQ-G1. (The Helios-token-source framing above is actually closer to the
+> _original_, pre-drift meaning of OQ-G1 in that repo's oldest spec doc, not
+> the redefined-then-closed version.) No GitHub Issue object backs "OQ-G1" in
+> either repo — it exists only as markdown-table bookkeeping, with no single
+> authoritative source (this repo's own
+> `.github/instructions/governance/README.md` confirms the governance sync
+> has never run here, so there is no compiled `open-questions.compiled.md` to
+> resolve the drift against either). The "frozen event schema" cited
+> alongside OQ-G1 in the decision doc has the identical problem: its named
+> source, `GH-ISSUE-dictionary-PR59-fixes.md` "Fix 2," does not exist in
+> either repo either — the same pattern of an unverifiable citation, not a
+> coincidence. Rather than continue citing a label whose meaning has drifted
+> and disagrees across repos, this document states the blocker directly, in
+> plain language, in the table above. The "OQ-G1" number is retired as a
+> citation — this note preserves the historical fact that it once existed,
+> but it should not be treated as a stable or resolvable cross-repo pointer
+> going forward. Do not reintroduce "OQ-G1" as a citation without first
+> establishing a single authoritative source for it across both repos.
 
 ## 12. Changelog
 
-- **2026-07-09** — Doc-consistency fixes from PR review: removed the stale
-  **OQ-G1** citations in §3/§4/§7 (OQ-G1 was closed May 2026 and only ever
-  covered WP-nonce auth for the retired `/progress/sync` route — it does not
-  describe the current network-sync blocker) and fixed a Markdown list
-  continuation-line indentation bug in §10. No code or behavior changes.
-- **2026-07-08** — Verified the REST client against the live dictionary
-  controller (no drift found); confirmed GraphQL is a content-authoring
+- **2026-07-09** — Verified the REST client against the live dictionary
+  controller (no drift found) and confirmed GraphQL is a content-authoring
   surface only, not a games consumer. A payload builder for the decision
-  doc's §3 "frozen event schema" was drafted and then removed from this
-  branch after discovering its citation (`GH-ISSUE-dictionary-PR59-fixes.md`
-  "Fix 2") does not exist in either this repo or the dictionary repo — see
-  the note in §10/§11. No network behavior changed; `syncNow()` remains a
-  no-op with no wire-schema assumption baked in.
+  doc's §3 "frozen event schema" was drafted and then removed after
+  discovering its citation (`GH-ISSUE-dictionary-PR59-fixes.md` "Fix 2")
+  does not exist in either this repo or the dictionary repo — folded into
+  the note below rather than kept as a separate finding. No network
+  behavior changed; `syncNow()` remains a no-op with no wire-schema
+  assumption baked in.
+- **2026-07-08** — Documentation consolidation and correction pass. Re-verified
+  every claim in this document against current source code
+  (`useProgressSync.js`, `useGameSet.js`, `useGameSession.js`,
+  `DictionaryApiClient.js`, `package.json`) — no code-behavior drift found.
+  Made explicit (§4, §8) that this repo has zero current connection to any
+  game-node-engine backend (no socket.io/WebSocket client, no HTTP client
+  calling a node-engine service, no such dependency in `package.json`) and
+  that `sparxstar-3iatlas-rlc-node-engine` is only an _intended_ future Game
+  Service, not yet integrated on either side. **Corrected the "OQ-G1"
+  citation** (§3, §4, §7, §9, §10, §11): retired it as an unreliable
+  cross-repo reference — the label has drifted and now disagrees between
+  this repo and `sparxstar-3iatlas-dictionary`'s governance docs, and no
+  GitHub Issue backs it in either repo — and replaced every reference to it
+  with a plain-language statement of the actual progress-sync blocker (§11),
+  plus a note explaining the retirement. Trimmed duplicated
+  architecture/technical content in `AGENTS.md` and `ROLE.md` to short
+  pointers back to this document, which remains the single canonical
+  technical specification for this repo.
 - **2026-06-29** — Initial spec. Repo restructured out of the extracted archive
   into a standard layout; governance, standards workflow, and AI-agent
   instruction files added.
