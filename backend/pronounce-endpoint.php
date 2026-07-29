@@ -286,8 +286,15 @@ function sparxstar_synthesise_twi( string $word, string $model_path, string $mod
 
 	// Write the headword as UTF-8 to stdin and close the pipe so Piper
 	// sees EOF and begins synthesis. No shell involvement — safe.
-	$written = fwrite( $pipes[0], $word );
+	$bytes_written = fwrite( $pipes[0], $word );
 	fclose( $pipes[0] );
+	
+	if ( $bytes_written === false ) {
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+		proc_close( $proc );
+		return new WP_Error( 'piper_input_failed', 'Failed to write input to Piper process.', [ 'status' => 500 ] );
+	}
 
 	if ( $written === false ) {
 		fclose( $pipes[1] );
