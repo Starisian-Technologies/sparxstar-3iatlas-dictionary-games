@@ -52,15 +52,15 @@ src/
 ## Game Shell Usage
 
 ```jsx
-import { GameShell } from "sparxstar-rlc-games";
+import { GameShell } from 'sparxstar-rlc-games';
 
 <GameShell
-  restUrl="https://example.com/wp-json/sparxstar/v1/dictionary"
-  language="en"
-  sourceLanguage="mandinka"
-  languages={[{ slug: "mandinka", name: "Mandinka" }]}
-  onSourceLanguage={(slug) => setSourceLanguage(slug)}
-  onBrowse={() => setTab("browse")}
+    restUrl="https://example.com/wp-json/sparxstar/v1/dictionary"
+    language="en"
+    sourceLanguage="mandinka"
+    languages={[{ slug: 'mandinka', name: 'Mandinka' }]}
+    onSourceLanguage={(slug) => setSourceLanguage(slug)}
+    onBrowse={() => setTab('browse')}
 />;
 ```
 
@@ -69,20 +69,20 @@ import { GameShell } from "sparxstar-rlc-games";
 ## API Client Usage
 
 ```js
-import { createDictionaryApiClient } from "sparxstar-rlc-games";
+import { createDictionaryApiClient } from 'sparxstar-rlc-games';
 
 // Consumer API key (WordPad, S2S, server-side):
 const dict = createDictionaryApiClient({
-  baseUrl: "https://example.com/wp-json/sparxstar/v1/dictionary",
-  apiKey: "sk_...",
+    baseUrl: 'https://example.com/wp-json/sparxstar/v1/dictionary',
+    apiKey: 'sk_...',
 });
-const wordlist = await dict.wordlist({ lang_source: "mandinka" });
+const wordlist = await dict.wordlist({ lang_source: 'mandinka' });
 
 // Same-origin browser app (page-token flow):
 const dict = createDictionaryApiClient({ baseUrl: restUrl });
 const tokenRes = await dict.getPageToken();
 dict.setPageToken(tokenRes.data.token);
-const result = await dict.lookup({ slug: "my-word" });
+const result = await dict.lookup({ slug: 'my-word' });
 ```
 
 ---
