@@ -158,6 +158,7 @@ describe('useProgressSync — authenticated sync path (suite token injected)', (
                     event_type: 'game.result',
                     payload: {
                         game_type: 'dictionary_quiz',
+                        word_uuid: 'w1',
                         outcome: 'correct',
                         attempts: 1,
                         time_ms: 1200,
@@ -167,6 +168,7 @@ describe('useProgressSync — authenticated sync path (suite token injected)', (
                     event_type: 'game.result',
                     payload: {
                         game_type: 'dictionary_quiz',
+                        word_uuid: 'w2',
                         outcome: 'learning',
                         attempts: 5,
                         time_ms: 4300,

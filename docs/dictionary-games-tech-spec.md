@@ -243,12 +243,15 @@ pre-Phase-3 behavior — see §4 and §11.
 - **Privacy:** all learner progress is local (IndexedDB) until a host app
   wires up both `engineUrl` and a real `getSuiteToken`. No PII is collected
   by this layer. The local `game_result` outbox event carries `word_uuid`,
-  `game`, `outcome`, `attempts`, `time_ms` — but `word_uuid` is **not**
-  forwarded to the engine: `syncNow()`'s wire translation sends only
-  `game_type`, `outcome`, `attempts`, `time_ms` (matching the engine's
-  `GameResultInput` contract, which has no `word_uuid` field — settlement
-  is per-`game_type`/`outcome`, not per-word). No learner-identifying data
-  leaves the device either way.
+  `game`, `outcome`, `attempts`, `time_ms`; `syncNow()`'s wire translation
+  forwards `word_uuid` too, alongside `game_type`, `outcome`, `attempts`,
+  `time_ms`. The engine's `GameResultInput` contract
+  (`src/services/gameResults.ts`, node-engine repo) has no `word_uuid`
+  field today — settlement is per `game_type`/`outcome`, not per word — so
+  it's currently ignored on arrival, not stored or acted on; sent anyway so
+  it's available if per-word attribution is added engine-side later.
+  `word_uuid` is an opaque dictionary-entry identifier, not learner
+  identity — no learner-identifying data leaves the device either way.
 
 ## 10. Current state
 

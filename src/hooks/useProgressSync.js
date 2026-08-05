@@ -170,10 +170,18 @@ export function useProgressSync({ restUrl: _restUrl, engineUrl, getSuiteToken })
                 // manifest is registered under (GAME-SERVICE-INTAKE-SPEC-v1.0 OQ-4) —
                 // not a per-minigame id. e.game (e.g. 'listen_write') stays local.
                 game_type: 'dictionary_quiz',
+                // Not part of the engine's GameResultInput contract today
+                // (src/services/gameResults.ts in the node-engine repo has
+                // no word_uuid field; settlement is per game_type/outcome,
+                // not per word) — sent anyway per review feedback so the
+                // engine has it available if per-word attribution is added
+                // later. Harmless either way: an unread field is ignored,
+                // not rejected.
                 word_uuid: e.word_uuid,
                 outcome: e.outcome,
                 attempts: e.attempts,
                 time_ms: e.time_ms,
+            },
         }));
 
         let result;
