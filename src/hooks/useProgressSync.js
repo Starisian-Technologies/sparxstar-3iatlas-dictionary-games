@@ -152,10 +152,10 @@ export function useProgressSync({ restUrl: _restUrl, engineUrl, getSuiteToken })
                 // manifest is registered under (GAME-SERVICE-INTAKE-SPEC-v1.0 OQ-4) —
                 // not a per-minigame id. e.game (e.g. 'listen_write') stays local.
                 game_type: 'dictionary_quiz',
+                word_uuid: e.word_uuid,
                 outcome: e.outcome,
                 attempts: e.attempts,
                 time_ms: e.time_ms,
-            },
         }));
 
         let result;
