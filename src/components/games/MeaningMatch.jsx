@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 
 /**
  * MeaningMatch — Game 4.3
@@ -9,7 +9,7 @@ import React, { useState, useMemo } from 'react';
  * Props:
  *   words      {Array}    Game-set words
  *   language   {string}   'en' | 'fr'
- *   onResult   {Function} (uuid, outcome, attempts, xp) => void
+ *   onResult   {Function} (uuid, outcome, attempts, xp, timeMs) => void
  *   onComplete {Function} () => void
  */
 export default function MeaningMatch({ words, language, onResult, onComplete }) {
@@ -17,6 +17,7 @@ export default function MeaningMatch({ words, language, onResult, onComplete }) 
     const [index, setIndex] = useState(0);
     const [selected, setSelected] = useState(null);
     const [revealed, setRevealed] = useState(false);
+    const wordStartRef = useRef(Date.now());
 
     const word = deck[index];
 
@@ -24,6 +25,11 @@ export default function MeaningMatch({ words, language, onResult, onComplete }) 
         () => (word ? buildOptions(deck, index, language) : []),
         [word, index, deck, language]
     );
+
+    /* Reset the per-word timer whenever a new word is presented. */
+    useEffect(() => {
+        wordStartRef.current = Date.now();
+    }, [index]);
 
     if (!word) return null;
 
@@ -33,7 +39,7 @@ export default function MeaningMatch({ words, language, onResult, onComplete }) 
         setRevealed(true);
 
         const isCorrect = options[idx].isCorrect;
-        onResult(word.uuid, isCorrect ? 'correct' : 'learning', 1, isCorrect ? 5 : 0);
+        onResult(word.uuid, isCorrect ? 'correct' : 'learning', 1, isCorrect ? 5 : 0, Date.now() - wordStartRef.current);
 
         setTimeout(() => {
             if (index + 1 >= deck.length) {

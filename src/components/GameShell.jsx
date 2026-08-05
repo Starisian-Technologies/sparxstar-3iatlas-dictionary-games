@@ -90,12 +90,16 @@ const setLocalStorageItem = (key, value) => {
  * post-session summary. Integrates with useGameSession and useProgressSync.
  *
  * Props:
- *   restUrl        {string}   Base REST URL
+ *   restUrl        {string}   Base REST URL (dictionary's own REST API)
  *   language       {string}   'en' | 'fr'
  *   sourceLanguage {string|null}  Currently selected language slug
  *   languages      {Array}    Available languages from /languages
  *   onSourceLanguage {Function}  (slug) => void — change source language
  *   onBrowse         {Function}  () => void — switch to Browse tab
+ *   engineUrl        {string}   [optional] RLC node-engine base URL, for
+ *     progress sync (GAME-SERVICE-INTAKE-SPEC-v1.0). Omit to stay local-only.
+ *   getSuiteToken     {Function} [optional] () => (string|null|Promise<string|null>).
+ *     Bearer token for the engine's batch endpoint. Omit to stay local-only.
  */
 export default function GameShell({
     restUrl,
@@ -104,6 +108,8 @@ export default function GameShell({
     languages,
     onSourceLanguage,
     onBrowse,
+    engineUrl,
+    getSuiteToken,
 }) {
     /* ── Setup state ── */
     const [selectedDomain, setSelectedDomain] = useState('');
@@ -135,7 +141,7 @@ export default function GameShell({
     const { session, learnedCount, initSession, recordResult, completeSession, clearSession } =
         useGameSession();
 
-    const { addEvent, syncNow } = useProgressSync({ restUrl });
+    const { addEvent, syncNow } = useProgressSync({ restUrl, engineUrl, getSuiteToken });
 
     /*
      * Promise chain for result writes.  Game components call onResult() synchronously
@@ -261,7 +267,7 @@ export default function GameShell({
 
     /* ── Handle a single word result from any game component ── */
     const handleWordResult = useCallback(
-        (uuid, outcome, attempts, xp) => {
+        (uuid, outcome, attempts, xp, timeMs) => {
             /*
              * Chain onto pendingResultRef so that back-to-back synchronous calls
              * (e.g. the final onResult + onComplete pair in DomainFlash) are serialized.
@@ -269,7 +275,24 @@ export default function GameShell({
              */
             pendingResultRef.current = pendingResultRef.current
                 .then(async () => {
-                    const updatedSession = await recordResult(uuid, outcome, attempts, xp);
+                    const updatedSession = await recordResult(uuid, outcome, attempts, xp, timeMs);
+
+                    /* Report every outcome (not just correct) toward the engine's
+                     * game.result intake (GAME-SERVICE-INTAKE-SPEC-v1.0 OQ-3) — the
+                     * dictionaryQuizManifest scores correct/incorrect/learning, so
+                     * this must carry all three, with attempts and time_ms, to be a
+                     * conformant GameResultEvent. This is a distinct local event type
+                     * from the aiwa_game_* bonus signals below: only this one is
+                     * translated to game.result by syncNow(); the bonus signals stay
+                     * local-only (the engine has no scoring path for them). */
+                    await addEvent({
+                        type: 'game_result',
+                        word_uuid: uuid,
+                        game: selectedGame,
+                        outcome,
+                        attempts,
+                        time_ms: typeof timeMs === 'number' ? timeMs : 0,
+                    });
 
                     /* Queue MyCred events. */
                     if (outcome === 'correct') {

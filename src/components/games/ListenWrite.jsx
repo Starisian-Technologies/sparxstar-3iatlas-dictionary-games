@@ -13,7 +13,7 @@ import AccessoryBar from '../AccessoryBar.jsx';
  * Props:
  *   words      {Array}    Game-set words
  *   language   {string}   'en' | 'fr'
- *   onResult   {Function} (uuid, outcome, attempts, xp) => void
+ *   onResult   {Function} (uuid, outcome, attempts, xp, timeMs) => void
  *   onComplete {Function} () => void
  */
 export default function ListenWrite({ words, language, onResult, onComplete }) {
@@ -26,8 +26,14 @@ export default function ListenWrite({ words, language, onResult, onComplete }) {
     const [status, setStatus] = useState(null); /* 'correct' | 'wrong' | null */
     const inputRef = useRef(null);
     const audioRef = useRef(null);
+    const wordStartRef = useRef(Date.now());
 
     const word = deck[index];
+
+    /* Reset the per-word timer whenever a new word is presented. */
+    useEffect(() => {
+        wordStartRef.current = Date.now();
+    }, [index]);
 
     /* Auto-play audio when word changes — reuse a single Audio instance. */
     useEffect(() => {
@@ -85,7 +91,7 @@ export default function ListenWrite({ words, language, onResult, onComplete }) {
 
         if (isCorrect) {
             setStatus('correct');
-            onResult(word.uuid, 'correct', attempts + 1, 10);
+            onResult(word.uuid, 'correct', attempts + 1, 10, Date.now() - wordStartRef.current);
             setTimeout(() => advance(), 1500);
         } else {
             const nextAttempts = attempts + 1;
@@ -95,7 +101,7 @@ export default function ListenWrite({ words, language, onResult, onComplete }) {
             if (nextAttempts >= 3) {
                 setRevealed(target);
                 setStatus('wrong');
-                onResult(word.uuid, 'learning', 3, 0);
+                onResult(word.uuid, 'learning', 3, 0, Date.now() - wordStartRef.current);
                 setTimeout(() => advance(), 2000);
             } else {
                 setRevealed(target.substring(0, nextAttempts));

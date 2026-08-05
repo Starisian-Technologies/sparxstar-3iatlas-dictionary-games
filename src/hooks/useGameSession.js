@@ -135,14 +135,22 @@ export function useGameSession() {
      * @param {'correct'|'learning'} outcome
      * @param {number} attempts  Number of attempts (1, 2, or 3)
      * @param {number} xp        XP earned for this word
+     * @param {number} timeMs    Elapsed time from word shown to result, in ms
      */
 
     const recordResult = useCallback(
-        async (wordUuid, outcome, attempts, xp) => {
+        async (wordUuid, outcome, attempts, xp, timeMs) => {
             const current = sessionRef.current;
             if (!current) return null;
 
-            const result = { wordUuid, outcome, attempts, xp, ts: Date.now() };
+            const result = {
+                wordUuid,
+                outcome,
+                attempts,
+                xp,
+                timeMs: typeof timeMs === 'number' ? timeMs : 0,
+                ts: Date.now(),
+            };
             const updated = {
                 ...current,
                 currentIndex: current.currentIndex + 1,

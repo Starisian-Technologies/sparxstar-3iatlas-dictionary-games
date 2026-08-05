@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import AccessoryBar from '../AccessoryBar.jsx';
 
 /**
@@ -15,7 +15,7 @@ import AccessoryBar from '../AccessoryBar.jsx';
  * Props:
  *   words      {Array}    Game-set words
  *   language   {string}   'en' | 'fr'
- *   onResult   {Function} (uuid, outcome, attempts, xp) => void
+ *   onResult   {Function} (uuid, outcome, attempts, xp, timeMs) => void
  *   onComplete {Function} () => void
  */
 export default function CompleteSentence({ words, language, onResult, onComplete }) {
@@ -42,8 +42,14 @@ export default function CompleteSentence({ words, language, onResult, onComplete
     const [revealed, setRevealed] = useState('');
     const [status, setStatus] = useState(null); /* 'correct' | 'wrong' | null */
     const inputRef = useRef(null);
+    const wordStartRef = useRef(Date.now());
 
     const word = deck[index];
+
+    /* Reset the per-word timer whenever a new word is presented. */
+    useEffect(() => {
+        wordStartRef.current = Date.now();
+    }, [index]);
 
     if (deck.length === 0) {
         return (
@@ -90,7 +96,7 @@ export default function CompleteSentence({ words, language, onResult, onComplete
 
         if (isCorrect) {
             setStatus('correct');
-            onResult(word.uuid, 'correct', attempts + 1, 8);
+            onResult(word.uuid, 'correct', attempts + 1, 8, Date.now() - wordStartRef.current);
             setTimeout(() => advance(), 1500);
         } else {
             const nextAttempts = attempts + 1;
@@ -101,7 +107,7 @@ export default function CompleteSentence({ words, language, onResult, onComplete
                 /* Show full word and advance. */
                 setRevealed(target);
                 setStatus('wrong');
-                onResult(word.uuid, 'learning', 3, 0);
+                onResult(word.uuid, 'learning', 3, 0, Date.now() - wordStartRef.current);
                 setTimeout(() => advance(), 2000);
             } else {
                 /* Reveal next letter. */

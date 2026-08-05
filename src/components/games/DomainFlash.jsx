@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Volume2 } from 'lucide-react';
 
 /**
@@ -11,7 +11,7 @@ import { Volume2 } from 'lucide-react';
  * Props:
  *   words      {Array}    Game-set words
  *   language   {string}   'en' | 'fr'
- *   onResult   {Function} (uuid, outcome, attempts, xp) => void
+ *   onResult   {Function} (uuid, outcome, attempts, xp, timeMs) => void
  *   onComplete {Function} () => void
  */
 export default function DomainFlash({ words, language, onResult, onComplete }) {
@@ -19,8 +19,15 @@ export default function DomainFlash({ words, language, onResult, onComplete }) {
     const [index, setIndex] = useState(0);
     const [flipped, setFlipped] = useState(false);
     const [answered, setAnswered] = useState(false);
+    const wordStartRef = useRef(Date.now());
 
     const word = deck[index];
+
+    /* Reset the per-word timer whenever a new card is shown. */
+    useEffect(() => {
+        wordStartRef.current = Date.now();
+    }, [index]);
+
     if (!word) return null;
 
     const meaning =
@@ -31,14 +38,14 @@ export default function DomainFlash({ words, language, onResult, onComplete }) {
     const handleKnew = () => {
         if (answered) return;
         setAnswered(true);
-        onResult(word.uuid, 'correct', 1, 5);
+        onResult(word.uuid, 'correct', 1, 5, Date.now() - wordStartRef.current);
         next();
     };
 
     const handleLearning = () => {
         if (answered) return;
         setAnswered(true);
-        onResult(word.uuid, 'learning', 1, 0);
+        onResult(word.uuid, 'learning', 1, 0, Date.now() - wordStartRef.current);
         next();
     };
 
