@@ -140,7 +140,25 @@ export function useProgressSync({ restUrl: _restUrl, engineUrl, getSuiteToken })
 
         const outbox =
             typeof getRecord === 'function' ? await getRecord('progress-outbox', OUTBOX_KEY) : null;
-        const events = outbox?.events ?? [];
+        const rawEvents = outbox?.events ?? [];
+
+        // Defensive backfill: every event queued by addEvent() carries an
+        // event_id, but an outbox written by an older build (before event_id
+        // existed) could still have entries without one. Assign and persist
+        // ids for those before building the batch — otherwise multiple
+        // undefined event_ids collapse into one Set entry below, and an
+        // accepted event could accidentally drain unrelated queued events
+        // that happen to also be missing an id.
+        let backfilled = false;
+        const events = rawEvents.map((e) => {
+            if (e.event_id) return e;
+            backfilled = true;
+            return { ...e, event_id: genEventId() };
+        });
+        if (backfilled && typeof putRecord === 'function') {
+            await putRecord('progress-outbox', { key: OUTBOX_KEY, events });
+        }
+
         const pending = events.filter((e) => e.type === 'game_result').slice(0, BATCH_MAX);
         if (pending.length === 0) return;
 

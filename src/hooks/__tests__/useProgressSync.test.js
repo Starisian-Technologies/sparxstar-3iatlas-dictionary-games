@@ -262,4 +262,59 @@ describe('useProgressSync — authenticated sync path (suite token injected)', (
         expect(window.fetch).not.toHaveBeenCalled();
         expect(getOutbox()).toHaveLength(1);
     });
+
+    it('backfills a missing event_id on a legacy outbox entry before sending, so undefined ids never collide in the drain logic', async () => {
+        const getSuiteToken = jest.fn().mockResolvedValue('fake-participant-token');
+
+        // Simulate an outbox written by a build that predates event_id
+        // (bypasses addEvent, which always assigns one) alongside a normal,
+        // already-id'd entry.
+        idbUtils.__store.set('progress-outbox:progress-outbox:pending', {
+            key: 'progress-outbox:pending',
+            events: [
+                {
+                    type: 'game_result',
+                    word_uuid: 'legacy',
+                    game: 'listen_write',
+                    outcome: 'correct',
+                    attempts: 1,
+                    time_ms: 800,
+                    ts: Date.now(),
+                },
+                {
+                    event_id: 'evt-has-id',
+                    type: 'game_result',
+                    word_uuid: 'w2',
+                    game: 'listen_write',
+                    outcome: 'learning',
+                    attempts: 3,
+                    time_ms: 2000,
+                    ts: Date.now(),
+                },
+            ],
+        });
+
+        window.fetch.mockResolvedValue({
+            ok: true,
+            json: async () => ({ accepted: 2, failed: [] }),
+        });
+
+        const { result } = renderHook(useProgressSync, {
+            restUrl: 'https://dict.example/wp-json/sparxstar/v1/dictionary',
+            engineUrl: 'https://engine.example/api/v1',
+            getSuiteToken,
+        });
+
+        await result.current.syncNow();
+
+        const [, opts] = window.fetch.mock.calls[0];
+        const body = JSON.parse(opts.body);
+        expect(body.events).toHaveLength(2);
+        const ids = body.events.map((e) => e.event_id);
+        expect(ids.every((id) => typeof id === 'string' && id.length > 0)).toBe(true);
+        expect(new Set(ids).size).toBe(2); // no collision between the backfilled id and the real one
+
+        // Both accepted -> both drained.
+        expect(getOutbox()).toHaveLength(0);
+    });
 });

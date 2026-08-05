@@ -242,8 +242,13 @@ pre-Phase-3 behavior — see §4 and §11.
       `/game-set` fetch is untouched by Phase 3 and stays that way.
 - **Privacy:** all learner progress is local (IndexedDB) until a host app
   wires up both `engineUrl` and a real `getSuiteToken`. No PII is collected
-  by this layer; `game.result` events carry only `word_uuid`, `outcome`,
-  `attempts`, `time_ms` — no learner-identifying data.
+  by this layer. The local `game_result` outbox event carries `word_uuid`,
+  `game`, `outcome`, `attempts`, `time_ms` — but `word_uuid` is **not**
+  forwarded to the engine: `syncNow()`'s wire translation sends only
+  `game_type`, `outcome`, `attempts`, `time_ms` (matching the engine's
+  `GameResultInput` contract, which has no `word_uuid` field — settlement
+  is per-`game_type`/`outcome`, not per-word). No learner-identifying data
+  leaves the device either way.
 
 ## 10. Current state
 
