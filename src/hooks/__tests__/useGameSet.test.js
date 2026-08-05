@@ -18,12 +18,14 @@ jest.mock('../idbUtils.js', () => ({
 }));
 
 beforeEach(() => {
-    global.fetch = jest.fn();
-    window.fetch = global.fetch;
+    // window.fetch and global.fetch are the same object reference under
+    // this repo's jest-environment-jsdom setup (verified empirically) —
+    // mocking window.fetch is sufficient and keeps this browser-env file
+    // eslint-clean (no `node` env, so a bare `global` reference doesn't lint).
+    window.fetch = jest.fn();
 });
 
 afterEach(() => {
-    delete global.fetch;
     delete window.fetch;
 });
 
