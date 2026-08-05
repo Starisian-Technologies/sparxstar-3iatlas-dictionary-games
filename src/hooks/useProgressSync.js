@@ -40,12 +40,11 @@
  * responsibility; how it stores/mints the token is out of scope here.
  */
 
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { getRecord, putRecord } from './idbUtils.js';
 
 const OUTBOX_KEY = 'progress-outbox:pending';
 const BATCH_MAX = 200; // matches the engine's `batch_too_large` cap (spec §3.10)
-let addEventQueue = Promise.resolve();
 
 function genEventId() {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -70,6 +69,10 @@ function genEventId() {
  * @returns {{ addEvent: Function, syncNow: Function, syncing: boolean }}
  */
 export function useProgressSync({ restUrl: _restUrl, engineUrl, getSuiteToken }) {
+    /* Per-instance write queue — kept in a ref (not module scope) so two
+     * mounted hook instances never interleave each other's outbox writes. */
+    const addEventQueueRef = useRef(Promise.resolve());
+
     /**
      * Add a progress event to the outbox.
      *
@@ -101,8 +104,8 @@ export function useProgressSync({ restUrl: _restUrl, engineUrl, getSuiteToken })
             });
         };
 
-        const queuedAppend = addEventQueue.then(appendEvent, appendEvent);
-        addEventQueue = queuedAppend.catch(() => {});
+        const queuedAppend = addEventQueueRef.current.then(appendEvent, appendEvent);
+        addEventQueueRef.current = queuedAppend.catch(() => {});
         return queuedAppend;
     }, []);
 
@@ -177,16 +180,20 @@ export function useProgressSync({ restUrl: _restUrl, engineUrl, getSuiteToken })
 
         const failedIds = new Set((result?.failed ?? []).map((f) => f.event_id));
         const sentIds = new Set(pending.map((e) => e.event_id));
-        const remaining = events.filter((e) => !sentIds.has(e.event_id) || failedIds.has(e.event_id));
+        const remaining = events.filter(
+            (e) => !sentIds.has(e.event_id) || failedIds.has(e.event_id)
+        );
 
         if (typeof putRecord === 'function') {
-            await putRecord('progress-outbox', { key: OUTBOX_KEY, events: remaining }).then((ok) => {
-                if (!ok) {
-                    console.warn(
-                        'useProgressSync: could not persist post-sync outbox state; already-synced events may resend.'
-                    );
+            await putRecord('progress-outbox', { key: OUTBOX_KEY, events: remaining }).then(
+                (ok) => {
+                    if (!ok) {
+                        console.warn(
+                            'useProgressSync: could not persist post-sync outbox state; already-synced events may resend.'
+                        );
+                    }
                 }
-            });
+            );
         }
     }, [engineUrl, getSuiteToken]);
 

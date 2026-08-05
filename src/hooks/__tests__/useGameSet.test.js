@@ -34,7 +34,10 @@ describe('useGameSet — GET {restUrl}/game-set (pull-only content plane)', () =
         window.fetch.mockResolvedValue({
             ok: true,
             status: 200,
-            json: async () => ({ success: true, data: { words: [{ uuid: 'w1', headword: 'test' }] } }),
+            json: async () => ({
+                success: true,
+                data: { words: [{ uuid: 'w1', headword: 'test' }] },
+            }),
         });
 
         const { result, rerender } = renderHook(useGameSet, {
@@ -72,7 +75,11 @@ describe('useGameSet — GET {restUrl}/game-set (pull-only content plane)', () =
     it('retries once against a refreshed page token on 401, still GET-only', async () => {
         window.fetch
             .mockResolvedValueOnce({ ok: false, status: 401, json: async () => ({}) })
-            .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ data: { token: 'new-token' } }) })
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                json: async () => ({ data: { token: 'new-token' } }),
+            })
             .mockResolvedValueOnce({
                 ok: true,
                 status: 200,
@@ -92,7 +99,7 @@ describe('useGameSet — GET {restUrl}/game-set (pull-only content plane)', () =
             'https://dict.example/wp-json/sparxstar/v1/dictionary/page-token'
         );
         window.fetch.mock.calls.forEach(([, opts]) => {
-            expect((opts?.method ?? 'GET')).toBe('GET');
+            expect(opts?.method ?? 'GET').toBe('GET');
         });
     });
 });

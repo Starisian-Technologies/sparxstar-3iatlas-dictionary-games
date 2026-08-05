@@ -45,7 +45,9 @@ afterEach(() => {
 
 describe('useProgressSync — guest/local-only path', () => {
     it('does not call fetch when neither engineUrl nor getSuiteToken is supplied', async () => {
-        const { result } = renderHook(useProgressSync, { restUrl: 'https://dict.example/wp-json/sparxstar/v1/dictionary' });
+        const { result } = renderHook(useProgressSync, {
+            restUrl: 'https://dict.example/wp-json/sparxstar/v1/dictionary',
+        });
 
         await result.current.addEvent({
             type: 'game_result',
@@ -70,7 +72,14 @@ describe('useProgressSync — guest/local-only path', () => {
             getSuiteToken,
         });
 
-        await result.current.addEvent({ type: 'game_result', word_uuid: 'w1', game: 'listen_write', outcome: 'correct', attempts: 1, time_ms: 500 });
+        await result.current.addEvent({
+            type: 'game_result',
+            word_uuid: 'w1',
+            game: 'listen_write',
+            outcome: 'correct',
+            attempts: 1,
+            time_ms: 500,
+        });
         await result.current.syncNow();
 
         expect(getSuiteToken).toHaveBeenCalled();
@@ -86,7 +95,14 @@ describe('useProgressSync — guest/local-only path', () => {
             getSuiteToken,
         });
 
-        await result.current.addEvent({ type: 'game_result', word_uuid: 'w1', game: 'listen_write', outcome: 'correct', attempts: 1, time_ms: 500 });
+        await result.current.addEvent({
+            type: 'game_result',
+            word_uuid: 'w1',
+            game: 'listen_write',
+            outcome: 'correct',
+            attempts: 1,
+            time_ms: 500,
+        });
         await expect(result.current.syncNow()).resolves.toBeUndefined();
 
         expect(window.fetch).not.toHaveBeenCalled();
@@ -108,9 +124,23 @@ describe('useProgressSync — authenticated sync path (suite token injected)', (
             getSuiteToken,
         });
 
-        await result.current.addEvent({ type: 'game_result', word_uuid: 'w1', game: 'listen_write', outcome: 'correct', attempts: 1, time_ms: 1200 });
+        await result.current.addEvent({
+            type: 'game_result',
+            word_uuid: 'w1',
+            game: 'listen_write',
+            outcome: 'correct',
+            attempts: 1,
+            time_ms: 1200,
+        });
         await result.current.addEvent({ type: 'aiwa_game_streak_3' }); // bonus signal — must stay local-only
-        await result.current.addEvent({ type: 'game_result', word_uuid: 'w2', game: 'letter_reveal', outcome: 'learning', attempts: 5, time_ms: 4300 });
+        await result.current.addEvent({
+            type: 'game_result',
+            word_uuid: 'w2',
+            game: 'letter_reveal',
+            outcome: 'learning',
+            attempts: 5,
+            time_ms: 4300,
+        });
 
         await result.current.syncNow();
 
@@ -126,11 +156,21 @@ describe('useProgressSync — authenticated sync path (suite token injected)', (
             expect.arrayContaining([
                 expect.objectContaining({
                     event_type: 'game.result',
-                    payload: { game_type: 'dictionary_quiz', outcome: 'correct', attempts: 1, time_ms: 1200 },
+                    payload: {
+                        game_type: 'dictionary_quiz',
+                        outcome: 'correct',
+                        attempts: 1,
+                        time_ms: 1200,
+                    },
                 }),
                 expect.objectContaining({
                     event_type: 'game.result',
-                    payload: { game_type: 'dictionary_quiz', outcome: 'learning', attempts: 5, time_ms: 4300 },
+                    payload: {
+                        game_type: 'dictionary_quiz',
+                        outcome: 'learning',
+                        attempts: 5,
+                        time_ms: 4300,
+                    },
                 }),
             ])
         );
@@ -151,14 +191,31 @@ describe('useProgressSync — authenticated sync path (suite token injected)', (
             getSuiteToken,
         });
 
-        await result.current.addEvent({ type: 'game_result', word_uuid: 'ok', game: 'listen_write', outcome: 'correct', attempts: 1, time_ms: 900 });
-        await result.current.addEvent({ type: 'game_result', word_uuid: 'bad', game: 'listen_write', outcome: 'correct', attempts: 1, time_ms: 900 });
+        await result.current.addEvent({
+            type: 'game_result',
+            word_uuid: 'ok',
+            game: 'listen_write',
+            outcome: 'correct',
+            attempts: 1,
+            time_ms: 900,
+        });
+        await result.current.addEvent({
+            type: 'game_result',
+            word_uuid: 'bad',
+            game: 'listen_write',
+            outcome: 'correct',
+            attempts: 1,
+            time_ms: 900,
+        });
 
         const queuedIds = getOutbox().map((e) => e.event_id);
 
         window.fetch.mockResolvedValue({
             ok: true,
-            json: async () => ({ accepted: 1, failed: [{ event_id: queuedIds[1], reason: 'session_unavailable' }] }),
+            json: async () => ({
+                accepted: 1,
+                failed: [{ event_id: queuedIds[1], reason: 'session_unavailable' }],
+            }),
         });
 
         await result.current.syncNow();
@@ -176,7 +233,14 @@ describe('useProgressSync — authenticated sync path (suite token injected)', (
             getSuiteToken,
         });
 
-        await result.current.addEvent({ type: 'game_result', word_uuid: 'w1', game: 'listen_write', outcome: 'correct', attempts: 1, time_ms: 900 });
+        await result.current.addEvent({
+            type: 'game_result',
+            word_uuid: 'w1',
+            game: 'listen_write',
+            outcome: 'correct',
+            attempts: 1,
+            time_ms: 900,
+        });
         window.fetch.mockResolvedValue({ ok: false, status: 401 });
 
         await result.current.syncNow();

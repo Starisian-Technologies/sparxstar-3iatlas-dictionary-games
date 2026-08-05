@@ -39,7 +39,13 @@ export default function MeaningMatch({ words, language, onResult, onComplete }) 
         setRevealed(true);
 
         const isCorrect = options[idx].isCorrect;
-        onResult(word.uuid, isCorrect ? 'correct' : 'learning', 1, isCorrect ? 5 : 0, Date.now() - wordStartRef.current);
+        onResult(
+            word.uuid,
+            isCorrect ? 'correct' : 'learning',
+            1,
+            isCorrect ? 5 : 0,
+            Date.now() - wordStartRef.current
+        );
 
         setTimeout(() => {
             if (index + 1 >= deck.length) {
