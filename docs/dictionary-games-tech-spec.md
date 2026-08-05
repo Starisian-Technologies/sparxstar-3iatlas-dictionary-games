@@ -48,6 +48,13 @@ in plain language, in §11 — see the note there for why that label is retired
 as a citation. Upstream dictionary specs are referenced (not vendored) in
 `AGENTS.md`.
 
+This repo is also the client side of `sparxstar-3iatlas-rlc-node-engine`'s
+**GAME-SERVICE-INTAKE-SPEC-v1.0** (`.github/instructions/GAME-SERVICE-INTAKE-SPEC-v1.0.md`
+in that repo) — the engine-side spec for the `game.result` batch event this
+repo's `syncNow()` now targets (§4, §7, §11). That spec's **OQ-3** (outbox
+couldn't populate a conformant `GameResultEvent` — only reported `correct`,
+no `attempts`/`time_ms`) was resolved from this side, 2026-08-05: see §11.
+
 ## 4. Architecture
 
 - **Build:** webpack 5, single entry `src/index.jsx`, UMD output
@@ -69,27 +76,36 @@ as a citation. Upstream dictionary specs are referenced (not vendored) in
       (`idbUtils`).
     - `api/*` — `createDictionaryApiClient` factory + TypeScript contract.
 - **Data flow:** `GameShell` → `useGameSet` → REST `/game-set` (cached in
-  IndexedDB, 3-day TTL) → game components → `useGameSession.recordResult` →
-  IndexedDB session + learned-words → `useProgressSync.addEvent` → outbox
-  (network sync deferred — see §11 for the current blocker).
-- **Backend connectivity (verified against current code):** this repo has
-  **zero current connection to any game-node-engine backend.** There is no
-  socket.io/WebSocket client anywhere in `src/`, no HTTP client calling a
-  node-engine or Game Service endpoint, and no such package in the
-  `dependencies`/`devDependencies` of `package.json` (§8). All network traffic
-  in this repo — whether through `DictionaryApiClient.js` or the direct
-  `fetch()` calls in `useGameSet.js` (`/page-token`, `/game-set`) and
-  `GameShell.jsx` (`/domains`) — targets the same separate Webster Dictionary
-  WordPress REST API (`sparxstar/v1/dictionary`, §6a) for word lists and
-  lookups; there is no single funneling client class, but there is also no
-  destination other than that one REST namespace, and none of it is related
-  to game state or backend authority. Game session state, scoring, and
-  progress are computed
-  and persisted **entirely client-side in IndexedDB** (§5); there is no
-  backend game-state authority today. `sparxstar-3iatlas-rlc-node-engine` is
-  the _intended_ future Game Service for this layer (per that repo's own
-  planning docs), but that integration (tenant API, device-identity tokens,
-  event contract) is not yet implemented on either side — see §8 and §11.
+  IndexedDB, 3-day TTL) → game components (each timing its own per-word
+  elapsed time via a `wordStartRef`) → `onResult(uuid, outcome, attempts, xp,
+timeMs)` → `useGameSession.recordResult` → IndexedDB session +
+  learned-words, and in parallel `useProgressSync.addEvent({ type:
+'game_result', ... })` → outbox → `syncNow()` (network sync **gated**, not
+  deferred — see §11 for what's still blocking it in production).
+- **Backend connectivity (updated 2026-08-05, Phase 3):** this repo now has a
+  **conditional, dependency-injected** connection to
+  `sparxstar-3iatlas-rlc-node-engine`. `useProgressSync.syncNow()`
+  (`src/hooks/useProgressSync.js`) POSTs to `{engineUrl}/events/batch` — the
+  engine's `game.result` intake (GAME-SERVICE-INTAKE-SPEC-v1.0) — via the
+  native `fetch()` API (no new package dependency), but **only** when the
+  host app supplies both an `engineUrl` and a `getSuiteToken` callback
+  (new optional `<GameShell />` props, §6b) and `getSuiteToken()` actually
+  resolves to a token. Neither is supplied by anything in this repo or wired
+  up by any host shell today — there is still no suite-token issuer anywhere
+  in this platform (§11) — so in production this stays exactly as inert as
+  before: no request is ever made. The code path itself, however, is real,
+  fully built, and integration-tested (against a fake injected token) rather
+  than theoretical. All other network traffic in this repo — through
+  `DictionaryApiClient.js` or the direct `fetch()` calls in `useGameSet.js`
+  (`/page-token`, `/game-set`) and `GameShell.jsx` (`/domains`) — is
+  unaffected and still targets only the separate Webster Dictionary
+  WordPress REST API (`sparxstar/v1/dictionary`, §6a); none of it is
+  related to game state or backend authority, and nothing in the Phase 3
+  diff adds a write path toward that dictionary API. Game session state,
+  scoring, and progress remain computed and persisted **entirely
+  client-side in IndexedDB** (§5) as the durable source of truth; the
+  engine, when reachable, is a settlement/reward sink for already-recorded
+  local results, not an authority this repo reads from.
 
 ## 5. Data model
 
@@ -144,7 +160,11 @@ page-token refresh and retry.
 `DictionaryApiError`.
 
 `<GameShell />` props: `restUrl`, `language`, `sourceLanguage`, `languages`,
-`onSourceLanguage`, `onBrowse`.
+`onSourceLanguage`, `onBrowse`, plus (Phase 3, both optional, no default)
+`engineUrl` (node-engine base URL) and `getSuiteToken` (`() =>
+string|null|Promise<string|null>`, the bearer token for the engine's batch
+endpoint). Omitting either keeps progress sync local-only, unchanged from
+pre-Phase-3 behavior — see §4 and §11.
 
 ## 7. Seams
 
@@ -156,10 +176,15 @@ page-token refresh and retry.
   state (`onSourceLanguage`).
 - **Persistence seam:** `idbUtils` is the only IndexedDB access point; all hooks
   go through it and degrade gracefully when IndexedDB is unavailable.
-- **Progress seam (deferred):** `useProgressSync.addEvent` writes to the outbox;
-  `syncNow()` is the future network seam, gated on the guest-client
-  token-issuance blocker described in §11 (previously miscited here as
-  "OQ-G1"; see the note in §11).
+- **Progress seam (implemented, gated):** `useProgressSync.addEvent` writes to
+  the outbox; `syncNow()` (Phase 3) translates queued `game_result` events to
+  the engine's `game.result` wire shape and POSTs them to
+  `{engineUrl}/events/batch`, but only runs the network call when the host
+  supplies both `engineUrl` and a `getSuiteToken` callback that resolves to a
+  token (§4, §6b) — dependency injection, not a hardcoded token source. No
+  host wires either today, so this stays local-only in production pending
+  the guest-client token-issuance blocker described in §11 (previously
+  miscited here as "OQ-G1"; see the note in §11).
 - **Global config seam:** `window.sparxstarDictionarySettings` (`restUrl`,
   `pageToken`) is read/refreshed by `useGameSet`.
 
@@ -172,15 +197,18 @@ page-token refresh and retry.
   `terser-webpack-plugin`, PostCSS, Tailwind 3, ESLint 8, Prettier 3, Jest 29.
 - **Upstream service:** the 3iAtlas dictionary REST API
   (`sparxstar-3iatlas-dictionary`).
-- **Intended future game service (not yet a dependency):**
-  `sparxstar-3iatlas-rlc-node-engine` has, per its own planning docs, named
-  itself as the intended eventual "Game Service" that would receive progress
-  events from this layer. That integration — a tenant API, device-identity
-  tokens, and an event contract — is explicitly **not yet implemented** on
-  either side. This repo currently has no runtime or build dependency on the
-  node engine: no HTTP/WebSocket client, no npm package, nothing in the
-  `dependencies`/`devDependencies` list above. Treat this as a description of
-  intended direction, not current integration status.
+- **Game service (Phase 3, conditional dependency):**
+  `sparxstar-3iatlas-rlc-node-engine` is the Game Service this layer's
+  progress events target, per its **GAME-SERVICE-INTAKE-SPEC-v1.0**
+  (`.github/instructions/GAME-SERVICE-INTAKE-SPEC-v1.0.md` in that repo).
+  The event contract is implemented on both sides as of Phase 3
+  (`game.result`, §1–§2 of that spec; `useProgressSync.syncNow()` here). This
+  repo still has **no npm package dependency** on the node engine and no
+  socket.io/WebSocket client — the connection is a plain `fetch()` POST, made
+  only when a host app supplies `engineUrl`/`getSuiteToken` (§4, §6b). No
+  device-identity/suite token issuer exists yet, so no host does this today;
+  treat the network path as implemented-but-inert, not as live integration
+  traffic.
 - **No PHP / Composer dependencies** — this repo pulls no private Composer
   packages, so it needs no composer-resolver auth in CI.
 
@@ -191,16 +219,39 @@ page-token refresh and retry.
   `/wordlist`. `GET /page-token` is unauthenticated. Keys are SHA-256 hashed
   server-side.
 - **Hard red lines:**
-    - `syncNow()` must not post to the network until a Game-Service intake spec
-      is committed _and_ a token-issuance mechanism exists for anonymous/guest
-      game clients (see §11 for the current blocker in plain language; this is
-      no longer cited via the retired "OQ-G1" label).
-    - Never read Helios Bearer tokens from `localStorage` (XSS exposure).
+    - `syncNow()` must not post to the network without a real bearer token —
+      as of Phase 3 this is enforced structurally, not just by convention:
+      the network branch only runs when a host-supplied `getSuiteToken()`
+      call resolves to a truthy token (`src/hooks/useProgressSync.js`); there
+      is no fallback, cache, or default token source. The Game-Service intake
+      spec is committed (GAME-SERVICE-INTAKE-SPEC-v1.0, node-engine repo) and
+      the wire shape is implemented; the still-open half of this red line is
+      that **no token-issuance mechanism exists for anonymous/guest game
+      clients**, so no host can satisfy `getSuiteToken()` with a real token
+      today (see §11).
+    - `useProgressSync` must never read a Bearer/suite token from
+      `localStorage` itself (XSS exposure) — token acquisition is entirely
+      the host app's responsibility via the injected `getSuiteToken`
+      callback, and this hook never inspects how that callback is
+      implemented.
     - Never emit `Access-Control-Allow-Credentials`.
     - No WordPress auth (`is_user_logged_in()`) on game endpoints.
     - Never send an ephemeral page token to `/wordlist`.
-- **Privacy:** all learner progress is local (IndexedDB) until an approved sync
-  path exists. No PII is collected by this layer.
+    - The engine sync path must never add a write toward the dictionary's own
+      REST API (`sparxstar/v1/dictionary`) — `useGameSet`'s pull-only
+      `/game-set` fetch is untouched by Phase 3 and stays that way.
+- **Privacy:** all learner progress is local (IndexedDB) until a host app
+  wires up both `engineUrl` and a real `getSuiteToken`. No PII is collected
+  by this layer. The local `game_result` outbox event carries `word_uuid`,
+  `game`, `outcome`, `attempts`, `time_ms`; `syncNow()`'s wire translation
+  forwards `word_uuid` too, alongside `game_type`, `outcome`, `attempts`,
+  `time_ms`. The engine's `GameResultInput` contract
+  (`src/services/gameResults.ts`, node-engine repo) has no `word_uuid`
+  field today — settlement is per `game_type`/`outcome`, not per word — so
+  it's currently ignored on arrival, not stored or acted on; sent anyway so
+  it's available if per-word attribution is added engine-side later.
+  `word_uuid` is an opaque dictionary-entry identifier, not learner
+  identity — no learner-identifying data leaves the device either way.
 
 ## 10. Current state
 
@@ -210,34 +261,55 @@ page-token refresh and retry.
   headers, and response envelopes match; confirmed GraphQL (WPGraphQL + SCF)
   in that repo is a content-authoring surface only, not something this
   package needs to call.
-- Progress sync is intentionally local-only (`syncNow()` is a no-op) pending
-  resolution of the guest-client token-issuance blocker described in §11
-  (previously miscited as "OQ-G1"; see the note there). There is also no wire
-  schema to build against yet — a "frozen event schema" mentioned in
-  3IATLAS-IDENTITY-AND-GAME-SERVICES-DECISION-v1.0 §3 cites a document,
-  `GH-ISSUE-dictionary-PR59-fixes.md` ("Fix 2"), that does not exist in this
-  repo or in `sparxstar-3iatlas-dictionary`; treat that schema as unverified
-  until GAME-SERVICE-INTAKE-SPEC-v1.0 is actually written. The only verified
-  precedent is the ad-hoc shape `addEvent()` already writes to the outbox
-  (`{ type, word_uuid?, game?, domain?, ts }`), which mirrors what the
-  retired WordPress `/progress/sync` handler used to parse.
+- **Progress sync (Phase 3, 2026-08-05): implemented, gated, dormant in
+  production.** `syncNow()` is no longer a no-op — GAME-SERVICE-INTAKE-SPEC-v1.0
+  is now written and approved (node-engine repo), so the wire schema exists
+  and is implemented against: queued `game_result` outbox events (`word_uuid`,
+  `game`, `outcome`, `attempts`, `time_ms` — every outcome, not just
+  `correct`) are translated to the engine's `game.result` shape
+  (`game_type: 'dictionary_quiz'`, per that spec's OQ-4 placeholder) and
+  POSTed to `{engineUrl}/events/batch` with a `Bearer` token, idempotently
+  (each event carries a stable `event_id`; only server-accepted events are
+  drained from the outbox). This only runs when a host supplies both
+  `engineUrl` and a `getSuiteToken` callback that resolves to a token (§4,
+  §6b, §9) — the guest-client token-issuance blocker itself (§11) is
+  **still unresolved**, so no host does this yet and the path is inert in
+  production today. The `aiwa_game_*` bonus markers (streak, first-practice,
+  return-visit, session-complete) are unaffected and stay local-only — the
+  engine has no scoring path for them.
+- All 6 game components (`ListenWrite`, `ArrangeWord`, `CompleteSentence`,
+  `LetterReveal`, `MeaningMatch`, `DomainFlash`) now measure real per-word
+  elapsed time via a `wordStartRef` reset each time a new word/card is shown,
+  and pass it through their `onResult` callback's new 5th `timeMs` argument.
+  `useGameSession.recordResult` and the local session's `results[]` records
+  carry it too (`timeMs`, defaulting to 0 only if the caller omits it).
 - LetterReveal uses an emoji placeholder for the pottery animation pending an
   approved asset (OQ-G3).
-- Tests: `jest --passWithNoTests` (no test suites committed yet).
+- Tests: `jest` (no longer `--passWithNoTests` — Phase 3 added the first test
+  suites, `src/hooks/__tests__/useProgressSync.test.js` (guest/local-only
+  invariant; authenticated sync path — translation, idempotent drain,
+  failure handling) and `src/hooks/__tests__/useGameSet.test.js` (content-plane
+  regression check: `/game-set` pull is GET-only and unaffected by the
+  sync-layer changes). The node-engine repo's
+  `tests/gameResults.db.test.ts` (Postgres-gated, `RUN_DB_TESTS=1`) covers
+  the other half of the chain end-to-end — batch → settlement → ledger →
+  the `game.result.settled` myCred webhook — using the exact
+  `dictionary_quiz`/`outcome`/`attempts`/`time_ms` payload shape this
+  repo's `syncNow()` now sends.
 - Styling assumes the host supplies the Tailwind runtime; no Tailwind/PostCSS
   config or CSS entry is vendored in this repo.
 
 ## 11. Open items
 
-| ID    | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| —     | **Progress-sync blocker (see note below — no longer cited as "OQ-G1"):** anonymous/guest game clients have no token-issuance mechanism that fits. Not a Helios JWT (that's for authenticated staff/platform users). Not an RLC-style session-participant token (that requires an active RLC session, which this games layer doesn't have). Network sync cannot ship until the node engine (or another game service) defines an intake mechanism for this class of client. |
-| —     | GAME-SERVICE-INTAKE-SPEC-v1.0 (wire schema for the eventual Game Service POST) is unwritten — do not build a payload builder against the decision doc's §3 "frozen event schema"; its citation (`GH-ISSUE-dictionary-PR59-fixes.md` "Fix 2") does not exist in-repo, so there is nothing to build against yet                                                                                                                                                             |
-| OQ-G3 | LetterReveal pottery animation — awaiting AIWA-approved asset                                                                                                                                                                                                                                                                                                                                                                                                             |
-| OQ-G4 | DomainFlash "I knew it" hook confirmation                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| OQ-I3 | Guest device progress merge — blocked on Game Service intake spec                                                                                                                                                                                                                                                                                                                                                                                                         |
-| —     | Add a test suite; confirm Tailwind/PostCSS ownership (host vs package)                                                                                                                                                                                                                                                                                                                                                                                                    |
-| —     | Reconcile npm package name (`sparxstar-rlc-games`) with repo name if desired                                                                                                                                                                                                                                                                                                                                                                                              |
+| ID    | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| —     | **Progress-sync blocker — STILL OPEN (see note below — no longer cited as "OQ-G1"):** anonymous/guest game clients have no token-issuance mechanism that fits. Not a Helios JWT (that's for authenticated staff/platform users). Not an RLC-style session-participant token (that requires an active RLC session, which this games layer doesn't have). As of Phase 3 (2026-08-05) `syncNow()` is fully implemented and gated on a dependency-injected `getSuiteToken` callback (§4, §6b, §9) rather than a no-op, so the code is no longer what's missing — but nothing in this platform can supply that callback with a real token yet, so network sync stays dormant in production until a suite-token issuer exists. |
+| —     | ~~GAME-SERVICE-INTAKE-SPEC-v1.0 (wire schema for the eventual Game Service POST) is unwritten~~ — **resolved.** Written and approved in the node-engine repo (`.github/instructions/GAME-SERVICE-INTAKE-SPEC-v1.0.md`); its **OQ-3** (this repo's outbox couldn't populate a conformant `GameResultEvent` — only reported `correct`, no `attempts`/`time_ms`) is also resolved, from this side, as of Phase 3 — see §4 and §10. The old "frozen event schema" citation (`GH-ISSUE-dictionary-PR59-fixes.md` "Fix 2") remains unverified/nonexistent and was never used; the real spec superseded it.                                                                                                                     |
+| OQ-G3 | LetterReveal pottery animation — awaiting AIWA-approved asset                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| OQ-G4 | DomainFlash "I knew it" hook confirmation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| OQ-I3 | Guest device progress merge — blocked on Game Service intake spec's guest-claim flow, which is itself FENCED on the Identity Service keystone (`sparxstar-identity`, out of scope). Unaffected by the Phase 3 progress-sync work: `syncNow()` only ever sends progress for a player who already has a suite token, never merges/claims prior guest history.                                                                                                                                                                                                                                                                                                                                                              |
+| —     | ~~Add a test suite~~ — **done, Phase 3.** `src/hooks/__tests__/useProgressSync.test.js`, `src/hooks/__tests__/useGameSet.test.js`. Confirm Tailwind/PostCSS ownership (host vs package) — still open.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| —     | Reconcile npm package name (`sparxstar-rlc-games`) with repo name if desired                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
 > **Note on the retired "OQ-G1" citation.** Earlier versions of this
 > document, `AGENTS.md`, and `.github/copilot-instructions.md` cited "OQ-G1"
@@ -269,6 +341,28 @@ page-token refresh and retry.
 
 ## 12. Changelog
 
+- **2026-08-05** — Phase 3: implemented `syncNow()` against
+  `sparxstar-3iatlas-rlc-node-engine`'s `GAME-SERVICE-INTAKE-SPEC-v1.0`,
+  resolving that spec's OQ-3 from this side. Instrumented all 6 game
+  components with real per-word elapsed-time tracking (`wordStartRef`,
+  extending `onResult`'s signature with a `timeMs` argument);
+  `GameShell.jsx`'s `handleWordResult` now queues a `game_result` outbox
+  event for every outcome (not just `correct`), carrying `attempts` and
+  `time_ms`. `useProgressSync.syncNow()` translates queued `game_result`
+  events to the engine's `game.result` wire shape and POSTs them to
+  `{engineUrl}/events/batch`, idempotently (stable per-event `event_id`,
+  partial-failure-safe outbox draining), gated on new optional
+  `<GameShell />` props `engineUrl` and `getSuiteToken` — a
+  dependency-injected callback, not a hardcoded token source, so the path
+  is fully built and integration-tested (fake token in tests) while
+  staying genuinely dormant in production (no host supplies either prop;
+  no suite-token issuer exists — §11's progress-sync blocker is
+  unaffected and still open). Added this repo's first test suites
+  (`src/hooks/__tests__/useProgressSync.test.js`,
+  `src/hooks/__tests__/useGameSet.test.js`) covering the guest/local-only
+  invariant, the authenticated sync path, and a content-plane regression
+  check confirming `/game-set` stays a GET-only pull, untouched by this
+  diff. Updated §3, §4, §6b, §7, §8, §9, §10, §11 to match.
 - **2026-07-09** — Verified the REST client against the live dictionary
   controller (no drift found) and confirmed GraphQL is a content-authoring
   surface only, not a games consumer. A payload builder for the decision

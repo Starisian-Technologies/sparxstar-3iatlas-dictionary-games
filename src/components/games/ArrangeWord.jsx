@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Volume2 } from 'lucide-react';
 
 /**
@@ -10,12 +10,13 @@ import { Volume2 } from 'lucide-react';
  * Props:
  *   words      {Array}    Game-set words
  *   language   {string}   'en' | 'fr'
- *   onResult   {Function} (uuid, outcome, attempts, xp) => void
+ *   onResult   {Function} (uuid, outcome, attempts, xp, timeMs) => void
  *   onComplete {Function} () => void
  */
 export default function ArrangeWord({ words, language, onResult, onComplete }) {
     const deck = useMemo(() => shuffle(words), [words]);
     const [index, setIndex] = useState(0);
+    const wordStartRef = useRef(Date.now());
     /* pool, answer, and initialPool are kept in one object so pickFromPool can
      * update both atomically via a single functional setter, preventing stale
      * state when the player taps tiles quickly before React re-renders. */
@@ -29,6 +30,11 @@ export default function ArrangeWord({ words, language, onResult, onComplete }) {
 
     const word = deck[index];
     const target = word ? word.headword.toLowerCase() : '';
+
+    /* Reset the per-word timer whenever a new word is presented. */
+    useEffect(() => {
+        wordStartRef.current = Date.now();
+    }, [index]);
 
     /* Advance to next word or complete session. */
     const advance = useCallback(() => {
@@ -53,7 +59,7 @@ export default function ArrangeWord({ words, language, onResult, onComplete }) {
         if (attempt === target) {
             setCorrect(true);
             if (word.audio_url) new Audio(word.audio_url).play().catch(() => {});
-            onResult(word.uuid, 'correct', 1, 5);
+            onResult(word.uuid, 'correct', 1, 5, Date.now() - wordStartRef.current);
             setTimeout(advance, 1200);
         } else {
             /* Shake animation, then return placed tiles to pool without

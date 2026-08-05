@@ -11,7 +11,7 @@ import React, { useState, useMemo, useRef } from 'react';
  * Props:
  *   words      {Array}    Game-set words
  *   language   {string}   'en' | 'fr'
- *   onResult   {Function} (uuid, outcome, attempts, xp) => void
+ *   onResult   {Function} (uuid, outcome, attempts, xp, timeMs) => void
  *   onComplete {Function} () => void
  */
 
@@ -31,6 +31,7 @@ export default function LetterReveal({ words, language, onResult, onComplete }) 
     const wrongGuessesRef = useRef(0);
     const wrongLettersRef = useRef(new Set());
     const doneRef = useRef(false);
+    const wordStartRef = useRef(Date.now());
 
     const word = deck[index];
     if (!word) return null;
@@ -67,7 +68,7 @@ export default function LetterReveal({ words, language, onResult, onComplete }) 
             if (complete) {
                 doneRef.current = true;
                 setDone(true);
-                onResult(word.uuid, 'correct', 1, 5);
+                onResult(word.uuid, 'correct', 1, 5, Date.now() - wordStartRef.current);
                 setTimeout(() => advance(), 1200);
             }
         } else {
@@ -84,7 +85,7 @@ export default function LetterReveal({ words, language, onResult, onComplete }) 
             if (nextWrong >= MAX_WRONG) {
                 doneRef.current = true;
                 setDone(true);
-                onResult(word.uuid, 'learning', 1, 0);
+                onResult(word.uuid, 'learning', 1, 0, Date.now() - wordStartRef.current);
                 setTimeout(() => advance(), 1800);
             }
         }
@@ -99,6 +100,7 @@ export default function LetterReveal({ words, language, onResult, onComplete }) 
             wrongGuessesRef.current = 0;
             wrongLettersRef.current = new Set();
             doneRef.current = false;
+            wordStartRef.current = Date.now();
             setRevealed(new Set());
             setWrongGuesses(0);
             setWrongLetters(new Set());
