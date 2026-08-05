@@ -36,10 +36,12 @@ function getOutbox() {
 beforeEach(() => {
     idbUtils.__store.clear();
     jest.clearAllMocks();
-    window.fetch = jest.fn();
+    global.fetch = jest.fn();
+    window.fetch = global.fetch;
 });
 
 afterEach(() => {
+    delete global.fetch;
     delete window.fetch;
 });
 

@@ -18,10 +18,12 @@ jest.mock('../idbUtils.js', () => ({
 }));
 
 beforeEach(() => {
-    window.fetch = jest.fn();
+    global.fetch = jest.fn();
+    window.fetch = global.fetch;
 });
 
 afterEach(() => {
+    delete global.fetch;
     delete window.fetch;
 });
 
