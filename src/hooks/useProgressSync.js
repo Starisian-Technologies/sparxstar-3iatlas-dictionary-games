@@ -140,7 +140,20 @@ export function useProgressSync({ restUrl: _restUrl, engineUrl, getSuiteToken })
 
         const outbox =
             typeof getRecord === 'function' ? await getRecord('progress-outbox', OUTBOX_KEY) : null;
-        const events = outbox?.events ?? [];
+        const rawEvents = outbox?.events ?? [];
+        // Assign stable event_ids to any legacy outbox entries that pre-date
+        // this change and were persisted without one, so we never send
+        // event_id: undefined or accidentally drain via a spurious undefined match.
+        let needsBackfill = false;
+        const events = rawEvents.map((e) => {
+            if (e.event_id) return e;
+            needsBackfill = true;
+            return { ...e, event_id: genEventId() };
+        });
+        if (needsBackfill && typeof putRecord === 'function') {
+            // Persist the back-filled ids so idempotent replay works correctly.
+            await putRecord('progress-outbox', { key: OUTBOX_KEY, events });
+        }
         const pending = events.filter((e) => e.type === 'game_result').slice(0, BATCH_MAX);
         if (pending.length === 0) return;
 
