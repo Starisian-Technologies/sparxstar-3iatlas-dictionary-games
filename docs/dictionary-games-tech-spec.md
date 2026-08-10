@@ -42,11 +42,12 @@ read-only, auto-synced). Cite ADRs and invariants by number from that snapshot;
 do not restate them here.
 
 Open questions this repo is bound by: **OQ-G3** (LetterReveal asset), **OQ-G4**
-(DomainFlash confirmation hook), **OQ-I3** (guest device progress merge). The
-progress-sync blocker previously cited here as "OQ-G1" is now stated directly,
-in plain language, in §11 — see the note there for why that label is retired
-as a citation. Upstream dictionary specs are referenced (not vendored) in
-`AGENTS.md`.
+(DomainFlash confirmation hook), **OQ-I3** (guest device progress merge —
+blocked on the Identity Service spec, not the intake spec; see §11). The
+progress-sync blocker previously cited here as "OQ-G1," and later restated as
+"guest clients have no fitting token-issuance mechanism," is **closed, not
+open** — see §11's corrected note for why. Upstream dictionary specs are
+referenced (not vendored) in `AGENTS.md`.
 
 This repo is also the client side of `sparxstar-3iatlas-rlc-node-engine`'s
 **GAME-SERVICE-INTAKE-SPEC-v1.0** (`.github/instructions/GAME-SERVICE-INTAKE-SPEC-v1.0.md`
@@ -183,9 +184,10 @@ pre-Phase-3 behavior — see §4 and §11.
   `{engineUrl}/events/batch`, but only runs the network call when the host
   supplies both `engineUrl` and a `getSuiteToken` callback that resolves to a
   token (§4, §6b) — dependency injection, not a hardcoded token source. No
-  host wires either today, so this stays local-only in production pending
-  the guest-client token-issuance blocker described in §11 (previously
-  miscited here as "OQ-G1"; see the note in §11).
+  host wires either today, so this stays local-only in production: not
+  because guest clients lack a token mechanism (they never get one, by
+  design — see §11), but because no `sparxstar-identity` issuer exists yet
+  for *authenticated* accounts, so no host has a real token to inject.
 - **Global config seam:** `window.sparxstarDictionarySettings` (`restUrl`,
   `pageToken`) is read/refreshed by `useGameSet`.
 
@@ -226,10 +228,12 @@ pre-Phase-3 behavior — see §4 and §11.
       call resolves to a truthy token (`src/hooks/useProgressSync.js`); there
       is no fallback, cache, or default token source. The Game-Service intake
       spec is committed (GAME-SERVICE-INTAKE-SPEC-v1.0, node-engine repo) and
-      the wire shape is implemented; the still-open half of this red line is
-      that **no token-issuance mechanism exists for anonymous/guest game
-      clients**, so no host can satisfy `getSuiteToken()` with a real token
-      today (see §11).
+      the wire shape is implemented. What's still missing is **not** a
+      guest-token mechanism — guest play never calls `getSuiteToken()` for a
+      real token at all, by design (§11) — it is that **no suite-token
+      issuer (`sparxstar-identity`) exists yet for authenticated accounts**,
+      so no host can satisfy `getSuiteToken()` with a real token today,
+      guest or otherwise (see §11).
     - `useProgressSync` must never read a Bearer/suite token from
       `localStorage` itself (XSS exposure) — token acquisition is entirely
       the host app's responsibility via the injected `getSuiteToken`
@@ -273,9 +277,10 @@ pre-Phase-3 behavior — see §4 and §11.
   (each event carries a stable `event_id`; only server-accepted events are
   drained from the outbox). This only runs when a host supplies both
   `engineUrl` and a `getSuiteToken` callback that resolves to a token (§4,
-  §6b, §9) — the guest-client token-issuance blocker itself (§11) is
-  **still unresolved**, so no host does this yet and the path is inert in
-  production today. The `aiwa_game_*` bonus markers (streak, first-practice,
+  §6b, §9) — the missing piece is the `sparxstar-identity` issuer for
+  authenticated accounts (§11), **still unbuilt**, not a guest-token
+  question (guest play never reaches this path at all, by design). No host
+  does this yet and the path is inert in production today. The `aiwa_game_*` bonus markers (streak, first-practice,
   return-visit, session-complete) are unaffected and stay local-only — the
   engine has no scoring path for them.
 - All 6 game components (`ListenWrite`, `ArrangeWord`, `CompleteSentence`,
@@ -304,7 +309,7 @@ pre-Phase-3 behavior — see §4 and §11.
 
 | ID    | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| —     | **Progress-sync blocker — STILL OPEN (see note below — no longer cited as "OQ-G1"):** anonymous/guest game clients have no token-issuance mechanism that fits. Not a Helios JWT (that's for authenticated staff/platform users). Not an RLC-style session-participant token (that requires an active RLC session, which this games layer doesn't have). As of Phase 3 (2026-08-05) `syncNow()` is fully implemented and gated on a dependency-injected `getSuiteToken` callback (§4, §6b, §9) rather than a no-op, so the code is no longer what's missing — but nothing in this platform can supply that callback with a real token yet, so network sync stays dormant in production until a suite-token issuer exists. |
+| —     | **CLOSED, corrected 2026-08 — was never actually a guest-token question.** Earlier framings here (and via the retired "OQ-G1" label) treated this as "anonymous/guest game clients have no token-issuance mechanism that fits." Per `3IATLAS-IDENTITY-AND-GAME-SERVICES-DECISION-v1.0.md` §4 (`sparxstar-3iatlas-rlc-node-engine` repo — read directly, not relayed): guest play is device-local by design, permanently; guests are never issued a token, so there's nothing to design for them. As of Phase 3 (2026-08-05) `syncNow()` is fully implemented and gated on a dependency-injected `getSuiteToken` callback (§4, §6b, §9). The one real remaining gap is that `sparxstar-identity` (the suite-token issuer for *authenticated* accounts) doesn't exist yet — item 1 of `3IATLAS-IDENTITY-AND-GAME-SERVICES-DECISION-v1.0.md` §8's "next specs to write," not yet written — so network sync stays dormant in production until that ships, for account-linked play only. |
 | —     | ~~GAME-SERVICE-INTAKE-SPEC-v1.0 (wire schema for the eventual Game Service POST) is unwritten~~ — **resolved.** Written and approved in the node-engine repo (`.github/instructions/GAME-SERVICE-INTAKE-SPEC-v1.0.md`); its **OQ-3** (this repo's outbox couldn't populate a conformant `GameResultEvent` — only reported `correct`, no `attempts`/`time_ms`) is also resolved, from this side, as of Phase 3 — see §4 and §10. The old "frozen event schema" citation (`GH-ISSUE-dictionary-PR59-fixes.md` "Fix 2") remains unverified/nonexistent and was never used; the real spec superseded it.                                                                                                                     |
 | OQ-G3 | LetterReveal pottery animation — awaiting AIWA-approved asset                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | OQ-G4 | DomainFlash "I knew it" hook confirmation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |

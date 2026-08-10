@@ -25,12 +25,15 @@ REST API.
   Owned by `Starisian-Technologies/sparxstar-3iatlas-dictionary`. This repo
   only calls those endpoints; it never defines them. The `.d.ts` here mirrors
   the server's published contract — the server is the source of truth.
-- **Helios identity and token issuance.** Progress sync is blocked until an
-  approved token-delivery mechanism exists for anonymous/guest game clients —
-  see `docs/dictionary-games-tech-spec.md` §11 for the blocker in plain
-  language (no longer cited via the retired "OQ-G1" label; see the note
-  there). This repo must not read Helios Bearer tokens from `localStorage` or
-  ship a network sync path.
+- **Identity and token issuance.** Owned by `sparxstar-identity` (separate,
+  not-yet-built repo), the sole issuer of suite JWTs once an account exists;
+  this repo (and the Game Service) only verify. Guest play never
+  authenticates at all — device-local by design, permanently, per
+  `3IATLAS-IDENTITY-AND-GAME-SERVICES-DECISION-v1.0.md` §4. Progress sync
+  (Phase 3, implemented) stays dormant in production only because that
+  issuer doesn't exist yet — see `docs/dictionary-games-tech-spec.md` §11
+  (no longer cited via the retired "OQ-G1" label). This repo must not read
+  Bearer/suite tokens from `localStorage`.
 - **Audio asset generation** and **dictionary entry enrichment** — owned by
   the dictionary pipeline.
 - **WordPress / PHP / server-side logic** — this is a browser package only.
@@ -60,6 +63,7 @@ Platform decisions, invariants, and open questions live in the governance
 snapshot at `.github/instructions/governance/` (auto-synced; read-only) and in
 the registries cited from `AGENTS.md`. Cite ADRs and invariants by number —
 do not restate them here. Open questions tracked by this repo: **OQ-G3**,
-**OQ-G4**, **OQ-I3** (see `AGENTS.md`); the progress-sync blocker previously
-cited as "OQ-G1" is now stated in plain language in
-`docs/dictionary-games-tech-spec.md` §11 (see the retirement note there).
+**OQ-G4**, **OQ-I3** (blocked on the Identity Service spec, not the intake
+spec — see `AGENTS.md`). The progress-sync blocker previously cited as
+"OQ-G1" is **closed, not open** — guest play never syncs, by design; see
+`docs/dictionary-games-tech-spec.md` §11.

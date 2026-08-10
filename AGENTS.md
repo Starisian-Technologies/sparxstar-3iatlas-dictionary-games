@@ -51,15 +51,19 @@ one place to keep in sync with the code.
 
 ### Security rules (hard requirements)
 
-- `useProgressSync.syncNow()` MUST NOT post to the network until a
-  Game-Service intake spec is committed and a token-issuance mechanism exists
-  for anonymous/guest game clients. It is a deliberate no-op today. See
-  `docs/dictionary-games-tech-spec.md` §11 for the current blocker stated in
-  plain language — it is **no longer cited via the "OQ-G1" label**. That
-  label drifted and now disagrees between this repo and
-  `sparxstar-3iatlas-dictionary`'s governance docs, and no GitHub Issue backs
-  it in either repo, so it has been retired as a citation (see the note in
-  §11 for the full explanation).
+- `useProgressSync.syncNow()` MUST NOT post to the network without a real
+  bearer token. As of Phase 3 (2026-08-05) it is **no longer a no-op** — the
+  Game-Service intake spec (`GAME-SERVICE-INTAKE-SPEC-v1.0`, node-engine
+  repo) is committed and implemented, and `syncNow()` POSTs to it — but the
+  network branch only runs when a host-supplied `getSuiteToken()` call
+  resolves to a truthy token, and no host does that today because
+  `sparxstar-identity` (the suite-token issuer) doesn't exist yet. This is
+  **not** a guest-token-issuance gap — guest play never calls this path at
+  all, by design (device-local, permanent, per
+  `3IATLAS-IDENTITY-AND-GAME-SERVICES-DECISION-v1.0.md` §4) — it is the
+  Identity Service being unbuilt for authenticated accounts. See
+  `docs/dictionary-games-tech-spec.md` §11 (no longer cited via the retired
+  "OQ-G1" label).
 - Do not read Helios Bearer tokens from `localStorage` (XSS exposure).
 - Never emit `Access-Control-Allow-Credentials`.
 - WordPress authentication is prohibited for all game endpoints.
@@ -68,7 +72,7 @@ one place to keep in sync with the code.
 
 | ID    | Description                                                                                                                                                                                              |
 | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| —     | Progress-sync token-issuance blocker for anonymous/guest game clients — stated in plain language in `docs/dictionary-games-tech-spec.md` §11. No longer cited as "OQ-G1"; see the retirement note there. |
+| —     | **CLOSED, corrected 2026-08.** Not a guest-token gap — guest play is device-local by design, permanently, per `3IATLAS-IDENTITY-AND-GAME-SERVICES-DECISION-v1.0.md` §4. `syncNow()` is implemented (Phase 3) and gated on `sparxstar-identity` (not yet built) for authenticated accounts only. See `docs/dictionary-games-tech-spec.md` §11. |
 | OQ-G3 | LetterReveal pottery animation — emoji placeholder, awaiting approved asset                                                                                                                              |
 | OQ-G4 | DomainFlash "I knew it" hook confirmation                                                                                                                                                                |
 | OQ-I3 | Guest device progress merge — blocked on Game Service intake spec                                                                                                                                        |
