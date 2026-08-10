@@ -70,12 +70,12 @@ one place to keep in sync with the code.
 
 ### Open questions tracked by this repo
 
-| ID    | Description                                                                                                                                                                                              |
-| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ID    | Description                                                                                                                                                                                                                                                                                                                                   |
+| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | —     | **CLOSED, corrected 2026-08.** Not a guest-token gap — guest play is device-local by design, permanently, per `3IATLAS-IDENTITY-AND-GAME-SERVICES-DECISION-v1.0.md` §4. `syncNow()` is implemented (Phase 3) and gated on `sparxstar-identity` (not yet built) for authenticated accounts only. See `docs/dictionary-games-tech-spec.md` §11. |
-| OQ-G3 | LetterReveal pottery animation — emoji placeholder, awaiting approved asset                                                                                                                              |
-| OQ-G4 | DomainFlash "I knew it" hook confirmation                                                                                                                                                                |
-| OQ-I3 | Guest device progress merge — blocked on Game Service intake spec                                                                                                                                        |
+| OQ-G3 | LetterReveal pottery animation — emoji placeholder, awaiting approved asset                                                                                                                                                                                                                                                                   |
+| OQ-G4 | DomainFlash "I knew it" hook confirmation                                                                                                                                                                                                                                                                                                     |
+| OQ-I3 | Guest device progress merge — blocked on Game Service intake spec                                                                                                                                                                                                                                                                             |
 
 ### Upstream spec references (in the dictionary repo)
 
