@@ -3,6 +3,7 @@ import { Loader2, ChevronDown } from 'lucide-react';
 import { useGameSet } from '../hooks/useGameSet.js';
 import { useGameSession } from '../hooks/useGameSession.js';
 import { useProgressSync } from '../hooks/useProgressSync.js';
+import { fetchWithPageToken } from '../api/pageToken.js';
 import SessionComplete from './SessionComplete.jsx';
 import DomainFlash from './games/DomainFlash.jsx';
 import MeaningMatch from './games/MeaningMatch.jsx';
@@ -163,9 +164,17 @@ export default function GameShell({
             return;
         }
         setDomainsLoading(true);
-        fetch(`${restUrl}/domains?lang_source=${encodeURIComponent(sourceLanguage)}`, {
-            signal: controller.signal,
-        })
+        /*
+         * /domains is page-token authenticated like every other same-origin
+         * read here. Without the header a token-enforcing server answers 401
+         * and the selector silently falls back to "All domains", which reads
+         * as "this language has no domains" rather than as an auth failure.
+         */
+        fetchWithPageToken(
+            `${restUrl}/domains?lang_source=${encodeURIComponent(sourceLanguage)}`,
+            restUrl,
+            { signal: controller.signal }
+        )
             .then((r) => (r.ok ? r.json() : null))
             .then((json) => {
                 if (!cancelled && json?.success && Array.isArray(json.data?.domains)) {

@@ -7,28 +7,7 @@
 
 import { useState, useEffect } from 'react';
 import { getRecord, putRecord } from './idbUtils.js';
-
-/**
- * Refresh the ephemeral page token by calling GET /page-token.
- * Stores the new token in window.sparxstarDictionarySettings.pageToken.
- *
- * @param {string} restUrl Base REST URL (sparxstar/v1/dictionary).
- * @returns {Promise<string>} The new token, or empty string on failure.
- */
-async function refreshPageToken(restUrl) {
-    try {
-        const res = await fetch(`${restUrl}/page-token`);
-        if (!res.ok) return '';
-        const json = await res.json();
-        const token = json?.data?.token ?? '';
-        if (token && typeof window !== 'undefined' && window.sparxstarDictionarySettings) {
-            window.sparxstarDictionarySettings.pageToken = token;
-        }
-        return token;
-    } catch {
-        return '';
-    }
-}
+import { fetchWithPageToken } from '../api/pageToken.js';
 
 /** 3-day TTL in milliseconds. */
 const TTL_MS = 3 * 24 * 60 * 60 * 1000;
@@ -86,21 +65,9 @@ export function useGameSet({ restUrl, langSource, domain = '', limit = 20, inclu
                 });
                 if (domain) params.set('domain', domain);
 
-                const pageToken =
-                    typeof window !== 'undefined'
-                        ? (window.sparxstarDictionarySettings?.pageToken ?? '')
-                        : '';
-                let res = await fetch(`${restUrl}/game-set?${params}`, {
-                    headers: { 'X-Page-Token': pageToken },
-                });
-
-                // On 401, attempt to refresh the token and retry once.
-                if (res.status === 401) {
-                    const newToken = await refreshPageToken(restUrl);
-                    res = await fetch(`${restUrl}/game-set?${params}`, {
-                        headers: { 'X-Page-Token': newToken },
-                    });
-                }
+                // Sends X-Page-Token and, on a 401, refreshes it and retries
+                // once (src/api/pageToken.js).
+                const res = await fetchWithPageToken(`${restUrl}/game-set?${params}`, restUrl);
 
                 if (!res.ok) {
                     throw new Error(`HTTP ${res.status}`);
