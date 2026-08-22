@@ -96,8 +96,9 @@ timeMs)` → `useGameSession.recordResult` → IndexedDB session +
   before: no request is ever made. The code path itself, however, is real,
   fully built, and integration-tested (against a fake injected token) rather
   than theoretical. All other network traffic in this repo — through
-  `DictionaryApiClient.js` or the direct `fetch()` calls in `useGameSet.js`
-  (`/page-token`, `/game-set`) and `GameShell.jsx` (`/domains`) — is
+  `DictionaryApiClient.js` or the page-token reads in `useGameSet.js`
+  (`/game-set`) and `GameShell.jsx` (`/domains`), both of which now go
+  through the shared `src/api/pageToken.js` helper — is
   unaffected and still targets only the separate Webster Dictionary
   WordPress REST API (`sparxstar/v1/dictionary`, §6a); none of it is
   related to game state or backend authority, and nothing in the Phase 3
@@ -133,17 +134,17 @@ timeMs)` → `useGameSession.recordResult` → IndexedDB session +
 
 ### 6a. Consumed REST endpoints (namespace `sparxstar/v1/dictionary`)
 
-| Method | Path           | Auth                            | Used by                   |
-| ------ | -------------- | ------------------------------- | ------------------------- |
-| GET    | `/lookup`      | page token or API key           | client `lookup()`         |
-| GET    | `/search`      | page token or API key           | client `search()`         |
-| GET    | `/wordlist`    | API key only (page token → 403) | client `wordlist()`       |
-| GET    | `/languages`   | page token or API key           | client `languages()`      |
-| GET    | `/domains`     | page token or API key           | client `domains()`        |
-| GET    | `/game-set`    | page token or API key           | `useGameSet`, `gameSet()` |
-| GET    | `/word-of-day` | page token or API key           | client `wordOfDay()`      |
-| POST   | `/spell`       | page token or API key           | client `spell()`          |
-| GET    | `/page-token`  | none                            | token bootstrap/refresh   |
+| Method | Path           | Auth                            | Used by                                                      |
+| ------ | -------------- | ------------------------------- | ------------------------------------------------------------ |
+| GET    | `/lookup`      | page token or API key           | client `lookup()`                                            |
+| GET    | `/search`      | page token or API key           | client `search()`                                            |
+| GET    | `/wordlist`    | API key only (page token → 403) | client `wordlist()`                                          |
+| GET    | `/languages`   | page token or API key           | client `languages()`                                         |
+| GET    | `/domains`     | page token or API key           | client `domains()`, `GameShell.jsx` via `fetchWithPageToken` |
+| GET    | `/game-set`    | page token or API key           | `useGameSet`, `gameSet()`                                    |
+| GET    | `/word-of-day` | page token or API key           | client `wordOfDay()`                                         |
+| POST   | `/spell`       | page token or API key           | client `spell()`                                             |
+| GET    | `/page-token`  | none                            | token bootstrap/refresh                                      |
 
 Quirks the client encodes: `/spell` duplicates results at `data.results`
 (canonical) and top-level `results` (legacy) — always read `data.results`.
@@ -341,6 +342,20 @@ pre-Phase-3 behavior — see §4 and §11.
 
 ## 12. Changelog
 
+- **2026-08-21** — Page-token auth fix. `GameShell.jsx`'s `/domains` request
+  sent no `X-Page-Token` and had no retry, so against a token-enforcing
+  server it 401'd and the domain selector silently fell back to "All
+  domains" — indistinguishable from a language with no domains. The
+  refresh-and-retry-once logic that `useGameSet.js` already had (and that
+  the dictionary repo's since-deleted copy of `GameShell` had for this exact
+  request) is now extracted to `src/api/pageToken.js`
+  (`currentPageToken`, `refreshPageToken`, `fetchWithPageToken`) and used by
+  both call sites, so there is one implementation rather than two that can
+  drift. Covered by `src/api/__tests__/pageToken.test.js` (header sent,
+  refresh-and-retry on 401, at most one retry, non-401 not retried, refresh
+  failure still retried, caller `init` preserved). No endpoint, wire shape or
+  auth model changed — §9's red lines are untouched, and this is the
+  page-token path only, not the suite/Bearer path.
 - **2026-08-05** — Phase 3: implemented `syncNow()` against
   `sparxstar-3iatlas-rlc-node-engine`'s `GAME-SERVICE-INTAKE-SPEC-v1.0`,
   resolving that spec's OQ-3 from this side. Instrumented all 6 game
