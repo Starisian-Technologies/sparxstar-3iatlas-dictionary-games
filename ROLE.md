@@ -25,15 +25,19 @@ REST API.
   Owned by `Starisian-Technologies/sparxstar-3iatlas-dictionary`. This repo
   only calls those endpoints; it never defines them. The `.d.ts` here mirrors
   the server's published contract — the server is the source of truth.
-- **Identity and token issuance.** Owned by `sparxstar-identity` (separate,
-  not-yet-built repo), the sole issuer of suite JWTs once an account exists;
-  this repo (and the Game Service) only verify. Guest play never
-  authenticates at all — device-local by design, permanently, per
+- **Identity and token issuance.** Owned by `sparxstar-identity` — the
+  `Starisian-Technologies/sparxstar-3iatlas-identity-node` repo, which
+  **exists and is production-ready for adult accounts** — the sole issuer of
+  suite JWTs once an account exists; this repo (and the Game Service) only
+  verify. Guest play never authenticates at all — device-local by design,
+  permanently, per
   `3IATLAS-IDENTITY-AND-GAME-SERVICES-DECISION-v1.0.md` §4. Progress sync
-  (Phase 3, implemented) stays dormant in production only because that
-  issuer doesn't exist yet — see `docs/dictionary-games-tech-spec.md` §11
-  (no longer cited via the retired "OQ-G1" label). This repo must not read
-  Bearer/suite tokens from `localStorage`.
+  (Phase 3, implemented) stays dormant in production not for want of an
+  issuer but because the Game Node does not yet accept suite tokens on
+  `/events/batch` — approved, not yet implemented there. See
+  `docs/dictionary-games-tech-spec.md` §11 (no longer cited via the retired
+  "OQ-G1" label). This repo must not read Bearer/suite tokens from
+  `localStorage`.
 - **Audio asset generation** and **dictionary entry enrichment** — owned by
   the dictionary pipeline.
 - **WordPress / PHP / server-side logic** — this is a browser package only.

@@ -56,14 +56,17 @@ one place to keep in sync with the code.
   Game-Service intake spec (`GAME-SERVICE-INTAKE-SPEC-v1.0`, node-engine
   repo) is committed and implemented, and `syncNow()` POSTs to it — but the
   network branch only runs when a host-supplied `getSuiteToken()` call
-  resolves to a truthy token, and no host does that today because
-  `sparxstar-identity` (the suite-token issuer) doesn't exist yet. This is
-  **not** a guest-token-issuance gap — guest play never calls this path at
-  all, by design (device-local, permanent, per
-  `3IATLAS-IDENTITY-AND-GAME-SERVICES-DECISION-v1.0.md` §4) — it is the
-  Identity Service being unbuilt for authenticated accounts. See
-  `docs/dictionary-games-tech-spec.md` §11 (no longer cited via the retired
-  "OQ-G1" label).
+  resolves to a truthy token, and no host does that today. This is **not** a
+  guest-token-issuance gap — guest play never calls this path at all, by
+  design (device-local, permanent, per
+  `3IATLAS-IDENTITY-AND-GAME-SERVICES-DECISION-v1.0.md` §4) — and it is
+  **not** a missing issuer: `sparxstar-identity` exists
+  (`sparxstar-3iatlas-identity-node`), mints RS256 suite tokens, and is
+  production-ready for adult accounts. The outstanding work is engine-side:
+  `/events/batch` admits only RLC participant tokens today, and settlement
+  still requires an RLC session. Adult suite-token intake is approved but
+  unimplemented there. See `docs/dictionary-games-tech-spec.md` §11 (no
+  longer cited via the retired "OQ-G1" label).
 - Do not read Helios Bearer tokens from `localStorage` (XSS exposure).
 - Never emit `Access-Control-Allow-Credentials`.
 - WordPress authentication is prohibited for all game endpoints.
