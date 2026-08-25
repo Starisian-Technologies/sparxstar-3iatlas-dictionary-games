@@ -27,11 +27,17 @@ submitted to the spec registry under `specs/IAtlas/`.
 
 ### What this repo is
 
-The RLC Games layer — a standalone React package containing the game shell,
-all six game components, session and progress hooks, IndexedDB utilities, and
-the dictionary API client. Extracted from `sparxstar-3iatlas-dictionary`. It is
-a **pure consumer** of the dictionary REST API. It contains no WordPress code,
-no PHP, and no server-side logic. See `ROLE.md` for the full boundary.
+The RLC Games layer — the game shell, all six game components, session and
+progress hooks, IndexedDB utilities, and the dictionary API client. Extracted
+from `sparxstar-3iatlas-dictionary`. It contains no WordPress code, no PHP, and
+no server-side logic. See `ROLE.md` for the full boundary.
+
+It builds **two artifacts from one source tree** (spec §4, §12.1): the reusable
+UMD package (`pnpm run build` → `dist/`, React external) and the deployable
+`games.sparxstar.com` website (`pnpm run build:site` → `dist-site/`, React
+bundled). `src/site/` consumes the package sources; nothing under
+`src/components/` or `src/hooks/` may import from `src/site/`. Keep that
+one-way, or the package boundary stops being real.
 
 ### Repo structure, API constraints, auth model, and data model
 
@@ -51,27 +57,40 @@ one place to keep in sync with the code.
 
 ### Security rules (hard requirements)
 
-- `useProgressSync.syncNow()` MUST NOT post to the network until a
-  Game-Service intake spec is committed and a token-issuance mechanism exists
-  for anonymous/guest game clients. It is a deliberate no-op today. See
-  `docs/dictionary-games-tech-spec.md` §11 for the current blocker stated in
-  plain language — it is **no longer cited via the "OQ-G1" label**. That
-  label drifted and now disagrees between this repo and
-  `sparxstar-3iatlas-dictionary`'s governance docs, and no GitHub Issue backs
-  it in either repo, so it has been retired as a citation (see the note in
-  §11 for the full explanation).
-- Do not read Helios Bearer tokens from `localStorage` (XSS exposure).
-- Never emit `Access-Control-Allow-Credentials`.
+- `useProgressSync.syncNow()` posts to the network **only** when a caller
+  supplies both `engineUrl` and a `getSuiteToken` that resolves to a real
+  token. As of 2026-08-25 the bundled website does that for a signed-in adult
+  (Identity Service is the issuer), so the path is live — for **guests it is
+  not, and must not become so**: an anonymous player has no token and their
+  progress stays on the device. See `docs/dictionary-games-tech-spec.md` §12.5
+  and §11. (The blocker is no longer cited via the "OQ-G1" label; see the note
+  in §11 for why.)
+- **Never persist a suite/Bearer token in the browser.** Not `localStorage`,
+  not `sessionStorage`, not IndexedDB, not a cookie, not a URL parameter, and
+  never in a log line. The website holds it in a module-scoped variable
+  (`src/site/auth/suiteToken.js`) and nowhere else, which is why a refresh
+  requires signing in again. **That is the accepted design, not a bug to
+  fix** — a silent renewal needs an approved contract that does not exist yet
+  (spec §12.4, §11). Two test suites enforce this; do not weaken them.
+- Never emit `Access-Control-Allow-Credentials`. Both the Identity Service and
+  the engine set `credentials: false`, and the website sends
+  `credentials: 'omit'`.
+- The website bundle must never contain the dictionary consumer API key.
 - WordPress authentication is prohibited for all game endpoints.
+- **No PHP in this repo.** `backend/*.php` was removed 2026-08-25 as historical
+  drafts superseded by the dictionary repo's own implementation (spec §12.8).
+  Server-side code belongs in the repo that owns the namespace.
 
 ### Open questions tracked by this repo
 
-| ID    | Description                                                                                                                                                                                              |
-| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| —     | Progress-sync token-issuance blocker for anonymous/guest game clients — stated in plain language in `docs/dictionary-games-tech-spec.md` §11. No longer cited as "OQ-G1"; see the retirement note there. |
-| OQ-G3 | LetterReveal pottery animation — emoji placeholder, awaiting approved asset                                                                                                                              |
-| OQ-G4 | DomainFlash "I knew it" hook confirmation                                                                                                                                                                |
-| OQ-I3 | Guest device progress merge — blocked on Game Service intake spec                                                                                                                                        |
+| ID    | Description                                                                                                                                                                                                                |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| —     | Progress-sync token issuance: resolved for authenticated adults (Identity Service), still open for anonymous guests — `docs/dictionary-games-tech-spec.md` §11. No longer cited as "OQ-G1"; see the retirement note there. |
+| —     | Secure session renewal — the website's token is memory-only, so a refresh signs the player out. Needs an approved contract before any persistence is added (§12.4).                                                        |
+| —     | `https://games.sparxstar.com` must be added to `UI_ORIGINS` on the Identity Service and the engine, additively (§12.7). Deployment config, not code.                                                                       |
+| OQ-G3 | LetterReveal pottery animation — emoji placeholder, awaiting approved asset                                                                                                                                                |
+| OQ-G4 | DomainFlash "I knew it" hook confirmation                                                                                                                                                                                  |
+| OQ-I3 | Guest device progress merge — blocked on Game Service intake spec                                                                                                                                                          |
 
 ### Upstream spec references (in the dictionary repo)
 

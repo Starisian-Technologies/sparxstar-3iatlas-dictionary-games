@@ -55,6 +55,7 @@ describe('useProgressSync — guest/local-only path', () => {
 
         await result.current.addEvent({
             type: 'game_result',
+            run_id: 'run-a',
             word_uuid: 'w1',
             game: 'listen_write',
             outcome: 'correct',
@@ -78,6 +79,7 @@ describe('useProgressSync — guest/local-only path', () => {
 
         await result.current.addEvent({
             type: 'game_result',
+            run_id: 'run-a',
             word_uuid: 'w1',
             game: 'listen_write',
             outcome: 'correct',
@@ -101,6 +103,7 @@ describe('useProgressSync — guest/local-only path', () => {
 
         await result.current.addEvent({
             type: 'game_result',
+            run_id: 'run-a',
             word_uuid: 'w1',
             game: 'listen_write',
             outcome: 'correct',
@@ -130,6 +133,7 @@ describe('useProgressSync — authenticated sync path (suite token injected)', (
 
         await result.current.addEvent({
             type: 'game_result',
+            run_id: 'run-a',
             word_uuid: 'w1',
             game: 'listen_write',
             outcome: 'correct',
@@ -139,6 +143,7 @@ describe('useProgressSync — authenticated sync path (suite token injected)', (
         await result.current.addEvent({ type: 'aiwa_game_streak_3' }); // bonus signal — must stay local-only
         await result.current.addEvent({
             type: 'game_result',
+            run_id: 'run-a',
             word_uuid: 'w2',
             game: 'letter_reveal',
             outcome: 'learning',
@@ -162,6 +167,8 @@ describe('useProgressSync — authenticated sync path (suite token injected)', (
                     event_type: 'game.result',
                     payload: {
                         game_type: 'dictionary_quiz',
+                        session_id: 'run-a',
+                        deal_id: 'w1',
                         word_uuid: 'w1',
                         outcome: 'correct',
                         attempts: 1,
@@ -172,6 +179,8 @@ describe('useProgressSync — authenticated sync path (suite token injected)', (
                     event_type: 'game.result',
                     payload: {
                         game_type: 'dictionary_quiz',
+                        session_id: 'run-a',
+                        deal_id: 'w2',
                         word_uuid: 'w2',
                         outcome: 'learning',
                         attempts: 5,
@@ -199,6 +208,7 @@ describe('useProgressSync — authenticated sync path (suite token injected)', (
 
         await result.current.addEvent({
             type: 'game_result',
+            run_id: 'run-a',
             word_uuid: 'ok',
             game: 'listen_write',
             outcome: 'correct',
@@ -207,6 +217,7 @@ describe('useProgressSync — authenticated sync path (suite token injected)', (
         });
         await result.current.addEvent({
             type: 'game_result',
+            run_id: 'run-a',
             word_uuid: 'bad',
             game: 'listen_write',
             outcome: 'correct',
@@ -241,6 +252,7 @@ describe('useProgressSync — authenticated sync path (suite token injected)', (
 
         await result.current.addEvent({
             type: 'game_result',
+            run_id: 'run-a',
             word_uuid: 'w1',
             game: 'listen_write',
             outcome: 'correct',
@@ -274,12 +286,13 @@ describe('useProgressSync — authenticated sync path (suite token injected)', (
 
         // Simulate an outbox written by a build that predates event_id
         // (bypasses addEvent, which always assigns one) alongside a normal,
-        // already-id'd entry.
+        // already-id'd entry. Both carry a run_id, so both are settleable.
         idbUtils.__store.set('progress-outbox:progress-outbox:pending', {
             key: 'progress-outbox:pending',
             events: [
                 {
                     type: 'game_result',
+                    run_id: 'run-a',
                     word_uuid: 'legacy',
                     game: 'listen_write',
                     outcome: 'correct',
@@ -290,6 +303,7 @@ describe('useProgressSync — authenticated sync path (suite token injected)', (
                 {
                     event_id: 'evt-has-id',
                     type: 'game_result',
+                    run_id: 'run-a',
                     word_uuid: 'w2',
                     game: 'listen_write',
                     outcome: 'learning',
@@ -322,5 +336,111 @@ describe('useProgressSync — authenticated sync path (suite token injected)', (
 
         // Both accepted -> both drained.
         expect(getOutbox()).toHaveLength(0);
+    });
+});
+
+/**
+ * Events the engine can only ever refuse must not be re-offered forever.
+ *
+ * `dictionary_quiz` is question-scoped: without a run id AND a question id the
+ * engine answers `run_id_required` / `question_id_required`, and an unknown
+ * outcome makes it throw rather than score. Each of those is a permanent 400
+ * for that event, so retrying it on every flush would grow the outbox without
+ * bound and bury the failures that *are* worth retrying. The learner's progress
+ * is not at risk either way — `game-sessions` is the durable record; the outbox
+ * is only a reward-claim queue.
+ */
+describe('useProgressSync — events the engine can never settle', () => {
+    const engineProps = {
+        restUrl: 'https://dict.example/wp-json/sparxstar/v1/dictionary',
+        engineUrl: 'https://engine.example/api/v1',
+        getSuiteToken: () => 'fake-suite-token',
+    };
+
+    it.each([
+        ['no run id (run_id_required)', { run_id: '', word_uuid: 'w1', outcome: 'correct' }],
+        [
+            'no question id (question_id_required)',
+            { run_id: 'run-a', word_uuid: '', outcome: 'correct' },
+        ],
+        [
+            'an outcome the manifest does not score',
+            { run_id: 'run-a', word_uuid: 'w1', outcome: 'nearly' },
+        ],
+        [
+            'a run id longer than the engine column allows',
+            { run_id: 'r'.repeat(200), word_uuid: 'w1', outcome: 'correct' },
+        ],
+    ])('drops a game_result with %s instead of retrying it forever', async (_label, bad) => {
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+        const { result } = renderHook(useProgressSync, engineProps);
+
+        await result.current.addEvent({
+            type: 'game_result',
+            game: 'listen_write',
+            attempts: 1,
+            time_ms: 900,
+            ...bad,
+        });
+        await result.current.syncNow();
+
+        expect(window.fetch).not.toHaveBeenCalled();
+        expect(getOutbox()).toHaveLength(0);
+        warn.mockRestore();
+    });
+
+    it('still sends the settleable events in a batch that also contains a malformed one', async () => {
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+        window.fetch.mockResolvedValue({
+            ok: true,
+            json: async () => ({ accepted: 1, failed: [] }),
+        });
+        const { result } = renderHook(useProgressSync, engineProps);
+
+        await result.current.addEvent({
+            type: 'game_result',
+            run_id: 'run-a',
+            word_uuid: 'good',
+            outcome: 'correct',
+            attempts: 1,
+            time_ms: 100,
+        });
+        await result.current.addEvent({
+            type: 'game_result',
+            word_uuid: 'no-run',
+            outcome: 'correct',
+            attempts: 1,
+            time_ms: 100,
+        });
+
+        await result.current.syncNow();
+
+        const body = JSON.parse(window.fetch.mock.calls[0][1].body);
+        expect(body.events).toHaveLength(1);
+        expect(body.events[0].payload.deal_id).toBe('good');
+        expect(getOutbox()).toHaveLength(0); // one accepted, one discarded
+        warn.mockRestore();
+    });
+
+    it('clamps a negative or non-numeric measurement to the zero the engine accepts', async () => {
+        window.fetch.mockResolvedValue({
+            ok: true,
+            json: async () => ({ accepted: 1, failed: [] }),
+        });
+        const { result } = renderHook(useProgressSync, engineProps);
+
+        await result.current.addEvent({
+            type: 'game_result',
+            run_id: 'run-a',
+            word_uuid: 'w1',
+            outcome: 'correct',
+            attempts: -3,
+            time_ms: Number.NaN,
+        });
+        await result.current.syncNow();
+
+        const body = JSON.parse(window.fetch.mock.calls[0][1].body);
+        expect(body.events[0].payload.attempts).toBe(0);
+        expect(body.events[0].payload.time_ms).toBe(0);
     });
 });

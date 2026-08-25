@@ -8,6 +8,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { getRecord, putRecord, deleteRecord } from './idbUtils.js';
 import { PRODUCTION_GAMES } from '../constants.js';
+import { newRunId } from '../ids.js';
 
 const SESSION_KEY = 'game-session:current';
 const LEARNED_KEY = 'learned-words:production';
@@ -56,8 +57,19 @@ export function useGameSession() {
                 if (cancelled) return;
 
                 if (saved && saved.completedAt === null) {
-                    sessionRef.current = saved;
-                    setSession(saved);
+                    /* A session written by a build older than run-id support
+                     * has no runId. Backfill and persist one rather than
+                     * letting the resumed run report results with an empty
+                     * `session_id` — the engine refuses a question-scoped
+                     * event without a run key (`run_id_required`), so those
+                     * results would never settle. One id assigned here keeps
+                     * the whole resumed run on a single claim key. */
+                    const resumed = saved.runId ? saved : { ...saved, runId: newRunId() };
+                    if (resumed !== saved && typeof putRecord === 'function') {
+                        await putRecord('game-sessions', resumed);
+                    }
+                    sessionRef.current = resumed;
+                    setSession(resumed);
                 }
                 if (learnedRecord && Array.isArray(learnedRecord.uuids)) {
                     setLearnedCount(learnedRecord.uuids.length);
@@ -95,6 +107,14 @@ export function useGameSession() {
     /**
      * Start a new session, replacing any existing one.
      *
+     * Each session is stamped with a fresh `runId` — the identifier of this
+     * one play-through. It is what `game.result` sends as `payload.session_id`,
+     * and it is the `run_id` half of the engine's per-question award claim
+     * (`src/ids.js`). Minting it here, once per session, is what makes
+     * "at most one award per question per run" mean what it says: every result
+     * from this play-through shares it, and the next play-through gets a new
+     * one so the same word may legitimately settle again.
+     *
      * @param {object} opts
      * @param {string} opts.gameType
      * @param {string} opts.langSource
@@ -105,6 +125,7 @@ export function useGameSession() {
         async ({ gameType, langSource, domain, words }) => {
             const newSession = {
                 key: SESSION_KEY,
+                runId: newRunId(),
                 gameType,
                 langSource,
                 domain,

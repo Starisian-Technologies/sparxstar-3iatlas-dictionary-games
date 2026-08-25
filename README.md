@@ -5,13 +5,20 @@ shell, six language-learning game components, session and progress hooks, an
 IndexedDB caching layer, and the typed dictionary REST client.
 
 A collection of challenging word games for any language. Extracted from
-`sparxstar-3iatlas-dictionary`, this package is a **pure consumer** of that
-dictionary's REST API — it contains no WordPress code, no PHP, and no
-server-side logic.
+`sparxstar-3iatlas-dictionary`, it is a **pure consumer** of that dictionary's
+REST API — no WordPress code, no PHP, no server-side logic.
 
-> Built as the UMD global `RlcGames` (npm package name `sparxstar-rlc-games`).
+**Two build targets, one source tree:**
+
+|         | What                                      | Command               | Output                                                         |
+| :------ | :---------------------------------------- | :-------------------- | :------------------------------------------------------------- |
+| Package | UMD bundle for host shells to mount       | `pnpm run build`      | `dist/js/rlc-games.min.js` (global `RlcGames`, React external) |
+| Website | The deployable `games.sparxstar.com` site | `pnpm run build:site` | `dist-site/` (`index.html` + hashed assets, React bundled)     |
+
 > See **`ROLE.md`** for the repo boundary, **`AGENTS.md`** for the rules agents
-> must follow, and **`docs/dictionary-games-tech-spec.md`** for the full spec.
+> must follow, **`DEPLOY.md`** for shipping the website, and
+> **`docs/dictionary-games-tech-spec.md`** for the full spec (§12 covers the
+> website).
 
 ## The six games
 
@@ -35,15 +42,41 @@ with `corepack enable`).
 
 ```bash
 pnpm install
-pnpm run build      # webpack → dist/js/rlc-games.min.js (UMD global RlcGames)
-pnpm run watch      # rebuild on change
-pnpm run lint       # eslint --fix
-pnpm run format     # prettier --write
-pnpm test           # jest --passWithNoTests
+pnpm run build       # package → dist/js/rlc-games.min.js (UMD global RlcGames)
+pnpm run build:site  # website → dist-site/ (index.html + hashed assets)
+pnpm run build:all   # both
+pnpm run watch       # rebuild the package on change
+pnpm run lint        # eslint --fix
+pnpm run format      # prettier --write
+pnpm test            # jest
 ```
 
-`react` and `react-dom` are webpack externals — the host application provides
-them.
+In the **package** build `react` and `react-dom` are webpack externals — the
+host application provides them. In the **website** build they are bundled,
+because the website is the host.
+
+### The website
+
+`src/site/` is a first-party host for the same components: it mounts
+`<GameShell />`, supplies Tailwind, and adds adult sign-in against the 3iAtlas
+Identity Service. Signing in is optional — guest play is complete and stays on
+the device; signing in lets finished results earn XP.
+
+The suite token is held **in memory only**, so a page refresh signs the player
+out. That is deliberate and documented (spec §12.3–§12.4) — please read it
+before "fixing" it.
+
+`src/site/` imports from the package sources; the package must never import from
+`src/site/`.
+
+```bash
+GAMES_DICTIONARY_URL=https://dictionary.example/wp-json/sparxstar/v1/dictionary \
+  pnpm run build:site
+```
+
+Endpoints default to production and are overridable per build with
+`GAMES_ENGINE_URL`, `GAMES_IDENTITY_URL`, `GAMES_SITE_URL` and
+`GAMES_DICTIONARY_URL`. None is a secret; no credential is ever compiled in.
 
 ## Usage
 
@@ -91,6 +124,7 @@ This repo participates in the platform governance system:
 - `.github/workflows/standards.yml` — org-wide JS/CSS/formatting enforcement.
 - `docs/dictionary-games-tech-spec.md` — the product spec (submitted to the
   spec registry under `specs/IAtlas/`).
+- `DEPLOY.md` — building and serving the website.
 
 ## License
 

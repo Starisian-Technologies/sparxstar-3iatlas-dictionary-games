@@ -293,9 +293,20 @@ export default function GameShell({
                      * conformant GameResultEvent. This is a distinct local event type
                      * from the aiwa_game_* bonus signals below: only this one is
                      * translated to game.result by syncNow(); the bonus signals stay
-                     * local-only (the engine has no scoring path for them). */
+                     * local-only (the engine has no scoring path for them).
+                     *
+                     * `run_id` and `word_uuid` together are what the engine's
+                     * per-question award claim is keyed on — the run this result
+                     * belongs to, and the question within it (they become the
+                     * payload's `session_id` and `deal_id`). `dictionary_quiz` is
+                     * question_scoped, so an event missing either is refused
+                     * outright (`run_id_required` / `question_id_required`) rather
+                     * than settled without idempotency. The run id comes from the
+                     * session recordResult just wrote, so it is the same id for
+                     * every result in this play-through. */
                     await addEvent({
                         type: 'game_result',
+                        run_id: updatedSession?.runId ?? '',
                         word_uuid: uuid,
                         game: selectedGame,
                         outcome,

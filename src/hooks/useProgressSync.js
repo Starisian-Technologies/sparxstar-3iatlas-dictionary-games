@@ -13,20 +13,20 @@
  *     SECURITY NOTE below) so the host app controls entirely how/whether a
  *     token is minted and stored.
  *
- * Neither is supplied by anything in this repo today — there is no suite
- * token issuer wired up for this class of client (docs/dictionary-games-tech-spec.md
- * §11). Until a host app passes both, syncNow() resolves immediately without
- * making a network call, and progress accumulates in the IndexedDB outbox
- * exactly as before. This makes the sync path fully buildable and
- * integration-testable (inject a fake `getSuiteToken` in tests) while
- * staying genuinely dormant in production.
+ * Until a caller passes both, syncNow() resolves immediately without making a
+ * network call and progress accumulates in the IndexedDB outbox — which is
+ * exactly what a GUEST is: a player nobody has signed in, whose results stay on
+ * the device. The bundled website (`src/site/`) supplies both only after an
+ * adult signs in against the Identity Service, so guest play and authenticated
+ * play are the same code path with and without a token, not two code paths.
  *
- * The event shape written to the outbox mirrors what this repo's old
- * WordPress `/progress/sync` handler parsed (now retired, but its shape is
- * the only verified precedent): `{ type, word_uuid?, game?, domain?, ts }`,
- * plus an `event_id` (used for idempotent replay) and, for `game_result`
- * events specifically, `outcome`, `attempts`, `time_ms`. This is not a
- * contract — just the ad-hoc shape addEvent() calls happen to use.
+ * The event shape written to the outbox is
+ * `{ event_id, type, word_uuid?, game?, domain?, ts }`, plus — for
+ * `game_result` events specifically — `run_id`, `outcome`, `attempts` and
+ * `time_ms`. `run_id` and `word_uuid` are not decoration: they become the
+ * wire's `session_id` and `deal_id`, which is what the engine keys its
+ * per-question award claim on. An event missing either cannot settle at all
+ * (see isSettleable).
  *
  * Only `game_result` events are ever translated to the engine's `game.result`
  * wire vocabulary and sent over the network. The `aiwa_game_*` bonus events
@@ -36,24 +36,75 @@
  *
  * SECURITY NOTE: This hook never reads a token from localStorage itself —
  * that would expose it to any injected script (XSS), undermining the
- * platform's token-integrity guarantee. `getSuiteToken` is the host app's
- * responsibility; how it stores/mints the token is out of scope here.
+ * platform's token-integrity guarantee. `getSuiteToken` is the caller's
+ * responsibility. The bundled website holds the token in a module-scoped
+ * variable and nowhere else (`src/site/auth/suiteToken.js`), which is why a
+ * refresh there requires signing in again — see tech spec §12. The token is
+ * also never logged: the warnings below report status codes and counts, never
+ * the Authorization header or a response body that might echo it.
  */
 
 import { useCallback, useEffect, useRef } from 'react';
 import { getRecord, putRecord } from './idbUtils.js';
+import { newEventId } from '../ids.js';
 
 const OUTBOX_KEY = 'progress-outbox:pending';
 const BATCH_MAX = 200; // matches the engine's `batch_too_large` cap (spec §3.10)
 
-function genEventId() {
-    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-        return crypto.randomUUID();
+/**
+ * The engine's `game_type` for every game in this suite.
+ *
+ * Not a per-minigame id: `listen_write`, `arrange_word` and the rest all settle
+ * as `dictionary_quiz`, which is the one manifest the engine registers for this
+ * client (node-engine `src/games/manifests.ts`). The specific minigame stays in
+ * the local outbox event's `game` field and is never sent — the engine has no
+ * per-minigame scoring path, and inventing game_types it has no manifest for
+ * would get every event rejected as `unsupported_game_type`.
+ */
+const GAME_TYPE = 'dictionary_quiz';
+
+/**
+ * Outcomes the `dictionary_quiz` manifest scores. An outcome outside this set
+ * is rejected by the engine (`scoringXpForOutcome` throws rather than silently
+ * scoring an unknown result), so sending one produces an event that fails on
+ * every flush forever.
+ */
+const VALID_OUTCOMES = new Set(['correct', 'learning', 'incorrect', 'skipped']);
+
+/** The engine stores `run_id` in a varchar(128) and prefixes solo runs with
+ *  `solo:` before writing, so the value this client sends must leave room. */
+const MAX_RUN_ID_LENGTH = 128 - 'solo:'.length;
+
+/**
+ * Can this queued `game_result` ever settle?
+ *
+ * `dictionary_quiz` is question-scoped, so the engine refuses an event that
+ * cannot identify both its run and its question — `run_id_required` and
+ * `question_id_required` are hard 400s, not warnings. An event that fails these
+ * checks would be re-sent and re-refused on every single flush, growing the
+ * outbox without bound and burying genuinely retryable failures. Screening them
+ * out here costs nothing: the durable record of the result is the local session
+ * in `game-sessions` (tech spec §5), not the outbox, so a dropped event loses a
+ * reward claim, never the learner's progress.
+ *
+ * @param {object} e Queued outbox event.
+ * @returns {boolean}
+ */
+function isSettleable(e) {
+    if (!e.event_id) return false;
+    if (typeof e.run_id !== 'string' || !e.run_id || e.run_id.length > MAX_RUN_ID_LENGTH) {
+        return false;
     }
-    // Fallback for environments without crypto.randomUUID (older browsers, some
-    // test runners) — not cryptographically strong, but only needs to be
-    // unique enough to dedupe one client's own outbox events.
-    return `evt-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    if (typeof e.word_uuid !== 'string' || !e.word_uuid) return false;
+    if (!VALID_OUTCOMES.has(e.outcome)) return false;
+    return true;
+}
+
+/** Clamp a measurement to the non-negative finite integer the engine accepts
+ *  (it rejects negatives outright and defaults a non-number to 0). */
+function measurement(value) {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return 0;
+    return Math.round(value);
 }
 
 /**
@@ -94,7 +145,7 @@ export function useProgressSync({ restUrl: _restUrl, engineUrl, getSuiteToken })
 
             await putRecord('progress-outbox', {
                 key: OUTBOX_KEY,
-                events: [...events, { event_id: genEventId(), ...event, ts: Date.now() }],
+                events: [...events, { event_id: newEventId(), ...event, ts: Date.now() }],
             }).then((ok) => {
                 if (!ok) {
                     console.warn(
@@ -153,34 +204,81 @@ export function useProgressSync({ restUrl: _restUrl, engineUrl, getSuiteToken })
         const events = rawEvents.map((e) => {
             if (e.event_id) return e;
             backfilled = true;
-            return { ...e, event_id: genEventId() };
+            return { ...e, event_id: newEventId() };
         });
         if (backfilled && typeof putRecord === 'function') {
             await putRecord('progress-outbox', { key: OUTBOX_KEY, events });
         }
 
-        const pending = events.filter((e) => e.type === 'game_result').slice(0, BATCH_MAX);
-        if (pending.length === 0) return;
+        /* Screen out anything the engine can only ever refuse, and drop it from
+         * the outbox rather than re-offering it forever (see isSettleable). */
+        const allResults = events.filter((e) => e.type === 'game_result');
+        const unsettleable = allResults.filter((e) => !isSettleable(e));
+        if (unsettleable.length > 0) {
+            console.warn(
+                `useProgressSync: discarding ${unsettleable.length} malformed game_result event(s) the engine cannot settle.`
+            );
+        }
+        const unsettleableIds = new Set(unsettleable.map((e) => e.event_id));
 
+        const pending = allResults.filter(isSettleable).slice(0, BATCH_MAX);
+        if (pending.length === 0) {
+            if (unsettleable.length > 0 && typeof putRecord === 'function') {
+                await putRecord('progress-outbox', {
+                    key: OUTBOX_KEY,
+                    events: events.filter((e) => !unsettleableIds.has(e.event_id)),
+                });
+            }
+            return;
+        }
+
+        /*
+         * The `game.result` wire shape (node-engine `GameResultInput`,
+         * GAME-SERVICE-INTAKE-SPEC-v1.0 §1–§2). Two identifiers do the
+         * idempotency work, and they are deliberately different things:
+         *
+         *   event_id  — transport-level. The engine's `processed_events` table
+         *               dedupes on it, so re-flushing an event it already
+         *               applied is silently skipped. Assigned once at queue
+         *               time and never regenerated, which is what makes a
+         *               retry a replay rather than a second submission.
+         *
+         *   session_id + deal_id — settlement-level. Together with game_type
+         *               and the account they form the engine's per-question
+         *               award claim. A refresh that somehow re-queued the same
+         *               result under a NEW event_id still cannot be paid twice,
+         *               because the claim row for (dictionary_quiz, this run,
+         *               this word, this account) is already taken. Replaying
+         *               the same word in a *new* run is a different claim, and
+         *               settles again — which is the intended behaviour.
+         *
+         * No xp or score is sent: the engine derives the award from
+         * game_type + outcome (Reward Rail Contract §3), and a client-supplied
+         * amount would be ignored at best.
+         */
         const batchEvents = pending.map((e) => ({
             event_id: e.event_id,
             event_type: 'game.result',
             payload: {
-                // 'dictionary_quiz' is the placeholder game_type the engine's
-                // manifest is registered under (GAME-SERVICE-INTAKE-SPEC-v1.0 OQ-4) —
-                // not a per-minigame id. e.game (e.g. 'listen_write') stays local.
-                game_type: 'dictionary_quiz',
-                // Not part of the engine's GameResultInput contract today
-                // (src/services/gameResults.ts in the node-engine repo has
-                // no word_uuid field; settlement is per game_type/outcome,
-                // not per word) — sent anyway per review feedback so the
-                // engine has it available if per-word attribution is added
-                // later. Harmless either way: an unread field is ignored,
-                // not rejected.
+                game_type: GAME_TYPE,
+                /* The run this result belongs to. The engine namespaces it
+                 * (`solo:<run_id>`) so a solo run can never collide with a
+                 * classroom session's key. */
+                session_id: e.run_id,
+                /* The question within that run. For this suite a "question" is
+                 * a dictionary entry, so the entry UUID is the stable question
+                 * id — the same word in the same run is the same deal. */
+                deal_id: e.word_uuid,
+                /* Retained alongside deal_id: it is the same value today, but
+                 * deal_id is the engine's idempotency key and word_uuid is the
+                 * dictionary's own identifier. Keeping both means a later
+                 * change to how a question is keyed (a sentence id, a
+                 * per-prompt id) does not silently re-point the entry
+                 * reference. An unread field is ignored, not rejected. */
                 word_uuid: e.word_uuid,
                 outcome: e.outcome,
-                attempts: e.attempts,
-                time_ms: e.time_ms,
+                attempts: measurement(e.attempts),
+                time_ms: measurement(e.time_ms),
             },
         }));
 
@@ -207,7 +305,9 @@ export function useProgressSync({ restUrl: _restUrl, engineUrl, getSuiteToken })
         const failedIds = new Set((result?.failed ?? []).map((f) => f.event_id));
         const sentIds = new Set(pending.map((e) => e.event_id));
         const remaining = events.filter(
-            (e) => !sentIds.has(e.event_id) || failedIds.has(e.event_id)
+            (e) =>
+                !unsettleableIds.has(e.event_id) &&
+                (!sentIds.has(e.event_id) || failedIds.has(e.event_id))
         );
 
         if (typeof putRecord === 'function') {
