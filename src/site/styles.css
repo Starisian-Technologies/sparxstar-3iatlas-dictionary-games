@@ -1,0 +1,13 @@
+/*
+ * Tailwind entry for the website build.
+ *
+ * The UMD package deliberately ships no CSS entry — a host that mounts
+ * <GameShell /> supplies the Tailwind runtime, which is why the game components
+ * use utility classes without vendoring them (tech spec §10). This site IS a
+ * host, so it is the thing that owes those utilities, and this file is where it
+ * pays. `tailwind.config.cjs` already scans `./src/**` so both the site chrome
+ * and the game components are covered by one content glob.
+ */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

@@ -27,11 +27,17 @@ submitted to the spec registry under `specs/IAtlas/`.
 
 ### What this repo is
 
-The RLC Games layer — a standalone React package containing the game shell,
-all six game components, session and progress hooks, IndexedDB utilities, and
-the dictionary API client. Extracted from `sparxstar-3iatlas-dictionary`. It is
-a **pure consumer** of the dictionary REST API. It contains no WordPress code,
-no PHP, and no server-side logic. See `ROLE.md` for the full boundary.
+The RLC Games layer — the game shell, all six game components, session and
+progress hooks, IndexedDB utilities, and the dictionary API client. Extracted
+from `sparxstar-3iatlas-dictionary`. It contains no WordPress code, no PHP, and
+no server-side logic. See `ROLE.md` for the full boundary.
+
+It builds **two artifacts from one source tree** (spec §4, §12.1): the reusable
+UMD package (`pnpm run build` → `dist/`, React external) and the deployable
+`games.sparxstar.com` website (`pnpm run build:site` → `dist-site/`, React
+bundled). `src/site/` consumes the package sources; nothing under
+`src/components/` or `src/hooks/` may import from `src/site/`. Keep that
+one-way, or the package boundary stops being real.
 
 ### Repo structure, API constraints, auth model, and data model
 
@@ -51,34 +57,40 @@ one place to keep in sync with the code.
 
 ### Security rules (hard requirements)
 
-- `useProgressSync.syncNow()` MUST NOT post to the network without a real
-  bearer token. As of Phase 3 (2026-08-05) it is **no longer a no-op** — the
-  Game-Service intake spec (`GAME-SERVICE-INTAKE-SPEC-v1.0`, node-engine
-  repo) is committed and implemented, and `syncNow()` POSTs to it — but the
-  network branch only runs when a host-supplied `getSuiteToken()` call
-  resolves to a truthy token, and no host does that today. This is **not** a
-  guest-token-issuance gap — guest play never calls this path at all, by
-  design (device-local, permanent, per
-  `3IATLAS-IDENTITY-AND-GAME-SERVICES-DECISION-v1.0.md` §4) — and it is
-  **not** a missing issuer: `sparxstar-identity` exists
-  (`sparxstar-3iatlas-identity-node`), mints RS256 suite tokens, and is
-  production-ready for adult accounts. The outstanding work is engine-side:
-  `/events/batch` admits only RLC participant tokens today, and settlement
-  still requires an RLC session. Adult suite-token intake is approved but
-  unimplemented there. See `docs/dictionary-games-tech-spec.md` §11 (no
-  longer cited via the retired "OQ-G1" label).
-- Do not read Helios Bearer tokens from `localStorage` (XSS exposure).
-- Never emit `Access-Control-Allow-Credentials`.
+- `useProgressSync.syncNow()` posts to the network **only** when a caller
+  supplies both `engineUrl` and a `getSuiteToken` that resolves to a real
+  token. As of 2026-08-25 the bundled website does that for a signed-in adult
+  (Identity Service is the issuer), so the path is live — for **guests it is
+  not, and must not become so**: an anonymous player has no token and their
+  progress stays on the device. See `docs/dictionary-games-tech-spec.md` §12.5
+  and §11. (The blocker is no longer cited via the "OQ-G1" label; see the note
+  in §11 for why.)
+- **Never persist a suite/Bearer token in the browser.** Not `localStorage`,
+  not `sessionStorage`, not IndexedDB, not a cookie, not a URL parameter, and
+  never in a log line. The website holds it in a module-scoped variable
+  (`src/site/auth/suiteToken.js`) and nowhere else, which is why a refresh
+  requires signing in again. **That is the accepted design, not a bug to
+  fix** — a silent renewal needs an approved contract that does not exist yet
+  (spec §12.4, §11). Two test suites enforce this; do not weaken them.
+- Never emit `Access-Control-Allow-Credentials`. Both the Identity Service and
+  the engine set `credentials: false`, and the website sends
+  `credentials: 'omit'`.
+- The website bundle must never contain the dictionary consumer API key.
 - WordPress authentication is prohibited for all game endpoints.
+- **No PHP in this repo.** `backend/*.php` was removed 2026-08-25 as historical
+  drafts superseded by the dictionary repo's own implementation (spec §12.8).
+  Server-side code belongs in the repo that owns the namespace.
 
 ### Open questions tracked by this repo
 
-| ID    | Description                                                                                                                                                                                                                                                                                                                                   |
-| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| —     | **CLOSED, corrected 2026-08.** Not a guest-token gap — guest play is device-local by design, permanently, per `3IATLAS-IDENTITY-AND-GAME-SERVICES-DECISION-v1.0.md` §4. `syncNow()` is implemented (Phase 3) and gated on a host-supplied suite token (authenticated accounts only; `sparxstar-identity` is the issuer). See `docs/dictionary-games-tech-spec.md` §11. |
-| OQ-G3 | LetterReveal pottery animation — emoji placeholder, awaiting approved asset                                                                                                                                                                                                                                                                   |
-| OQ-G4 | DomainFlash "I knew it" hook confirmation                                                                                                                                                                                                                                                                                                     |
-| OQ-I3 | Guest device progress merge — blocked on the Identity Service spec (out of scope here)                                                                                                                                                                                                                                                       |
+| ID    | Description                                                                                                                                                                                                                |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| —     | Progress-sync token issuance: resolved for authenticated adults (Identity Service), still open for anonymous guests — `docs/dictionary-games-tech-spec.md` §11. No longer cited as "OQ-G1"; see the retirement note there. |
+| —     | Secure session renewal — the website's token is memory-only, so a refresh signs the player out. Needs an approved contract before any persistence is added (§12.4).                                                        |
+| —     | `https://games.sparxstar.com` must be added to `UI_ORIGINS` on the Identity Service and the engine, additively (§12.7). Deployment config, not code.                                                                       |
+| OQ-G3 | LetterReveal pottery animation — emoji placeholder, awaiting approved asset                                                                                                                                                |
+| OQ-G4 | DomainFlash "I knew it" hook confirmation                                                                                                                                                                                  |
+| OQ-I3 | Guest device progress merge — blocked on Game Service intake spec                                                                                                                                                          |
 
 ### Upstream spec references (in the dictionary repo)
 

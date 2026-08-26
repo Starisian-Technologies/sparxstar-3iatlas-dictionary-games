@@ -37,8 +37,47 @@ jobs:
             - name: Lint
               run: pnpm run lint:ci
 
-            - name: Build
+            - name: Build package (UMD)
               run: pnpm run build
+
+            # The website is a separate target and can break on its own — it
+            # bundles React instead of externalising it, compiles Tailwind, and
+            # validates its endpoint configuration at build time. Building only
+            # the package would let all of that rot unnoticed.
+            - name: Build website
+              run: pnpm run build:site
+
+            # The Nginx CSP's connect-src is generated from the same endpoint
+            # config the bundle is built with, so the two cannot disagree. This
+            # proves the committed copy is still that output: hand-editing the
+            # snippet, or changing an endpoint default without regenerating,
+            # fails here rather than in a browser as a CSP violation.
+            - name: Security headers snippet is up to date
+              run: |
+                  pnpm run build:headers
+                  if ! git diff --exit-code -- deploy/nginx/games-security-headers.conf; then
+                    echo "::error::deploy/nginx/games-security-headers.conf is stale — run 'pnpm run build:headers' and commit the result."
+                    exit 1
+                  fi
 
             - name: Test
               run: pnpm test
+
+            # Cheap standing check that no credential was ever compiled into
+            # the deployable bundle. The site's configuration is four public
+            # URLs; anything key-shaped in dist-site/ is a mistake worth
+            # failing the build over rather than discovering after it ships.
+            - name: Assert no secrets in the website bundle
+              run: |
+                  if grep -rIlE '(sk_live|sk_test|-----BEGIN [A-Z ]*PRIVATE KEY|X-Api-Key)' dist-site/; then
+                    echo "::error::Possible credential found in dist-site/"
+                    exit 1
+                  fi
+                  echo "No credential patterns found in dist-site/."
+
+            # Source maps are built for symbolicating crash reports and must
+            # not be served. Nginx 404s them and the Dockerfile deletes them;
+            # this just makes sure they are still findable at build time for
+            # the release artifact rather than silently disabled.
+            - name: Confirm source maps were emitted (for release artifacts)
+              run: test -n "$(find dist-site -name '*.map' -print -quit)"

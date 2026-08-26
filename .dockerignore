@@ -1,0 +1,19 @@
+# Keep the build context small and keep local state out of the image.
+# `deploy/Dockerfile` copies only the files the site build reads, so this is
+# defence in depth rather than the only control — but a smaller context also
+# means a faster build and no chance of a stray local file being baked in.
+
+node_modules/
+dist/
+dist-site/
+.git/
+.github/
+docs/
+backend/
+**/__tests__/
+*.test.js
+*.md
+.env
+.env.*
+*.local
+.DS_Store
