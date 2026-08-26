@@ -96,22 +96,22 @@ timeMs)` → `useGameSession.recordResult` → IndexedDB session +
   per-question award claim on, so it is not optional decoration — see §12.3
   and §6c. Network sync is **gated** on a supplied token, and the bundled
   website (§12) is the first thing in this platform that can supply one.
-- **Backend connectivity (updated 2026-08-05, Phase 3):** this repo now has a
-  **conditional, dependency-injected** connection to
+- **Backend connectivity (Phase 3 2026-08-05; live 2026-08-25):** this repo has
+  a **conditional, dependency-injected** connection to
   `sparxstar-3iatlas-rlc-node-engine`. `useProgressSync.syncNow()`
   (`src/hooks/useProgressSync.js`) POSTs to `{engineUrl}/events/batch` — the
   engine's `game.result` intake (GAME-SERVICE-INTAKE-SPEC-v1.0) — via the
   native `fetch()` API (no new package dependency), but **only** when the
-  host app supplies both an `engineUrl` and a `getSuiteToken` callback
-  (new optional `<GameShell />` props, §6b) and `getSuiteToken()` actually
-  resolves to a token. Neither is supplied by anything in this repo or wired
-  up by any host shell today. The suite-token issuer now exists —
-  `sparxstar-identity` is the `sparxstar-3iatlas-identity-node` repo, which
-  mints RS256 suite tokens and is production-ready for adult accounts — but
-  the engine does not yet accept those tokens on `/events/batch` (§11), so in
-  production this stays exactly as inert as before: no request is ever made. The code path itself, however, is real,
-  fully built, and integration-tested (against a fake injected token) rather
-  than theoretical. All other network traffic in this repo — through
+  caller supplies both an `engineUrl` and a `getSuiteToken` callback
+  (optional `<GameShell />` props, §6b) and `getSuiteToken()` actually
+  resolves to a token.
+  **Both ends are ready and the bundled website supplies both**, so this is
+  live traffic for a signed-in adult, not a dormant path: the issuer exists
+  (`sparxstar-3iatlas-identity-node`, RS256 suite tokens, adult-ready) and the
+  engine accepts them (`authenticateParticipantOrSuite` on that route, settling
+  via `settleSoloGameResult`; §10, §12.3). It stays inert only for a **guest**,
+  who has no token by design and never reaches this path at all (§12.5).
+  All other network traffic in this repo — through
   `DictionaryApiClient.js` or the page-token reads in `useGameSet.js`
   (`/game-set`) and `GameShell.jsx` (`/domains`), both of which now go
   through the shared `src/api/pageToken.js` helper — is
@@ -279,11 +279,12 @@ screening exists to prevent. Covered by
   (`game.result`, §1–§2 of that spec; `useProgressSync.syncNow()` here). This
   repo still has **no npm package dependency** on the node engine and no
   socket.io/WebSocket client — the connection is a plain `fetch()` POST, made
-  only when a host app supplies `engineUrl`/`getSuiteToken` (§4, §6b). The
-  issuer exists now (`sparxstar-identity`), but the engine's `/events/batch`
-  still admits only RLC participant tokens (§11), so no host does this today;
-  treat the network path as implemented-but-inert, not as live integration
-  traffic.
+  only when a caller supplies `engineUrl`/`getSuiteToken` (§4, §6b). As of
+  2026-08-25 this is **live integration traffic** for a signed-in adult: the
+  issuer exists (`sparxstar-identity`) and the engine accepts its tokens on
+  `/events/batch` (`authenticateParticipantOrSuite` → `settleSoloGameResult`),
+  and the bundled website (§12) supplies both. It carries no traffic for a
+  guest, who has no token by design (§12.5).
 - **No PHP / Composer dependencies** — this repo pulls no private Composer
   packages, so it needs no composer-resolver auth in CI.
 
@@ -692,6 +693,20 @@ same, and port it there if not.
   spec), and updated `.github/copilot-instructions.md` to match the current
   Phase 3 `syncNow()` behavior (token-gated network path, not a no-op).
 
+- **2026-08-26 (§4/§8 sweep)** — Finished the correction started on 2026-08-25.
+  That pass updated §5, §9, §10, §11 and §12 but missed two sections, which
+  were left asserting the opposite of the rest of the document: §4's "Backend
+  connectivity" said "the engine does not yet accept those tokens on
+  `/events/batch` … in production this stays exactly as inert as before: no
+  request is ever made", and §8's "Game service" said "the engine's
+  `/events/batch` still admits only RLC participant tokens … treat the network
+  path as implemented-but-inert, not as live integration traffic". Both are
+  wrong on the same fact corrected elsewhere, and a reader landing in either
+  section would have concluded the shipped website cannot work. Both now state
+  the position accurately: live for a signed-in adult, inert only for a guest,
+  who has no token by design. `.github/copilot-instructions.md` gained the same
+  clarification plus the never-persist-a-token rule it was missing.
+  Documentation only.
 - **2026-08-26 (merge with `main`)** — Reconciled the deployment branch with
   PR #13's identity/game-service correction. Kept #13's framing, which is
   right: the guest-sync question is closed by design, and
