@@ -31,10 +31,17 @@ Flag any PR that:
 ## Repo-specific red lines (this is a browser-only consumer package)
 
 - `useProgressSync.syncNow()` MUST NOT post to the network without a real
-  bearer token. As of Phase 3 it is no longer a no-op; the network path is
-  gated on a host-supplied truthy suite token and remains dormant for guest
-  play by design (see `docs/dictionary-games-tech-spec.md` §11).
-- Reading a Helios Bearer token from `localStorage` (XSS exposure).
+  bearer token. The network path is gated on a caller-supplied truthy suite
+  token. As of 2026-08-25 it is **live for a signed-in adult** — the bundled
+  website (`src/site/`) signs in against `id.sparxstar.com` and supplies one —
+  and **dormant for guest play by design**, permanently: a guest has no token
+  and never reaches this path. Do not add a guest token
+  (`docs/dictionary-games-tech-spec.md` §11, §12.5).
+- Persisting a suite/Bearer token anywhere in the browser — `localStorage`,
+  `sessionStorage`, IndexedDB, a cookie, a URL parameter, or a log line. The
+  website holds it in a module-scoped variable only
+  (`src/site/auth/suiteToken.js`), which is why a refresh signs the player out;
+  that is the accepted design, not a bug (spec §12.3, §12.4).
 - Emitting `Access-Control-Allow-Credentials`.
 - Any WordPress / PHP / server-side auth on game endpoints
   (`is_user_logged_in()` and friends are prohibited).
