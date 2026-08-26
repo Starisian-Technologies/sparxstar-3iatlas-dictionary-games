@@ -74,6 +74,24 @@ RUN rm -f /etc/nginx/conf.d/default.conf
 COPY deploy/nginx/games-site.conf /etc/nginx/conf.d/games-site.conf
 COPY deploy/nginx/games-security-headers.conf /etc/nginx/conf.d/games-security-headers.conf
 
+ARG GAMES_ENGINE_URL
+ARG GAMES_IDENTITY_URL
+ARG GAMES_DICTIONARY_URL
+# Keep CSP connect-src in sync with any endpoint override build args.
+RUN set -eu; \
+    csp_origin_from_url() { \
+        origin="$(printf '%s' "$1" | sed -E -n 's#^(https?://[^/]+)(/.*)?$#\1#p')"; \
+        if [ -z "$origin" ]; then \
+            echo "Invalid URL passed for CSP origin extraction: $1" >&2; \
+            exit 1; \
+        fi; \
+        printf '%s' "$origin"; \
+    }; \
+    dictionary_origin="$(csp_origin_from_url "${GAMES_DICTIONARY_URL:-https://dictionary.sparxstar.com/wp-json/sparxstar/v1/dictionary}")"; \
+    identity_origin="$(csp_origin_from_url "${GAMES_IDENTITY_URL:-https://id.sparxstar.com/auth/v1}")"; \
+    engine_origin="$(csp_origin_from_url "${GAMES_ENGINE_URL:-https://rlc-api.sparxstar.com/api/v1}")"; \
+    sed -i "s#connect-src 'self' https://dictionary.sparxstar.com https://id.sparxstar.com https://rlc-api.sparxstar.com;#connect-src 'self' ${dictionary_origin} ${identity_origin} ${engine_origin};#" /etc/nginx/conf.d/games-security-headers.conf
+
 COPY --from=build /app/dist-site /usr/share/nginx/html
 
 # Run unprivileged. The stock nginx image starts as root to bind port 80 and

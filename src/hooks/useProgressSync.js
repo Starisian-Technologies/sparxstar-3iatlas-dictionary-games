@@ -231,11 +231,6 @@ export function useProgressSync({ restUrl: _restUrl, engineUrl, getSuiteToken })
 
         const pending = allResults.filter(isSettleable).slice(0, BATCH_MAX);
         if (pending.length === 0) return;
-                    events: events.filter((e) => !unsettleableIds.has(e.event_id)),
-                });
-            }
-            return;
-        }
 
         /*
          * The `game.result` wire shape (node-engine `GameResultInput`,
