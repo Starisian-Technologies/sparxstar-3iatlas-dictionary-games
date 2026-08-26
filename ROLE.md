@@ -35,14 +35,23 @@ the site out of the repo.
   Owned by `Starisian-Technologies/sparxstar-3iatlas-dictionary`. This repo
   only calls those endpoints; it never defines them. The `.d.ts` here mirrors
   the server's published contract — the server is the source of truth.
-- **Identity and token issuance.** `sparxstar-3iatlas-identity-node`
-  (`https://id.sparxstar.com`) is the platform's one authentication authority
-  and the only minter of suite tokens. This repo authenticates against it and
-  never issues, signs, refreshes, or persists a token — and never decides what
-  a token holder may do. Guest progress stays device-local; there is no token
-  for an anonymous player and this repo must not invent one. See
-  `docs/dictionary-games-tech-spec.md` §12.3 and §11 (the retired "OQ-G1"
-  label is explained there).
+- **Identity and token issuance.** Owned by `sparxstar-identity` — the
+  `Starisian-Technologies/sparxstar-3iatlas-identity-node` repo, which
+  **exists and is production-ready for adult accounts** — the sole issuer of
+  suite JWTs once an account exists. This repo (and the Game Service) only
+  verify: it never issues, signs, refreshes, or persists a token — and never
+  decides what a token holder may do. Guest play never authenticates at all —
+  device-local by design, per
+  `3IATLAS-IDENTITY-AND-GAME-SERVICES-DECISION-v1.0.md` §4; there is no token
+  for an anonymous player and this repo must not invent one. Progress sync
+  (Phase 3) is **live for signed-in adults as of 2026-08-25**: the Game Node
+  accepts an adult suite token on `/events/batch` — shipped in
+  `sparxstar-3iatlas-rlc-node-engine#31` (2026-08-22), and in Release 1 the
+  suite principal is that route's *only* live one — and the bundled website
+  supplies a real `getSuiteToken`. It stays dormant for **guests**, and must.
+  See `docs/dictionary-games-tech-spec.md` §12.3 and §11 (no longer cited via
+  the retired "OQ-G1" label). This repo must not read Bearer/suite tokens from
+  `localStorage`.
 - **Audio asset generation** and **dictionary entry enrichment** — owned by
   the dictionary pipeline.
 - **WordPress / PHP / server-side logic** — browser code only. The static host
