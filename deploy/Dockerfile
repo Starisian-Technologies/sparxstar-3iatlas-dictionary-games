@@ -86,6 +86,15 @@ RUN rm -f /etc/nginx/conf.d/default.conf
 COPY deploy/nginx/games-site.conf /etc/nginx/conf.d/games-site.conf
 COPY --from=build /app/deploy/nginx/games-security-headers.conf /etc/nginx/conf.d/games-security-headers.conf
 
+# NOTE: an earlier revision rewrote connect-src here with `sed` against the
+# committed snippet. That is no longer needed and was removed: the snippet the
+# line above copies was generated in the build stage from the same endpoint
+# configuration the bundle was compiled with, so it already names the right
+# origins. Keeping both would mean a third copy of the endpoint defaults living
+# in shell, and a `sed -i` that silently no-ops when its pattern stops matching
+# — which is precisely how a staging image would quietly regain the production
+# policy.
+
 COPY --from=build /app/dist-site /usr/share/nginx/html
 
 # Run unprivileged. The stock nginx image starts as root to bind port 80 and
