@@ -210,27 +210,36 @@ export function useProgressSync({ restUrl: _restUrl, engineUrl, getSuiteToken })
             await putRecord('progress-outbox', { key: OUTBOX_KEY, events });
         }
 
-        /* Screen out anything the engine can only ever refuse, and drop it from
-         * the outbox rather than re-offering it forever (see isSettleable). */
-        const allResults = events.filter((e) => e.type === 'game_result');
-        const unsettleable = allResults.filter((e) => !isSettleable(e));
+        /*
+         * Screen out anything the engine can only ever refuse, and drop it from
+         * the outbox rather than re-offering it forever (see isSettleable).
+         *
+         * This happens BEFORE the request and does not depend on its outcome.
+         * These events cannot settle whatever the server answers, so pruning
+         * them is not part of draining a successful flush — an earlier version
+         * folded the two together and pruned only when there was nothing
+         * settleable to send, which meant a batch carrying both a good event
+         * and a malformed one left the malformed one queued whenever the
+         * request failed. It then warned and was re-screened on every
+         * subsequent flush: exactly the unbounded growth this screening exists
+         * to prevent.
+         */
+        const unsettleable = events.filter((e) => e.type === 'game_result' && !isSettleable(e));
+        let queued = events;
         if (unsettleable.length > 0) {
             console.warn(
                 `useProgressSync: discarding ${unsettleable.length} malformed game_result event(s) the engine cannot settle.`
             );
-        }
-        const unsettleableIds = new Set(unsettleable.map((e) => e.event_id));
-
-        const pending = allResults.filter(isSettleable).slice(0, BATCH_MAX);
-        if (pending.length === 0) {
-            if (unsettleable.length > 0 && typeof putRecord === 'function') {
-                await putRecord('progress-outbox', {
-                    key: OUTBOX_KEY,
-                    events: events.filter((e) => !unsettleableIds.has(e.event_id)),
-                });
+            const unsettleableIds = new Set(unsettleable.map((e) => e.event_id));
+            queued = events.filter((e) => !unsettleableIds.has(e.event_id));
+            if (typeof putRecord === 'function') {
+                await putRecord('progress-outbox', { key: OUTBOX_KEY, events: queued });
             }
-            return;
         }
+
+        /* Every game_result left in `queued` is settleable by construction. */
+        const pending = queued.filter((e) => e.type === 'game_result').slice(0, BATCH_MAX);
+        if (pending.length === 0) return;
 
         /*
          * The `game.result` wire shape (node-engine `GameResultInput`,
@@ -304,10 +313,10 @@ export function useProgressSync({ restUrl: _restUrl, engineUrl, getSuiteToken })
 
         const failedIds = new Set((result?.failed ?? []).map((f) => f.event_id));
         const sentIds = new Set(pending.map((e) => e.event_id));
-        const remaining = events.filter(
-            (e) =>
-                !unsettleableIds.has(e.event_id) &&
-                (!sentIds.has(e.event_id) || failedIds.has(e.event_id))
+        /* Drains from `queued` — the malformed events were already removed
+         * above, so this only has to decide what the server accepted. */
+        const remaining = queued.filter(
+            (e) => !sentIds.has(e.event_id) || failedIds.has(e.event_id)
         );
 
         if (typeof putRecord === 'function') {

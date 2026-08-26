@@ -227,6 +227,14 @@ Retrying a permanent 400 on every flush grows the outbox without bound and
 buries the failures worth retrying. Nothing is lost: `game-sessions` is the
 durable record of progress; the outbox is only a reward-claim queue.
 
+That discard happens **before the request and independently of its outcome**.
+It is deliberately not part of draining a successful flush: these events cannot
+settle whatever the server answers, so folding the two together means a batch
+carrying both a good event and a malformed one leaves the malformed one queued
+whenever the request fails — reinstating exactly the unbounded growth the
+screening exists to prevent. Covered by
+`src/hooks/__tests__/useProgressSync.test.js`.
+
 ## 7. Seams
 
 - **REST seam:** all server interaction goes through `createDictionaryApiClient`
@@ -601,6 +609,20 @@ drops the CSP. The include path is absolute because a relative one resolves
 against nginx's prefix, which differs between the official image and a distro
 package.
 
+That snippet is **generated**, not hand-written
+(`scripts/generate-csp-headers.cjs`), from the same `site-endpoints.cjs` the
+bundle is compiled against (§12.2). The CSP's `connect-src` has to name the
+exact origins the bundle calls, and two hand-maintained copies agreed in
+production and nowhere else: a staging build overriding `GAMES_DICTIONARY_URL`
+shipped a bundle calling staging behind a policy permitting only production, so
+the browser blocked every request and reported a CSP violation rather than
+anything naming the cause. Deriving both from one source removes the class of
+bug — an override cannot reach one artifact without reaching the other. The
+container regenerates the snippet in its build stage and copies it from there;
+a droplet deploy must run `pnpm run build:headers` with the same overrides. CI
+regenerates and fails on any difference from the committed copy, so the two
+cannot drift.
+
 ### 12.7 CORS the deployment depends on
 
 Neither service needs a code change — both already support an additive
@@ -644,6 +666,19 @@ same, and port it there if not.
 
 ## 13. Changelog
 
+- **2026-08-25 (review pass)** — Two defects found in review of the deployment
+  change, both fixed with regression coverage. (1) `syncNow()` pruned
+  unsettleable events only when there was nothing settleable to send, so a
+  batch carrying both a good and a malformed event left the malformed one
+  queued whenever the request failed — it then warned and was re-screened on
+  every subsequent flush, which is the unbounded growth the screening exists to
+  prevent. The prune now runs before the request and does not depend on its
+  outcome (§6c). (2) The Nginx CSP's `connect-src` was hand-written while the
+  bundle's endpoints were build-time configurable, so any endpoint override
+  produced a bundle calling one origin behind a policy permitting another —
+  a staging deployment that fails with nothing but CSP violations. The snippet
+  is now generated from the same `site-endpoints.cjs` the bundle uses, the
+  container regenerates it in its build stage, and CI fails on drift (§12.6).
 - **2026-08-25** — Deployment release: the repo now ships a website, not only a
   package. Added a second build target (`webpack.site.config.js` → `dist-site/`,
   content-hashed assets and an `index.html`) alongside the **unchanged** UMD

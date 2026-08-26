@@ -18,6 +18,7 @@
     "scripts": {
         "build": "webpack",
         "build:site": "webpack --config webpack.site.config.js",
+        "build:headers": "node scripts/generate-csp-headers.cjs",
         "build:all": "pnpm run build && pnpm run build:site",
         "watch": "webpack --watch",
         "lint": "eslint \"src/**/*.{js,jsx}\" --fix",

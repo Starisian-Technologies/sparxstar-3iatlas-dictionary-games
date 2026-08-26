@@ -43,6 +43,8 @@ RUN pnpm install --frozen-lockfile
 # this layer on any unrelated file (a doc, a workflow) and would pull local
 # build output into the image.
 COPY babel.config.cjs postcss.config.cjs tailwind.config.cjs webpack.site.config.js ./
+COPY site-endpoints.cjs ./
+COPY scripts ./scripts
 COPY src ./src
 
 ARG GAMES_ENGINE_URL
@@ -55,6 +57,13 @@ ENV GAMES_ENGINE_URL=${GAMES_ENGINE_URL} \
     GAMES_DICTIONARY_URL=${GAMES_DICTIONARY_URL}
 
 RUN pnpm run build:site
+
+# Generate the Nginx security headers from the SAME endpoint configuration the
+# bundle was just built with. This is why the runtime stage copies the snippet
+# from here rather than from the build context: a --build-arg override reaches
+# the bundle and the CSP together, so a staging image cannot ship a policy that
+# blocks its own requests.
+RUN pnpm run build:headers
 
 # Source maps are emitted (hidden-source-map) for symbolicating crash reports,
 # but they must not ship inside the served directory. Nginx 404s them as a
@@ -69,10 +78,13 @@ FROM nginx:1.27-alpine AS runtime
 
 # The stock default site would otherwise shadow ours on port 80.
 RUN rm -f /etc/nginx/conf.d/default.conf
-# Both files, and the snippet must land at exactly the absolute path
-# games-site.conf includes it from.
+# Both files must land at exactly the absolute path games-site.conf includes
+# the snippet from. The server block is static and comes from the context; the
+# headers snippet is GENERATED, so it comes from the build stage — copying the
+# committed one here would silently reinstate the production CSP over a staging
+# build's own.
 COPY deploy/nginx/games-site.conf /etc/nginx/conf.d/games-site.conf
-COPY deploy/nginx/games-security-headers.conf /etc/nginx/conf.d/games-security-headers.conf
+COPY --from=build /app/deploy/nginx/games-security-headers.conf /etc/nginx/conf.d/games-security-headers.conf
 
 COPY --from=build /app/dist-site /usr/share/nginx/html
 

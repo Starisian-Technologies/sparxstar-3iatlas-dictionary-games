@@ -75,6 +75,28 @@ dictionary _consumer API key_ must never be built into the bundle — a key in a
 static file is a published key. The site uses the ephemeral page-token flow
 instead, which is why `/wordlist` is not reachable from it.
 
+### Overriding an endpoint also changes the CSP
+
+The Nginx `connect-src` must name the exact origins the bundle calls, or the
+browser blocks every request. Both are generated from the same configuration,
+so this happens for you:
+
+```bash
+GAMES_DICTIONARY_URL=https://staging-dict.example/wp-json/sparxstar/v1/dictionary \
+  pnpm run build:site
+GAMES_DICTIONARY_URL=https://staging-dict.example/wp-json/sparxstar/v1/dictionary \
+  pnpm run build:headers    # regenerates deploy/nginx/games-security-headers.conf
+```
+
+The container does both in its build stage, so `docker build --build-arg …`
+needs no extra step. **A droplet deploy does** — run `build:headers` with the
+same overrides before copying the snippet, or you will serve a staging bundle
+behind the production policy and see nothing but CSP violations.
+
+`deploy/nginx/games-security-headers.conf` is a **generated file**; edit
+`scripts/generate-csp-headers.cjs` (or the defaults in `site-endpoints.cjs`) and
+regenerate. CI fails if the committed copy is not what the generator produces.
+
 ---
 
 ## 3 · Serve
@@ -104,6 +126,7 @@ droplet; this is a third server block on the same box, and the only one serving
 files rather than proxying.
 
 ```bash
+pnpm run build:headers   # regenerate if you overrode any endpoint above
 rsync -a --delete dist-site/ root@<droplet>:/var/www/games.sparxstar.com/
 scp deploy/nginx/games-security-headers.conf root@<droplet>:/etc/nginx/conf.d/
 scp deploy/nginx/games-site.conf root@<droplet>:/etc/nginx/sites-available/games.sparxstar.com
@@ -195,7 +218,10 @@ served HTML in its place. Usually a half-finished deploy: `index.html` was
 updated but the new `/assets/` files were not, or the other way round. Re-sync
 `dist-site/` in full.
 
-**A blank page and a CSP violation in the console.** Something was added that
-the policy does not allow — an external font, a CDN script, an inline
-`<script>`. Change the code, not the policy: `connect-src` in particular is what
-stops an injected script from exfiltrating a suite token.
+**A blank page and a CSP violation in the console.** If the blocked URL is one
+of your own endpoints, the headers snippet was not regenerated after an endpoint
+override — re-run `pnpm run build:headers` with the same variables and re-copy
+it. Otherwise something was added that the policy does not allow (an external
+font, a CDN script, an inline `<script>`): change the code, not the policy.
+`connect-src` in particular is what stops an injected script from exfiltrating a
+suite token.

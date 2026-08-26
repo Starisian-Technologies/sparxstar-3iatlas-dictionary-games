@@ -422,6 +422,79 @@ describe('useProgressSync — events the engine can never settle', () => {
         warn.mockRestore();
     });
 
+    it('drops the malformed events even when the flush that carried the good ones fails', async () => {
+        /* Regression: the prune used to run only when there was nothing
+         * settleable to send. A batch containing BOTH a good event and a
+         * malformed one, whose network call then failed, returned early and
+         * left the malformed event queued — so it warned and was re-screened
+         * on every subsequent flush forever, which is the exact unbounded
+         * growth the screening exists to prevent. The prune does not depend
+         * on the engine's answer: these events can never settle whatever the
+         * server says, so they are removed before the request is attempted. */
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+        const { result } = renderHook(useProgressSync, engineProps);
+
+        await result.current.addEvent({
+            type: 'game_result',
+            run_id: 'run-a',
+            word_uuid: 'good',
+            outcome: 'correct',
+            attempts: 1,
+            time_ms: 100,
+        });
+        await result.current.addEvent({
+            type: 'game_result',
+            word_uuid: 'no-run',
+            outcome: 'correct',
+            attempts: 1,
+            time_ms: 100,
+        });
+
+        window.fetch.mockResolvedValue({ ok: false, status: 503 });
+        await result.current.syncNow();
+
+        const remaining = getOutbox();
+        expect(remaining).toHaveLength(1);
+        expect(remaining[0].word_uuid).toBe('good'); // retryable, kept
+        warn.mockRestore();
+    });
+
+    it('does not re-warn about malformed events on a later flush', async () => {
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+        const { result } = renderHook(useProgressSync, engineProps);
+
+        await result.current.addEvent({
+            type: 'game_result',
+            run_id: 'run-a',
+            word_uuid: 'good',
+            outcome: 'correct',
+            attempts: 1,
+            time_ms: 100,
+        });
+        await result.current.addEvent({
+            type: 'game_result',
+            word_uuid: 'no-run',
+            outcome: 'correct',
+            attempts: 1,
+            time_ms: 100,
+        });
+
+        window.fetch.mockResolvedValue({ ok: false, status: 503 });
+        await result.current.syncNow();
+        const warningsAfterFirst = warn.mock.calls.filter((c) =>
+            String(c[0]).includes('malformed')
+        ).length;
+
+        await result.current.syncNow();
+        const warningsAfterSecond = warn.mock.calls.filter((c) =>
+            String(c[0]).includes('malformed')
+        ).length;
+
+        expect(warningsAfterFirst).toBe(1);
+        expect(warningsAfterSecond).toBe(1); // not warned again
+        warn.mockRestore();
+    });
+
     it('clamps a negative or non-numeric measurement to the zero the engine accepts', async () => {
         window.fetch.mockResolvedValue({
             ok: true,

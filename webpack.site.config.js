@@ -29,34 +29,23 @@ const HtmlWebpackPlugin = require('html-webpack-plugin');
 const MiniCssExtractPlugin = require('mini-css-extract-plugin');
 const CssMinimizerPlugin = require('css-minimizer-webpack-plugin');
 const TerserPlugin = require('terser-webpack-plugin');
+const { resolveEndpoints } = require('./site-endpoints.cjs');
 
 /**
  * Deployment endpoints, overridable at build time.
  *
+ * Resolved by the shared `site-endpoints.cjs`, which the CSP generator reads
+ * too — so the origins compiled into the bundle and the origins the Nginx
+ * `connect-src` permits cannot disagree. It also validates them, failing the
+ * build rather than emitting a bundle that would call a bad origin from a
+ * deployed browser.
+ *
  * All four are PUBLIC addresses, not secrets — they are visible in the browser
  * the moment the app makes its first request. No credential, key or token is
- * defined here or anywhere else in this build; the image that serves the output
- * has nothing in it worth stealing.
+ * defined here or anywhere else in this build; the image that serves the
+ * output has nothing in it worth stealing.
  */
-const SITE_CONFIG = {
-    GAMES_ENGINE_URL: process.env.GAMES_ENGINE_URL ?? 'https://rlc-api.sparxstar.com/api/v1',
-    GAMES_IDENTITY_URL: process.env.GAMES_IDENTITY_URL ?? 'https://id.sparxstar.com',
-    GAMES_SITE_URL: process.env.GAMES_SITE_URL ?? 'https://games.sparxstar.com',
-    GAMES_DICTIONARY_URL:
-        process.env.GAMES_DICTIONARY_URL ??
-        'https://dictionary.sparxstar.com/wp-json/sparxstar/v1/dictionary',
-};
-
-/* Fail the build rather than emit a bundle that would call a bad origin at
- * runtime — a typo'd override otherwise surfaces as an opaque CORS error in a
- * deployed browser, which is a far worse place to find it. */
-for (const [key, value] of Object.entries(SITE_CONFIG)) {
-    if (!/^https:\/\/[^/]+/.test(value) || value.endsWith('/')) {
-        throw new Error(
-            `${key} must be an https:// URL with no trailing slash (got ${JSON.stringify(value)})`
-        );
-    }
-}
+const SITE_CONFIG = resolveEndpoints();
 
 module.exports = {
     mode: 'production',
