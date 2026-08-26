@@ -221,11 +221,16 @@ export function useProgressSync({ restUrl: _restUrl, engineUrl, getSuiteToken })
         }
         const unsettleableIds = new Set(unsettleable.map((e) => e.event_id));
 
+        // Drop permanently-unsettleable events immediately so they don't linger on repeated failures.
+        if (unsettleable.length > 0 && typeof putRecord === 'function') {
+            await putRecord('progress-outbox', {
+                key: OUTBOX_KEY,
+                events: events.filter((e) => !unsettleableIds.has(e.event_id)),
+            });
+        }
+
         const pending = allResults.filter(isSettleable).slice(0, BATCH_MAX);
-        if (pending.length === 0) {
-            if (unsettleable.length > 0 && typeof putRecord === 'function') {
-                await putRecord('progress-outbox', {
-                    key: OUTBOX_KEY,
+        if (pending.length === 0) return;
                     events: events.filter((e) => !unsettleableIds.has(e.event_id)),
                 });
             }
