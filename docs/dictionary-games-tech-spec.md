@@ -42,11 +42,12 @@ read-only, auto-synced). Cite ADRs and invariants by number from that snapshot;
 do not restate them here.
 
 Open questions this repo is bound by: **OQ-G3** (LetterReveal asset), **OQ-G4**
-(DomainFlash confirmation hook), **OQ-I3** (guest device progress merge). The
-progress-sync blocker previously cited here as "OQ-G1" is now stated directly,
-in plain language, in §11 — see the note there for why that label is retired
-as a citation. Upstream dictionary specs are referenced (not vendored) in
-`AGENTS.md`.
+(DomainFlash confirmation hook), **OQ-I3** (guest device progress merge —
+blocked on the Identity Service spec, not the intake spec; see §11). The
+progress-sync blocker previously cited here as "OQ-G1," and later restated as
+"guest clients have no fitting token-issuance mechanism," is **closed, not
+open** — see §11's corrected note for why. Upstream dictionary specs are
+referenced (not vendored) in `AGENTS.md`.
 
 This repo is also the client side of `sparxstar-3iatlas-rlc-node-engine`'s
 **GAME-SERVICE-INTAKE-SPEC-v1.0** (`.github/instructions/GAME-SERVICE-INTAKE-SPEC-v1.0.md`
@@ -104,9 +105,11 @@ timeMs)` → `useGameSession.recordResult` → IndexedDB session +
   host app supplies both an `engineUrl` and a `getSuiteToken` callback
   (new optional `<GameShell />` props, §6b) and `getSuiteToken()` actually
   resolves to a token. Neither is supplied by anything in this repo or wired
-  up by any host shell today — there is still no suite-token issuer anywhere
-  in this platform (§11) — so in production this stays exactly as inert as
-  before: no request is ever made. The code path itself, however, is real,
+  up by any host shell today. The suite-token issuer now exists —
+  `sparxstar-identity` is the `sparxstar-3iatlas-identity-node` repo, which
+  mints RS256 suite tokens and is production-ready for adult accounts — but
+  the engine does not yet accept those tokens on `/events/batch` (§11), so in
+  production this stays exactly as inert as before: no request is ever made. The code path itself, however, is real,
   fully built, and integration-tested (against a fake injected token) rather
   than theoretical. All other network traffic in this repo — through
   `DictionaryApiClient.js` or the page-token reads in `useGameSet.js`
@@ -251,9 +254,11 @@ screening exists to prevent. Covered by
   `{engineUrl}/events/batch`, but only runs the network call when the host
   supplies both `engineUrl` and a `getSuiteToken` callback that resolves to a
   token (§4, §6b) — dependency injection, not a hardcoded token source. No
-  host wires either today, so this stays local-only in production pending
-  the guest-client token-issuance blocker described in §11 (previously
-  miscited here as "OQ-G1"; see the note in §11).
+  host wires either today, so this stays local-only in production: not
+  because guest clients lack a token mechanism (they never get one, by
+  design — see §11), but because the engine side of the authenticated path is
+  not built yet: `sparxstar-identity` can mint the token, and
+  `/events/batch` cannot yet verify it (§11).
 - **Global config seam:** `window.sparxstarDictionarySettings` (`restUrl`,
   `pageToken`) is read/refreshed by `useGameSet`.
 
@@ -274,8 +279,9 @@ screening exists to prevent. Covered by
   (`game.result`, §1–§2 of that spec; `useProgressSync.syncNow()` here). This
   repo still has **no npm package dependency** on the node engine and no
   socket.io/WebSocket client — the connection is a plain `fetch()` POST, made
-  only when a host app supplies `engineUrl`/`getSuiteToken` (§4, §6b). No
-  device-identity/suite token issuer exists yet, so no host does this today;
+  only when a host app supplies `engineUrl`/`getSuiteToken` (§4, §6b). The
+  issuer exists now (`sparxstar-identity`), but the engine's `/events/batch`
+  still admits only RLC participant tokens (§11), so no host does this today;
   treat the network path as implemented-but-inert, not as live integration
   traffic.
 - **No PHP / Composer dependencies** — this repo pulls no private Composer
@@ -294,10 +300,14 @@ screening exists to prevent. Covered by
       call resolves to a truthy token (`src/hooks/useProgressSync.js`); there
       is no fallback, cache, or default token source. The Game-Service intake
       spec is committed (GAME-SERVICE-INTAKE-SPEC-v1.0, node-engine repo) and
-      the wire shape is implemented; the still-open half of this red line is
-      that **no token-issuance mechanism exists for anonymous/guest game
-      clients**, so no host can satisfy `getSuiteToken()` with a real token
-      today (see §11).
+      the wire shape is implemented. What's still missing is **not** a
+      guest-token mechanism — guest play never calls `getSuiteToken()` for a
+      real token at all, by design (§11) — and it is no longer a missing
+      issuer either: `sparxstar-identity` exists and mints suite tokens for
+      authenticated accounts. What is missing is the **engine-side
+      acceptance of that token**: `/events/batch` is gated on
+      `requireParticipant`, an HMAC RLC participant token, so a real suite
+      token would be rejected there today (see §11).
     - `useProgressSync` must never read a Bearer/suite token from
       `localStorage` itself (XSS exposure) — token acquisition is entirely
       the host app's responsibility via the injected `getSuiteToken`
@@ -341,19 +351,30 @@ screening exists to prevent. Covered by
   headers, and response envelopes match; confirmed GraphQL (WPGraphQL + SCF)
   in that repo is a content-authoring surface only, not something this
   package needs to call.
-- **Progress sync: live as of 2026-08-25.** The 2026-08-05 Phase 3 work built
-  the path and left it dormant because nothing in the platform could mint a
-  suite token for this class of client. `https://id.sparxstar.com`
-  (`sparxstar-3iatlas-identity-node`) is now that issuer, and the engine's solo
-  settlement path (`settleSoloGameResult`) accepts an adult suite token, so the
-  blocker is resolved for **authenticated adults** and the bundled website
-  (§12) supplies both `engineUrl` and a real `getSuiteToken`. Queued
-  `game_result` events are translated to the engine's `game.result` shape and
-  POSTed to `{engineUrl}/events/batch` (§6c), idempotently.
-  The **guest** half of the old blocker is unchanged and still open: there is
-  no token for an anonymous player and the engine's guest-claim flow is still
-  fenced, so guest progress stays device-local (§11, §12.5) — which is the
-  intended product behaviour, not a degradation.
+- **Progress sync: live for signed-in adults as of 2026-08-25.** Phase 3
+  (2026-08-05) built the path and left it dormant. Two corrections have since
+  landed on what was actually missing, and both matter:
+    - It was never a **guest**-token question. Guest play does not reach this
+      path at all, by design and permanently
+      (`3IATLAS-IDENTITY-AND-GAME-SERVICES-DECISION-v1.0.md` §4). Guest
+      progress stays device-local, which is the product behaviour, not a
+      degradation (§12.5).
+    - It was never a missing **issuer**: `sparxstar-3iatlas-identity-node`
+      (`https://id.sparxstar.com`) exists and mints RS256 suite tokens for
+      adult accounts.
+    - The remaining item was described here as **engine-side** — that
+      `/events/batch` accepted only RLC participant tokens. **That is no
+      longer accurate**, verified 2026-08-25 against the engine's source:
+      `src/routes/events.ts` authenticates with
+      `authenticateParticipantOrSuite`, `src/services/batch.ts` carries a
+      `suite_solo` principal permitted `game.result`, and
+      `src/services/gameResults.ts` implements `settleSoloGameResult` with a
+      null session, class and school. In release 1 `classroomEnabled` is
+      false, so the adult solo principal is the **only** live one.
+      Nothing was blocking, so the bundled website (§12) now supplies both
+      `engineUrl` and a real `getSuiteToken`, and queued `game_result` events are
+      translated to the engine's `game.result` shape and POSTed to
+      `{engineUrl}/events/batch` (§6c), idempotently.
 - **The `game.result` payload was repaired in the same change.** It previously
   carried `game_type`, `word_uuid`, `outcome`, `attempts` and `time_ms` but
   **no `session_id` and no `deal_id`** — and `dictionary_quiz` is
@@ -404,19 +425,19 @@ screening exists to prevent. Covered by
 
 ## 11. Open items
 
-| ID    | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| —     | **Progress-sync blocker — HALF RESOLVED 2026-08-25 (see note below — no longer cited as "OQ-G1").** The blocker was that no token issuer fitted this class of client. For an **authenticated adult** that is now answered: `https://id.sparxstar.com` is the suite-token issuer, the engine's `settleSoloGameResult` accepts an adult suite token, and the bundled website signs in against it (§12.3) — sync is live for signed-in adults. For an **anonymous guest** it is unchanged and still open: there is no token for a player with no account, so guest progress stays device-local. That is the intended product behaviour rather than a gap to close, and closing it would need the engine's still-fenced guest-claim flow (see OQ-I3), not a new token type. |
-| —     | **Secure session renewal — NEW, open.** The website holds the suite token in memory only, so a refresh signs the player out (§12.4). Closing that needs an approved renewal contract the Identity Service does not offer today: `/auth/v1/login` mints a bearer and nothing else, and its CORS policy sets `credentials: false`, so a cookie session is refused rather than merely unimplemented — and `Access-Control-Allow-Credentials` is a platform red line (§9). **Until such a contract is specified and approved, do not add browser token persistence to this repo.**                                                                                                                                                                                          |
-| —     | **Deployment configuration, not code — blocking the launch.** `https://games.sparxstar.com` must be added to `UI_ORIGINS` on BOTH the Identity Service and the engine, additively, without displacing the WordPad origin (§12.7). Neither needs a code change. Until it lands, sign-in and settlement fail in the browser with a CORS error while every server-side check passes.                                                                                                                                                                                                                                                                                                                                                                                       |
-| —     | ~~GAME-SERVICE-INTAKE-SPEC-v1.0 (wire schema for the eventual Game Service POST) is unwritten~~ — **resolved.** Written and approved in the node-engine repo (`.github/instructions/GAME-SERVICE-INTAKE-SPEC-v1.0.md`); its **OQ-3** (this repo's outbox couldn't populate a conformant `GameResultEvent` — only reported `correct`, no `attempts`/`time_ms`) is also resolved, from this side, as of Phase 3 — see §4 and §10. The old "frozen event schema" citation (`GH-ISSUE-dictionary-PR59-fixes.md` "Fix 2") remains unverified/nonexistent and was never used; the real spec superseded it.                                                                                                                                                                    |
-| OQ-G3 | LetterReveal pottery animation — awaiting AIWA-approved asset                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| OQ-G4 | DomainFlash "I knew it" hook confirmation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| OQ-I3 | Guest device progress merge — blocked on Game Service intake spec's guest-claim flow, which is itself FENCED on the Identity Service keystone (`sparxstar-identity`, out of scope). Unaffected by the Phase 3 progress-sync work: `syncNow()` only ever sends progress for a player who already has a suite token, never merges/claims prior guest history.                                                                                                                                                                                                                                                                                                                                                                                                             |
-| —     | ~~Add a test suite~~ — **done, Phase 3**, extended 2026-08-25 with `settlement.test.js` (the four idempotency rules, against a model of the engine), `useGameSession.test.js` (run-id invariants), and `src/site/auth/__tests__/{guestPlay,tokenStorage}.test.js`. ~~Confirm Tailwind/PostCSS ownership (host vs package)~~ — **settled** for the case this repo controls: the website is a host and owns its CSS entry (`src/site/styles.css`); the package still ships none (§4, §12.1).                                                                                                                                                                                                                                                                              |
-| —     | **Browser check is not in CI.** `scripts/browser-check.mjs` drives the built bundle through the real Nginx config in Chromium (31 checks, including the token-storage sweep). It needs a browser download and a running server, so it is a pre-release step rather than a per-commit one. Wire it into a release workflow if that trade stops making sense.                                                                                                                                                                                                                                                                                                                                                                                                             |
-| —     | **Port the TTS deployment notes upstream.** `backend/pronounce-config-sample.php` was removed here (§12.8); confirm the owning implementation (`sparxstar-3iatlas-dictionary`, `src/api/Sparxstar3IAtlasDictionaryTts.php`) documents the Kasanoma model URLs, the two Piper runtime options and the cache TTL, and port them from `c54cc65` if not.                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| —     | Reconcile npm package name (`sparxstar-rlc-games`) with repo name if desired                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ID    | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| —     | **Progress-sync: CLOSED 2026-08-25.** Three framings of this were wrong in turn, so the record matters. It was never a guest-token gap (guest play never reaches the sync path, by design and permanently — `3IATLAS-IDENTITY-AND-GAME-SERVICES-DECISION-v1.0.md` §4). It was never a missing issuer (`sparxstar-3iatlas-identity-node` exists and mints adult suite tokens). And the last framing — that the engine did not yet accept suite tokens on `/events/batch` — is also no longer accurate: verified against the engine's source, `authenticateParticipantOrSuite` admits a suite principal and `settleSoloGameResult` settles adult solo results, with `classroomEnabled` false in release 1 so it is the only live principal. Sync is live for signed-in adults via the bundled website (§10, §12.3). No longer cited as "OQ-G1"; see the retirement note below. |
+| —     | **Secure session renewal — NEW, open.** The website holds the suite token in memory only, so a refresh signs the player out (§12.4). Closing that needs an approved renewal contract the Identity Service does not offer today: `/auth/v1/login` mints a bearer and nothing else, and its CORS policy sets `credentials: false`, so a cookie session is refused rather than merely unimplemented — and `Access-Control-Allow-Credentials` is a platform red line (§9). **Until such a contract is specified and approved, do not add browser token persistence to this repo.**                                                                                                                                                                                                                                                                                               |
+| —     | **Deployment configuration, not code — blocking the launch.** `https://games.sparxstar.com` must be added to `UI_ORIGINS` on BOTH the Identity Service and the engine, additively, without displacing the WordPad origin (§12.7). Neither needs a code change. Until it lands, sign-in and settlement fail in the browser with a CORS error while every server-side check passes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| —     | ~~GAME-SERVICE-INTAKE-SPEC-v1.0 (wire schema for the eventual Game Service POST) is unwritten~~ — **resolved.** Written and approved in the node-engine repo (`.github/instructions/GAME-SERVICE-INTAKE-SPEC-v1.0.md`); its **OQ-3** (this repo's outbox couldn't populate a conformant `GameResultEvent` — only reported `correct`, no `attempts`/`time_ms`) is also resolved, from this side, as of Phase 3 — see §4 and §10. The old "frozen event schema" citation (`GH-ISSUE-dictionary-PR59-fixes.md` "Fix 2") remains unverified/nonexistent and was never used; the real spec superseded it.                                                                                                                                                                                                                                                                         |
+| OQ-G3 | LetterReveal pottery animation — awaiting AIWA-approved asset                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| OQ-G4 | DomainFlash "I knew it" hook confirmation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| OQ-I3 | Guest device progress merge — blocked on the Identity Service spec (`sparxstar-identity`, out of scope). Unaffected by the Phase 3 progress-sync work: `syncNow()` only ever sends progress for a player who already has a suite token, never merges/claims prior guest history.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| —     | ~~Add a test suite~~ — **done, Phase 3**, extended 2026-08-25 with `settlement.test.js` (the four idempotency rules, against a model of the engine), `useGameSession.test.js` (run-id invariants), and `src/site/auth/__tests__/{guestPlay,tokenStorage}.test.js`. ~~Confirm Tailwind/PostCSS ownership (host vs package)~~ — **settled** for the case this repo controls: the website is a host and owns its CSS entry (`src/site/styles.css`); the package still ships none (§4, §12.1).                                                                                                                                                                                                                                                                                                                                                                                   |
+| —     | **Browser check is not in CI.** `scripts/browser-check.mjs` drives the built bundle through the real Nginx config in Chromium (31 checks, including the token-storage sweep). It needs a browser download and a running server, so it is a pre-release step rather than a per-commit one. Wire it into a release workflow if that trade stops making sense.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| —     | **Port the TTS deployment notes upstream.** `backend/pronounce-config-sample.php` was removed here (§12.8); confirm the owning implementation (`sparxstar-3iatlas-dictionary`, `src/api/Sparxstar3IAtlasDictionaryTts.php`) documents the Kasanoma model URLs, the two Piper runtime options and the cache TTL, and port them from `c54cc65` if not.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| —     | Reconcile npm package name (`sparxstar-rlc-games`) with repo name if desired                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 > **Note on the retired "OQ-G1" citation.** Earlier versions of this
 > document, `AGENTS.md`, and `.github/copilot-instructions.md` cited "OQ-G1"
@@ -666,6 +687,26 @@ same, and port it there if not.
 
 ## 13. Changelog
 
+- **2026-08-26** — Consistency correction. Aligned OQ-I3 wording so this spec,
+  `AGENTS.md`, and `ROLE.md` all point to the same blocker (Identity Service
+  spec), and updated `.github/copilot-instructions.md` to match the current
+  Phase 3 `syncNow()` behavior (token-gated network path, not a no-op).
+
+- **2026-08-26 (merge with `main`)** — Reconciled the deployment branch with
+  PR #13's identity/game-service correction. Kept #13's framing, which is
+  right: the guest-sync question is closed by design, and
+  `sparxstar-3iatlas-identity-node` exists and is adult-ready. Corrected the
+  one part of it that had already gone stale — #13 recorded the remaining gap
+  as engine-side ("`/events/batch` admits only RLC participant tokens";
+  "adult suite-token intake is approved but unimplemented"). Verified against
+  the node-engine source: `src/routes/events.ts` authenticates with
+  `authenticateParticipantOrSuite`, `src/services/batch.ts` carries a
+  `suite_solo` principal permitted `game.result`, and
+  `src/services/gameResults.ts` implements `settleSoloGameResult` against a
+  null session/class/school — and with `classroomEnabled` false in release 1
+  the adult solo principal is the only live one. So nothing was outstanding on
+  either side, which is why this release could turn the path on. Documentation
+  only; §10, §11, `AGENTS.md` and `ROLE.md` updated to match.
 - **2026-08-25 (review pass)** — Two defects found in review of the deployment
   change, both fixed with regression coverage. (1) `syncNow()` pruned
   unsettleable events only when there was nothing settleable to send, so a
@@ -716,6 +757,18 @@ same, and port it there if not.
   repo's own `/pronounce` implementation, reconciling the repo's no-PHP boundary
   (§12.8). No dictionary endpoint, response shape, or auth model changed; the
   page-token path is untouched.
+- **2026-08-22** — Identity correction. This document (and `AGENTS.md`,
+  `ROLE.md`) claimed `sparxstar-identity` "doesn't exist yet" / was "still
+  unbuilt" in six places. That was wrong: it exists as
+  `sparxstar-3iatlas-identity-node`, mints RS256 suite tokens, publishes
+  JWKS, and is rated production-ready for the adult account tier by its own
+  2026-08-19 readiness review. Every such claim is corrected. The remaining
+  gap is restated accurately as **engine-side**: the adult suite-token path
+  is approved (R3, GAME-SERVICE-INTAKE-SPEC-v1.0 §3) but `/events/batch`
+  still admits only RLC participant tokens, and `settleGameResult` still
+  requires an RLC session to settle against — so a suite-token middleware
+  and a session-less settlement path are what is actually outstanding. The
+  guest half stays closed by design. No code changed; documentation only.
 - **2026-08-21** — Page-token auth fix. `GameShell.jsx`'s `/domains` request
   sent no `X-Page-Token` and had no retry, so against a token-enforcing
   server it 401'd and the domain selector silently fell back to "All
@@ -745,8 +798,8 @@ same, and port it there if not.
   dependency-injected callback, not a hardcoded token source, so the path
   is fully built and integration-tested (fake token in tests) while
   staying genuinely dormant in production (no host supplies either prop;
-  no suite-token issuer exists — §11's progress-sync blocker is
-  unaffected and still open). Added this repo's first test suites
+  at the time of that change no suite-token issuer existed — §11's
+  progress-sync blocker was unaffected and still open then). Added this repo's first test suites
   (`src/hooks/__tests__/useProgressSync.test.js`,
   `src/hooks/__tests__/useGameSet.test.js`) covering the guest/local-only
   invariant, the authenticated sync path, and a content-plane regression

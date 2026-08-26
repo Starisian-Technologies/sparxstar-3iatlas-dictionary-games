@@ -35,14 +35,22 @@ the site out of the repo.
   Owned by `Starisian-Technologies/sparxstar-3iatlas-dictionary`. This repo
   only calls those endpoints; it never defines them. The `.d.ts` here mirrors
   the server's published contract — the server is the source of truth.
-- **Identity and token issuance.** `sparxstar-3iatlas-identity-node`
-  (`https://id.sparxstar.com`) is the platform's one authentication authority
-  and the only minter of suite tokens. This repo authenticates against it and
-  never issues, signs, refreshes, or persists a token — and never decides what
-  a token holder may do. Guest progress stays device-local; there is no token
-  for an anonymous player and this repo must not invent one. See
-  `docs/dictionary-games-tech-spec.md` §12.3 and §11 (the retired "OQ-G1"
-  label is explained there).
+- **Identity and token issuance.** Owned by `sparxstar-identity` — the
+  `Starisian-Technologies/sparxstar-3iatlas-identity-node` repo, which
+  **exists and is production-ready for adult accounts** — the sole issuer of
+  suite JWTs. This repo only ever _presents_ one: it never issues, signs,
+  refreshes, or persists a token, and never decides what a token holder may
+  do. It must not read a Bearer/suite token
+  from `localStorage`; the website holds it in memory only
+  (`docs/dictionary-games-tech-spec.md` §12.3). Guest play never authenticates
+  at all — device-local by design, permanently, per
+  `3IATLAS-IDENTITY-AND-GAME-SERVICES-DECISION-v1.0.md` §4 — and this repo must
+  not invent a guest token. Progress sync is **live for signed-in adults as of
+  2026-08-25**: an earlier note here said the Game Node did not yet accept
+  suite tokens on `/events/batch`, which is no longer accurate — it
+  authenticates with `authenticateParticipantOrSuite` and settles adult solo
+  results through `settleSoloGameResult`. See §11 and §12.3 (the retired
+  "OQ-G1" label is explained there).
 - **Audio asset generation** and **dictionary entry enrichment** — owned by
   the dictionary pipeline.
 - **WordPress / PHP / server-side logic** — browser code only. The static host
@@ -76,6 +84,7 @@ Platform decisions, invariants, and open questions live in the governance
 snapshot at `.github/instructions/governance/` (auto-synced; read-only) and in
 the registries cited from `AGENTS.md`. Cite ADRs and invariants by number —
 do not restate them here. Open questions tracked by this repo: **OQ-G3**,
-**OQ-G4**, **OQ-I3** (see `AGENTS.md`); the progress-sync blocker previously
-cited as "OQ-G1" is now stated in plain language in
-`docs/dictionary-games-tech-spec.md` §11 (see the retirement note there).
+**OQ-G4**, **OQ-I3** (blocked on the Identity Service spec, not the intake
+spec — see `AGENTS.md`). The progress-sync blocker previously cited as
+"OQ-G1" is **closed, not open** — guest play never syncs, by design; see
+`docs/dictionary-games-tech-spec.md` §11.
