@@ -57,14 +57,31 @@ one place to keep in sync with the code.
 
 ### Security rules (hard requirements)
 
-- `useProgressSync.syncNow()` posts to the network **only** when a caller
-  supplies both `engineUrl` and a `getSuiteToken` that resolves to a real
-  token. As of 2026-08-25 the bundled website does that for a signed-in adult
-  (Identity Service is the issuer), so the path is live — for **guests it is
-  not, and must not become so**: an anonymous player has no token and their
-  progress stays on the device. See `docs/dictionary-games-tech-spec.md` §12.5
-  and §11. (The blocker is no longer cited via the "OQ-G1" label; see the note
-  in §11 for why.)
+- `useProgressSync.syncNow()` MUST NOT post to the network without a real
+  bearer token. It POSTs to the node-engine's `/events/batch`
+  (`GAME-SERVICE-INTAKE-SPEC-v1.0`), and the network branch runs only when a
+  caller-supplied `getSuiteToken()` resolves to a truthy token.
+  **As of 2026-08-25 that path is live for signed-in adults**: the bundled
+  website (`src/site/`) signs in against `sparxstar-3iatlas-identity-node`
+  (`https://id.sparxstar.com`) and supplies the token.
+    - This is **not** a guest-token-issuance gap. Guest play never calls this
+      path at all, by design — device-local, permanent, per
+      `3IATLAS-IDENTITY-AND-GAME-SERVICES-DECISION-v1.0.md` §4. Do not add a
+      guest token.
+    - It is **not** a missing issuer either: `sparxstar-3iatlas-identity-node`
+      mints RS256 suite tokens and is production-ready for adult accounts.
+    - **Nor is the engine side outstanding any longer.** Earlier revisions of
+      this file said `/events/batch` admits only RLC participant tokens and
+      that adult suite-token intake was "approved but unimplemented"; that is
+      no longer true, and was corrected on 2026-08-25 against the engine's
+      own source. `src/routes/events.ts` there authenticates with
+      `authenticateParticipantOrSuite`, `src/services/batch.ts` carries a
+      `suite_solo` principal permitted `game.result`, and
+      `src/services/gameResults.ts` implements `settleSoloGameResult` with no
+      RLC session. In release 1 `classroomEnabled` is false, so the adult solo
+      principal is in fact the **only** live one. See
+      `docs/dictionary-games-tech-spec.md` §11 (no longer cited via the
+      retired "OQ-G1" label).
 - **Never persist a suite/Bearer token in the browser.** Not `localStorage`,
   not `sessionStorage`, not IndexedDB, not a cookie, not a URL parameter, and
   never in a log line. The website holds it in a module-scoped variable
@@ -83,14 +100,14 @@ one place to keep in sync with the code.
 
 ### Open questions tracked by this repo
 
-| ID    | Description                                                                                                                                                                                                                |
-| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| —     | Progress-sync token issuance: resolved for authenticated adults (Identity Service), still open for anonymous guests — `docs/dictionary-games-tech-spec.md` §11. No longer cited as "OQ-G1"; see the retirement note there. |
-| —     | Secure session renewal — the website's token is memory-only, so a refresh signs the player out. Needs an approved contract before any persistence is added (§12.4).                                                        |
-| —     | `https://games.sparxstar.com` must be added to `UI_ORIGINS` on the Identity Service and the engine, additively (§12.7). Deployment config, not code.                                                                       |
-| OQ-G3 | LetterReveal pottery animation — emoji placeholder, awaiting approved asset                                                                                                                                                |
-| OQ-G4 | DomainFlash "I knew it" hook confirmation                                                                                                                                                                                  |
-| OQ-I3 | Guest device progress merge — blocked on Game Service intake spec                                                                                                                                                          |
+| ID    | Description                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| —     | **CLOSED, corrected 2026-08.** Not a guest-token gap — guest play is device-local by design, permanently, per `3IATLAS-IDENTITY-AND-GAME-SERVICES-DECISION-v1.0.md` §4. `syncNow()` is implemented and gated on a suite token (authenticated adults only; `sparxstar-identity` is the issuer, and the engine's solo path accepts it). Live as of 2026-08-25 via the bundled website. See `docs/dictionary-games-tech-spec.md` §11. |
+| —     | Secure session renewal — the website's token is memory-only, so a refresh signs the player out. Needs an approved contract before any persistence is added (§12.4).                                                                                                                                                                                                                                                                |
+| —     | `https://games.sparxstar.com` must be added to `UI_ORIGINS` on the Identity Service and the engine, additively (§12.7). Deployment config, not code.                                                                                                                                                                                                                                                                               |
+| OQ-G3 | LetterReveal pottery animation — emoji placeholder, awaiting approved asset                                                                                                                                                                                                                                                                                                                                                        |
+| OQ-G4 | DomainFlash "I knew it" hook confirmation                                                                                                                                                                                                                                                                                                                                                                                          |
+| OQ-I3 | Guest device progress merge — blocked on the Identity Service spec (out of scope here)                                                                                                                                                                                                                                                                                                                                             |
 
 ### Upstream spec references (in the dictionary repo)
 
