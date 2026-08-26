@@ -30,10 +30,10 @@ Flag any PR that:
 
 ## Repo-specific red lines (this is a browser-only consumer package)
 
-- Network progress sync (`useProgressSync.syncNow()`) shipping before an
-  approved token-issuance mechanism exists for anonymous/guest game clients
-  (see `docs/dictionary-games-tech-spec.md` §11 — no longer cited as
-  "OQ-G1") — it must remain a no-op.
+- `useProgressSync.syncNow()` MUST NOT post to the network without a real
+  bearer token. As of Phase 3 it is no longer a no-op; the network path is
+  gated on a host-supplied truthy suite token and remains dormant for guest
+  play by design (see `docs/dictionary-games-tech-spec.md` §11).
 - Reading a Helios Bearer token from `localStorage` (XSS exposure).
 - Emitting `Access-Control-Allow-Credentials`.
 - Any WordPress / PHP / server-side auth on game endpoints
