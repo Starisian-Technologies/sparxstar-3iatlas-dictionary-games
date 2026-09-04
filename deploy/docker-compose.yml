@@ -1,0 +1,133 @@
+# games.sparxstar.com — the static site and the BFF it proxies to.
+#
+# Two services, because they hold different things: `games-site` serves public
+# bytes and holds nothing, `games-bff` holds the private key that authenticates
+# this deployment to the Identity Node. Only the site publishes a port; the BFF
+# is reachable only on the internal network, by name.
+#
+#   docker compose -f deploy/docker-compose.yml up -d --build
+#
+# BEFORE THE FIRST RUN, the key pair has to exist and be registered. In order:
+#
+#   1. Generate it OUTSIDE source control, RSA 3072 (spec §9), and give it to
+#      the uid the BFF container runs as — 1000 (`node`). A bind mount carries
+#      numeric ownership through unchanged, so a root-owned 0400 key is
+#      unreadable in the container and the BFF refuses to boot:
+#
+#        openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 \
+#          -out /etc/sparxstar/games-identity.pem
+#        chown 1000:1000 /etc/sparxstar/games-identity.pem
+#        chmod 400 /etc/sparxstar/games-identity.pem
+#
+#   2. Derive the PUBLIC JWK and register it with the Identity Node, which
+#      stores only that half. (The identity repo's `pnpm service-client
+#      key:register --jwk` takes the JWK and refuses one carrying private
+#      material.)
+#
+#   3. Register the same subject in the Dictionary Node's caller registry, with
+#      the `m2m` scope and an approved budget. The subject must match the
+#      Identity token's `sub` exactly, or the Dictionary authenticates the
+#      caller and then refuses it as `subject_unknown`.
+#
+# See DEPLOY.md for the full ordered runbook.
+
+services:
+    games-site:
+        build:
+            context: ..
+            dockerfile: deploy/Dockerfile
+            args:
+                # Public addresses only. A --build-arg is visible in `docker
+                # history`, so it is the right channel for a URL and the wrong
+                # one for a credential. There is deliberately no dictionary URL
+                # here any more: the browser does not address the Dictionary.
+                GAMES_ENGINE_URL: ${GAMES_ENGINE_URL:-https://rlc-api.sparxstar.com/api/v1}
+                GAMES_IDENTITY_URL: ${GAMES_IDENTITY_URL:-https://id.sparxstar.com}
+                GAMES_SITE_URL: ${GAMES_SITE_URL:-https://games.sparxstar.com}
+        image: sparxstar/dictionary-games:${TAG:-current}
+        restart: unless-stopped
+        ports:
+            # TLS is terminated by whatever fronts this — Cloudflare, or an
+            # Nginx on the droplet. See the TLS block at the bottom of
+            # deploy/nginx/games-site.conf for the second topology.
+            - '${SITE_PORT:-8080}:80'
+        depends_on:
+            # Ordering only, not a guarantee: the site serves fine while the
+            # BFF is still starting, and a `/api/dictionary/` call during that
+            # window gets a 502 the client retries. Making the site wait would
+            # mean a BFF problem takes the whole site offline, which is worse —
+            # guest play needs no dictionary call to start.
+            - games-bff
+        networks:
+            - games
+
+    games-bff:
+        build:
+            context: ..
+            dockerfile: deploy/Dockerfile.bff
+        image: sparxstar/dictionary-games-bff:${TAG:-current}
+        restart: unless-stopped
+        # NO `ports`. This service is reachable only as `games-bff:8081` on the
+        # internal network, which is what stops the credential holder from
+        # being addressable from outside the host at all. Publishing a port
+        # here would expose an unauthenticated read path to the Dictionary.
+        environment:
+            NODE_ENV: production
+            BFF_HOST: 0.0.0.0
+            BFF_PORT: '8081'
+
+            # The Identity Node's token endpoint. Must equal the `aud` that
+            # service pins (its IDENTITY_TOKEN_ENDPOINT), or every assertion is
+            # refused as a wrong audience — the two values are one fact.
+            GAMES_IDENTITY_TOKEN_URL: ${GAMES_IDENTITY_TOKEN_URL:-https://id.sparxstar.com/oauth2/token}
+            GAMES_IDENTITY_CLIENT_ID: ${GAMES_IDENTITY_CLIENT_ID:-sparxstar-dictionary-games}
+            # The `kid` of the registered public key. Rotation switches over by
+            # changing this and the mounted key together.
+            GAMES_IDENTITY_KEY_ID: ${GAMES_IDENTITY_KEY_ID:?set the registered kid, e.g. games-2026-09}
+
+            # A PATH, never the key. Read from the read-only mount below.
+            GAMES_IDENTITY_PRIVATE_KEY_FILE: /run/secrets/games-identity-key.pem
+
+            GAMES_DICTIONARY_API_URL: ${GAMES_DICTIONARY_API_URL:-https://dictionary-api.sparxstar.com}
+            GAMES_DICTIONARY_AUDIENCE: ${GAMES_DICTIONARY_AUDIENCE:-dictionary}
+
+            # Languages the site offers. A stopgap: the Dictionary Node
+            # publishes no /languages route, so there is nothing to ask. The
+            # default is the one language with a compiled corpus in the
+            # Dictionary's own release documentation. Delete this setting when
+            # that route exists.
+            GAMES_DICTIONARY_LANGUAGES: ${GAMES_DICTIONARY_LANGUAGES:-mnk:Mandinka}
+        volumes:
+            # READ-ONLY, and a file rather than a directory so nothing else in
+            # the mount is exposed.
+            #
+            # OWNERSHIP MATTERS AND IS EASY TO GET WRONG. A bind mount carries
+            # the host's numeric uid/gid and mode through unchanged, and this
+            # container runs unprivileged as `node` (uid 1000). A root-owned
+            # mode-0400 key is therefore UNREADABLE here, and `loadConfig()`
+            # treats an unreadable key as fatal — so the BFF never opens its
+            # listener and the failure looks like an upstream outage.
+            #
+            # The host file must be `chown 1000:1000` and mode 0400: owned by
+            # the uid the container runs as, readable by nobody else. Do NOT
+            # reach for 0444 to make it "just work" — that makes the
+            # deployment's only private key readable by every user on the host.
+            # DEPLOY.md §2a step 1 has the exact commands.
+            - ${GAMES_IDENTITY_KEY_PATH:?set the host path of the RSA private key}:/run/secrets/games-identity-key.pem:ro
+        # Defence in depth around the one process that holds a key.
+        read_only: true
+        cap_drop:
+            - ALL
+        security_opt:
+            - no-new-privileges:true
+        tmpfs:
+            # `read_only: true` leaves no writable filesystem; node wants /tmp.
+            - /tmp:size=16m,mode=1777
+        networks:
+            - games
+
+networks:
+    games:
+        # Internal to this compose project. The BFF is not routable from
+        # outside it.
+        driver: bridge

@@ -20,9 +20,10 @@
         "build:site": "webpack --config webpack.site.config.js",
         "build:headers": "node scripts/generate-csp-headers.cjs",
         "build:all": "pnpm run build && pnpm run build:site",
+        "start:bff": "node server/index.js",
         "watch": "webpack --watch",
-        "lint": "eslint \"src/**/*.{js,jsx}\" --fix",
-        "lint:ci": "eslint \"src/**/*.{js,jsx}\"",
+        "lint": "eslint \"src/**/*.{js,jsx}\" \"server/**/*.js\" --fix",
+        "lint:ci": "eslint \"src/**/*.{js,jsx}\" \"server/**/*.js\"",
         "format": "prettier --write .",
         "format:check": "prettier --check .",
         "test": "jest"

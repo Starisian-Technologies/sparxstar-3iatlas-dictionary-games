@@ -1,109 +1,247 @@
 /**
- * useGameSet — content-plane regression check for Phase 3.
+ * useGameSet — the browser half of the private-Dictionary contract.
  *
- * Phase 3 only touches the progress-sync layer (useProgressSync.js,
- * GameShell.jsx's onResult wiring, the 6 game components' timing
- * instrumentation). This file was never touched by that diff — this test
- * exists to prove the dictionary's GET {restUrl}/game-set pull still works
- * exactly as before, and that it is genuinely read-only: no request other
- * than GET /game-set (and, on a 401, GET /page-token) is ever made.
+ * This file used to assert that the hook called the Dictionary REST API
+ * directly, with an ephemeral page token and a 3-day IndexedDB cache. All
+ * three of those are now the things it asserts CANNOT happen:
+ *
+ *   - The request is SAME-ORIGIN, to the games BFF. The Dictionary API is
+ *     private; no browser may call it.
+ *   - No page token, no API key, no credential of any kind leaves the browser.
+ *   - Nothing is persisted. Game words carry rights and consent restrictions
+ *     and can be withdrawn, and a client-side cache is a place a withdrawn
+ *     word outlives its withdrawal on a device nobody can reach.
+ *
+ * The pull-only invariant it always defended is unchanged and still checked:
+ * GET only, no body, no write path toward the dictionary.
  */
 import { act } from 'react';
 import { renderHook } from '../../testUtils/renderHook.js';
 import { useGameSet } from '../useGameSet.js';
 
-jest.mock('../idbUtils.js', () => ({
-    getRecord: jest.fn(async () => null), // force a network fetch (no cache hit)
-    putRecord: jest.fn(async () => true),
-}));
+const BFF = '/api/dictionary';
+
+/*
+ * DELIBERATELY NOT MOCKED: `idbUtils`.
+ *
+ * The old suite mocked it to force a cache miss. This one imports the hook
+ * against the real module and asserts nothing is written — a mock would hide
+ * exactly the regression worth catching, namely someone reintroducing a
+ * persistent copy of rights-restricted content.
+ */
+import * as idbUtils from '../idbUtils.js';
 
 beforeEach(() => {
-    // window.fetch and global.fetch are the same object reference under
-    // this repo's jest-environment-jsdom setup (verified empirically) —
-    // mocking window.fetch is sufficient and keeps this browser-env file
-    // eslint-clean (no `node` env, so a bare `global` reference doesn't lint).
+    // window.fetch and global.fetch are the same object under this repo's
+    // jest-environment-jsdom setup, so mocking window.fetch is sufficient and
+    // keeps this browser-env file eslint-clean.
     window.fetch = jest.fn();
+    jest.spyOn(idbUtils, 'putRecord');
 });
 
 afterEach(() => {
     delete window.fetch;
+    jest.restoreAllMocks();
 });
 
 function flushMicrotasks() {
     return act(() => new Promise((resolve) => setTimeout(resolve, 0)));
 }
 
-describe('useGameSet — GET {restUrl}/game-set (pull-only content plane)', () => {
-    it('fetches words from GET /game-set and never issues a write request', async () => {
-        window.fetch.mockResolvedValue({
-            ok: true,
-            status: 200,
-            json: async () => ({
-                success: true,
-                data: { words: [{ uuid: 'w1', headword: 'test' }] },
-            }),
-        });
+function okPack(words) {
+    return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, data: { words } }),
+    };
+}
 
-        const { result, rerender } = renderHook(useGameSet, {
-            restUrl: 'https://dict.example/wp-json/sparxstar/v1/dictionary',
-            langSource: 'mandinka',
-            domain: '',
-            limit: 20,
-            includeAudio: false,
-        });
+/** One word in the shape the BFF actually returns (the Dictionary's GamePack). */
+function packWord(overrides = {}) {
+    return {
+        entry_id: 'entry-1',
+        header_word: 'baa',
+        ipa_pronunciation: 'baː',
+        domain_code: '1.3',
+        english_lemma: 'river',
+        french_lemma: 'rivière',
+        english_definition: 'a large natural stream',
+        audio_url: null,
+        example: { sentence: 'Baa be jan.', translation_en: 'The river is far.' },
+        ...overrides,
+    };
+}
+
+describe('useGameSet — GET {bffPath}/game-set (private dictionary, via the BFF)', () => {
+    it('fetches words from the same-origin BFF and never issues a write request', async () => {
+        window.fetch.mockResolvedValue(okPack([packWord()]));
+
+        const props = { bffPath: BFF, language: 'mnk', domain: '', limit: 20 };
+        const { result, rerender } = renderHook(useGameSet, props);
 
         await flushMicrotasks();
-        rerender({
-            restUrl: 'https://dict.example/wp-json/sparxstar/v1/dictionary',
-            langSource: 'mandinka',
-            domain: '',
-            limit: 20,
-            includeAudio: false,
-        });
+        rerender({ ...props });
 
         expect(window.fetch).toHaveBeenCalledTimes(1);
         const [url, opts] = window.fetch.mock.calls[0];
-        expect(url).toBe(
-            'https://dict.example/wp-json/sparxstar/v1/dictionary/game-set?lang_source=mandinka&limit=20&include_audio=false'
-        );
-        // GET only — no method override, no body. This is the read-only/
-        // pull-only invariant: no write path toward the dictionary anywhere
-        // in the sync-layer diff.
+
+        // Relative, so same-origin by construction. The dictionary's own
+        // address does not appear in the bundle at all.
+        expect(url).toBe('/api/dictionary/game-set?language=mnk&size=20');
+        expect(url.startsWith('/')).toBe(true);
+        expect(url).not.toMatch(/^https?:/);
+
+        // Pull-only: GET, no body, no method override.
         expect(opts.method ?? 'GET').toBe('GET');
         expect(opts.body).toBeUndefined();
 
-        expect(result.current.words).toEqual([{ uuid: 'w1', headword: 'test' }]);
         expect(result.current.error).toBeNull();
     });
 
-    it('retries once against a refreshed page token on 401, still GET-only', async () => {
-        window.fetch
-            .mockResolvedValueOnce({ ok: false, status: 401, json: async () => ({}) })
-            .mockResolvedValueOnce({
-                ok: true,
-                status: 200,
-                json: async () => ({ data: { token: 'new-token' } }),
-            })
-            .mockResolvedValueOnce({
-                ok: true,
-                status: 200,
-                json: async () => ({ success: true, data: { words: [] } }),
-            });
+    it('sends no credential — no page token, no API key, no cookies', async () => {
+        window.fetch.mockResolvedValue(okPack([]));
 
-        renderHook(useGameSet, {
-            restUrl: 'https://dict.example/wp-json/sparxstar/v1/dictionary',
-            langSource: 'mandinka',
-        });
+        renderHook(useGameSet, { bffPath: BFF, language: 'mnk' });
+        await flushMicrotasks();
 
+        const [, opts] = window.fetch.mock.calls[0];
+        const headerNames = Object.keys(opts.headers ?? {}).map((name) => name.toLowerCase());
+
+        expect(headerNames).not.toContain('x-page-token');
+        expect(headerNames).not.toContain('x-api-key');
+        expect(headerNames).not.toContain('authorization');
+        // Same-origin would otherwise attach cookies by default.
+        expect(opts.credentials).toBe('omit');
+    });
+
+    it('never calls /page-token — the route does not exist and the flow is retired', async () => {
+        window.fetch.mockResolvedValue({ ok: false, status: 401, json: async () => ({}) });
+
+        const { result } = renderHook(useGameSet, { bffPath: BFF, language: 'mnk' });
         await flushMicrotasks();
         await flushMicrotasks();
 
-        expect(window.fetch).toHaveBeenCalledTimes(3);
-        expect(window.fetch.mock.calls[1][0]).toBe(
-            'https://dict.example/wp-json/sparxstar/v1/dictionary/page-token'
+        // Exactly one request, and no token refresh behind it. A 401 from the
+        // BFF is a service problem the player cannot fix by re-authenticating.
+        expect(window.fetch).toHaveBeenCalledTimes(1);
+        for (const [url] of window.fetch.mock.calls) {
+            expect(url).not.toContain('page-token');
+        }
+        expect(result.current.error).toBe('HTTP 401');
+    });
+
+    it('persists nothing — a withdrawn word must not outlive its withdrawal', async () => {
+        window.fetch.mockResolvedValue(okPack([packWord()]));
+
+        renderHook(useGameSet, { bffPath: BFF, language: 'mnk' });
+        await flushMicrotasks();
+
+        expect(idbUtils.putRecord).not.toHaveBeenCalled();
+    });
+
+    it('asks for audio-verified entries only when the game needs audio', async () => {
+        window.fetch.mockResolvedValue(okPack([]));
+
+        renderHook(useGameSet, { bffPath: BFF, language: 'mnk', audioVerifiedOnly: true });
+        await flushMicrotasks();
+
+        const [url] = window.fetch.mock.calls[0];
+        // `audio_verified` asks for entries that HAVE consented, verified audio
+        // — not for audio to be added to any entry, which is what the retired
+        // `include_audio` parameter meant.
+        expect(url).toContain('audio_verified=true');
+        expect(url).not.toContain('include_audio');
+    });
+
+    it('passes a domain filter through and omits it when empty', async () => {
+        window.fetch.mockResolvedValue(okPack([]));
+
+        renderHook(useGameSet, { bffPath: BFF, language: 'mnk', domain: '1.3' });
+        await flushMicrotasks();
+        expect(window.fetch.mock.calls[0][0]).toContain('domain=1.3');
+
+        window.fetch.mockClear();
+        renderHook(useGameSet, { bffPath: BFF, language: 'mnk', domain: '' });
+        await flushMicrotasks();
+        expect(window.fetch.mock.calls[0][0]).not.toContain('domain=');
+    });
+
+    it('makes no request at all without a language', async () => {
+        renderHook(useGameSet, { bffPath: BFF, language: null });
+        await flushMicrotasks();
+        expect(window.fetch).not.toHaveBeenCalled();
+    });
+
+    it('clamps the pack size to the BFF ceiling rather than provoking a 400', async () => {
+        window.fetch.mockResolvedValue(okPack([]));
+
+        renderHook(useGameSet, { bffPath: BFF, language: 'mnk', limit: 5000 });
+        await flushMicrotasks();
+
+        // The BFF refuses an over-cap size; a caller passing a large number is
+        // a product question about pack size, not something to show a player.
+        expect(window.fetch.mock.calls[0][0]).toContain('size=50');
+    });
+
+    it('reports a failure without inventing an empty word list', async () => {
+        window.fetch.mockResolvedValue({ ok: false, status: 503, json: async () => ({}) });
+
+        const { result } = renderHook(useGameSet, { bffPath: BFF, language: 'mnk' });
+        await flushMicrotasks();
+
+        expect(result.current.error).toBe('HTTP 503');
+        expect(result.current.words).toEqual([]);
+        expect(result.current.loading).toBe(false);
+    });
+});
+
+/**
+ * The regression this file did not previously catch.
+ *
+ * The hook used to hand the BFF's GamePack straight to the components, which
+ * read a different set of field names — so every prompt rendered blank and
+ * every result carried `word_uuid: undefined`. The suite above tested the hook
+ * against a BFF response and the BFF suite tested the BFF against a Dictionary
+ * response; nothing tested the pair, which is exactly where the break lived.
+ */
+describe('useGameSet — hands components THEIR shape, not the pack shape', () => {
+    it('adapts GamePack field names to the ones the components read', async () => {
+        window.fetch.mockResolvedValue(okPack([packWord()]));
+
+        const { result } = renderHook(useGameSet, { bffPath: BFF, language: 'mnk' });
+        await flushMicrotasks();
+
+        const [word] = result.current.words;
+
+        // What the components read.
+        expect(word.uuid).toBe('entry-1');
+        expect(word.headword).toBe('baa');
+        expect(word.ipa).toBe('baː');
+        expect(word.domain).toBe('1.3');
+        expect(word.translation_en).toBe('river');
+        expect(word.translation_fr).toBe('rivière');
+        expect(word.example_sentences).toEqual([
+            { sentence: 'Baa be jan.', translation_en: 'The river is far.' },
+        ]);
+
+        // And the raw pack names are gone, so nothing downstream can start
+        // depending on both spellings at once.
+        expect(word.entry_id).toBeUndefined();
+        expect(word.header_word).toBeUndefined();
+    });
+
+    it('carries no rights-gated definition field through under any name', async () => {
+        window.fetch.mockResolvedValue(
+            okPack([packWord({ english_definition: '', french_definition: '' })])
         );
-        window.fetch.mock.calls.forEach(([, opts]) => {
-            expect(opts?.method ?? 'GET').toBe('GET');
-        });
+
+        const { result } = renderHook(useGameSet, { bffPath: BFF, language: 'mnk' });
+        await flushMicrotasks();
+
+        const [word] = result.current.words;
+        expect(word.english_definition).toBeUndefined();
+        expect(word.french_definition).toBeUndefined();
+        // The gloss comes from the lemma, which is never rights-gated.
+        expect(word.translation_en).toBe('river');
     });
 });

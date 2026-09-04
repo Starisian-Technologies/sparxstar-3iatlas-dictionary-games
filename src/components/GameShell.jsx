@@ -3,7 +3,6 @@ import { Loader2, ChevronDown } from 'lucide-react';
 import { useGameSet } from '../hooks/useGameSet.js';
 import { useGameSession } from '../hooks/useGameSession.js';
 import { useProgressSync } from '../hooks/useProgressSync.js';
-import { fetchWithPageToken } from '../api/pageToken.js';
 import SessionComplete from './SessionComplete.jsx';
 import DomainFlash from './games/DomainFlash.jsx';
 import MeaningMatch from './games/MeaningMatch.jsx';
@@ -91,10 +90,14 @@ const setLocalStorageItem = (key, value) => {
  * post-session summary. Integrates with useGameSession and useProgressSync.
  *
  * Props:
- *   restUrl        {string}   Base REST URL (dictionary's own REST API)
+ *   bffPath        {string}   Base path of the games BFF (`/api/dictionary`).
+ *     SAME-ORIGIN, and the only dictionary address this component knows. The
+ *     Dictionary API is private: the browser never addresses it, the BFF holds
+ *     the credential. Replaces the former `restUrl`, which was the dictionary's
+ *     own origin.
  *   language       {string}   'en' | 'fr'
- *   sourceLanguage {string|null}  Currently selected language slug
- *   languages      {Array}    Available languages from /languages
+ *   sourceLanguage {string|null}  Currently selected ISO 639-3 language code
+ *   languages      {Array}    Available languages from the BFF
  *   onSourceLanguage {Function}  (slug) => void — change source language
  *   onBrowse         {Function}  () => void — switch to Browse tab
  *   engineUrl        {string}   [optional] RLC node-engine base URL, for
@@ -103,7 +106,7 @@ const setLocalStorageItem = (key, value) => {
  *     Bearer token for the engine's batch endpoint. Omit to stay local-only.
  */
 export default function GameShell({
-    restUrl,
+    bffPath,
     language,
     sourceLanguage,
     languages,
@@ -113,7 +116,28 @@ export default function GameShell({
     getSuiteToken,
 }) {
     /* ── Setup state ── */
-    const [selectedDomain, setSelectedDomain] = useState('');
+    /*
+     * The domain selection is TAGGED WITH THE LANGUAGE IT WAS MADE FOR, and
+     * the effective filter is derived from that tag rather than stored.
+     *
+     * Storing the bare code and clearing it in an effect is not enough, and the
+     * reason is ordering: `useGameSet` is called above the effect that would do
+     * the clearing, so its own effect runs FIRST on the render where the
+     * language changed. For that one commit the hook sees the new language
+     * beside the old language's domain code, and issues a request for a filter
+     * that does not exist in the corpus it is now asking about — the player
+     * gets an empty pack, and the corrected request follows behind it.
+     *
+     * Deriving it closes the window instead of narrowing it: a selection made
+     * for `mnk` is simply not a selection once the language is `wol`, on the
+     * very first render, with no effect involved.
+     */
+    const [domainChoice, setDomainChoice] = useState({ language: null, code: '' });
+    const selectedDomain = domainChoice.language === sourceLanguage ? domainChoice.code : '';
+    const setSelectedDomain = useCallback(
+        (code) => setDomainChoice({ language: sourceLanguage, code }),
+        [sourceLanguage]
+    );
     const [selectedGame, setSelectedGame] = useState(GAME_TYPES[0].id);
     const [wordCount, setWordCount] = useState(20);
     const [domains, setDomains] = useState([]);
@@ -132,17 +156,25 @@ export default function GameShell({
         loading: gameSetLoading,
         error: gameSetError,
     } = useGameSet({
-        restUrl,
-        langSource: sourceLanguage,
+        bffPath,
+        language: sourceLanguage,
         domain: selectedDomain,
         limit: wordCount,
-        includeAudio: selectedGame === 'listen_write',
+        /*
+         * `listen_write` is the one game that cannot be played without audio,
+         * so it asks the Dictionary for audio-verified entries only. The old
+         * `includeAudio` flag asked for audio URLs to be ADDED to any entry;
+         * this asks for entries that HAVE consented, verified audio, which is
+         * the question the game actually has. An entry with no consented
+         * recording is not a `listen_write` prompt.
+         */
+        audioVerifiedOnly: selectedGame === 'listen_write',
     });
 
     const { session, learnedCount, initSession, recordResult, completeSession, clearSession } =
         useGameSession();
 
-    const { addEvent, syncNow } = useProgressSync({ restUrl, engineUrl, getSuiteToken });
+    const { addEvent, syncNow } = useProgressSync({ engineUrl, getSuiteToken });
 
     /*
      * Promise chain for result writes.  Game components call onResult() synchronously
@@ -157,27 +189,43 @@ export default function GameShell({
         let cancelled = false;
         const controller = new AbortController();
 
+        /*
+         * CLEARED FIRST, not on success.
+         *
+         * Domain codes are per-language, so leaving the previous language's
+         * list on screen while the new one loads — or forever, if the request
+         * fails — offers the player domains that do not exist in the language
+         * they selected. The SELECTION is handled by deriving it (see
+         * `domainChoice` above) rather than clearing it here, because an effect
+         * runs too late to keep a stale code out of the first request.
+         */
+        setDomains([]);
+
         if (!sourceLanguage) {
-            setDomains([]);
             setDomainsLoading(false);
             setSetupError(null);
             return;
         }
         setDomainsLoading(true);
         /*
-         * /domains is page-token authenticated like every other same-origin
-         * read here. Without the header a token-enforcing server answers 401
-         * and the selector silently falls back to "All domains", which reads
-         * as "this language has no domains" rather than as an auth failure.
+         * Same-origin, through the BFF. No credential and no page token: the
+         * Dictionary API is private and the browser does not address it.
+         *
+         * KNOWN GAP: the Dictionary Node publishes no `/domains` route (the
+         * WordPress original had one; the Node port did not carry it over), so
+         * the BFF answers an empty list. The selector already treats "no
+         * domains" as "All domains", so the filter degrades quietly rather
+         * than blocking play — which is why this stays a soft failure and not
+         * an error banner.
          */
-        fetchWithPageToken(
-            `${restUrl}/domains?lang_source=${encodeURIComponent(sourceLanguage)}`,
-            restUrl,
-            { signal: controller.signal }
-        )
+        fetch(`${bffPath}/domains?language=${encodeURIComponent(sourceLanguage)}`, {
+            credentials: 'omit',
+            headers: { Accept: 'application/json' },
+            signal: controller.signal,
+        })
             .then((r) => (r.ok ? r.json() : null))
             .then((json) => {
-                if (!cancelled && json?.success && Array.isArray(json.data?.domains)) {
+                if (!cancelled && Array.isArray(json?.data?.domains)) {
                     setDomains(json.data.domains);
                 }
             })
@@ -196,7 +244,7 @@ export default function GameShell({
             cancelled = true;
             controller.abort();
         };
-    }, [sourceLanguage, restUrl]);
+    }, [sourceLanguage, bffPath]);
 
     /* ── Resume an in-progress session when the Play tab is opened ── */
     useEffect(() => {
@@ -207,7 +255,18 @@ export default function GameShell({
             if (remainingWords.length > 0) {
                 setGameWords(remainingWords);
                 setSelectedGame(session.gameType);
-                setSelectedDomain(session.domain ?? '');
+                /*
+                 * Restored as a PAIR, tagged with the session's own language.
+                 * `onSourceLanguage` is the parent's state, so it lands on a
+                 * later render; tagging the resumed domain with whatever
+                 * language happens to be selected right now would make the
+                 * resumed filter evaporate the moment the resumed language
+                 * arrives.
+                 */
+                setDomainChoice({
+                    language: session.langSource ?? '',
+                    code: session.domain ?? '',
+                });
                 onSourceLanguage(session.langSource ?? '');
                 setPhase('playing');
             }

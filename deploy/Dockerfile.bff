@@ -1,0 +1,76 @@
+# Dictionary Games BFF — the server-side component that holds the credential.
+#
+# A SEPARATE IMAGE from the static site (deploy/Dockerfile), deliberately.
+#
+# The static host and the credential holder have opposite security profiles: the
+# static image is public bytes served to anyone, and this one holds the private
+# key that authenticates this deployment to the Identity Node. Keeping them
+# apart means the image everyone pulls contains no key material and no runtime
+# that could read one, and this image contains no browser-facing content that
+# could be tampered with to read the key. One process each, one blast radius
+# each.
+#
+# Build from the REPOSITORY ROOT:
+#
+#   docker build -f deploy/Dockerfile.bff -t sparxstar/dictionary-games-bff:<tag> .
+#
+# NOTHING SECRET IS BUILT IN. There is no ARG for a key and no COPY of one. The
+# signing key is MOUNTED AT RUNTIME, read-only, and read from a path — see
+# deploy/docker-compose.yml. A --build-arg is visible in `docker history` to
+# anyone who can pull the image, which makes it the wrong channel for a
+# credential; an env var is visible in `docker inspect` and /proc, which makes
+# it the wrong channel too. A mounted file is the only one left that is right.
+
+FROM node:22-alpine AS runtime
+
+# The BFF has ZERO runtime dependencies — it is written against node:http and
+# node:crypto only. So there is no install step, no lockfile, and no
+# node_modules in this image at all.
+#
+# That is a security property, not a brag. This process holds the deployment's
+# only private key; every package it carried would be a package that could
+# reach that key, and a JWT library would have been the most obvious candidate.
+# RS256 over a `header.payload` string is twenty lines of `crypto`.
+
+WORKDIR /app
+
+# Only the server. None of src/, none of the build tooling, no site sources —
+# nothing this process does not execute.
+COPY server ./server
+
+# Run unprivileged. The node image ships a `node` user; the application
+# filesystem is owned by root and not writable by it, because a service that
+# holds a key has no reason to be able to modify its own code.
+RUN chown -R root:root /app && chmod -R a-w /app
+
+# The `node` user from the base image. Named by NUMBER as well, because the
+# host must chown the mounted signing key to the same uid: a bind mount carries
+# the host's numeric ownership straight through, so "readable by node" is a
+# statement about uid 1000 on the host, not about a name the host has never
+# heard of. If a future base image renumbers this user, the key mount breaks
+# loudly at boot (config.js treats an unreadable key as fatal) rather than
+# quietly — and DEPLOY.md's §2a step 1 is where the number is used.
+USER node
+# uid 1000 = `node` in node:22-alpine. Verify with:
+#   docker run --rm node:22-alpine id -u node
+
+# Matches BFF_PORT's default and the `upstream games_bff` in
+# deploy/nginx/games-site.conf.
+EXPOSE 8081
+
+# Loopback is the default in server/config.js, which is correct for a
+# same-host Nginx. In a container the proxy is a different network namespace,
+# so it must listen on the container's interface instead — the compose network
+# is what keeps it unreachable from outside, not the bind address.
+ENV BFF_HOST=0.0.0.0 \
+    BFF_PORT=8081 \
+    NODE_ENV=production
+
+# /healthz answers without touching a credential or an upstream, so a
+# Dictionary or Identity outage does not get this container restarted in a loop.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD node -e "require('http').get({host:'127.0.0.1',port:process.env.BFF_PORT,path:'/healthz'},r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+
+# `node` directly, no init wrapper: server/index.js installs SIGTERM/SIGINT
+# handlers that stop accepting, drain in-flight requests, and exit.
+CMD ["node", "server/index.js"]

@@ -24,7 +24,20 @@
 
 'use strict';
 
-/** Production. A plain build needs no environment at all. */
+/**
+ * Production. A plain build needs no environment at all.
+ *
+ * NOTE the absence of a dictionary endpoint. The browser no longer addresses
+ * the Dictionary API: it calls this site's own `/api/dictionary/*`, which Nginx
+ * proxies to the server-side BFF holding the credential. So the dictionary
+ * origin is not compiled into the bundle AND is not permitted by the CSP's
+ * `connect-src` — a direct call from the page is now blocked by policy, not
+ * merely absent from the code.
+ *
+ * `GAMES_DICTIONARY_URL` was REMOVED rather than repointed. A CI job still
+ * passing it now fails the build (unknown build arg) instead of quietly
+ * restoring a direct browser path to a private API.
+ */
 const DEFAULTS = {
     /** Node-engine base. `/events/batch` is mounted under it, so the `/api/v1`
      *  suffix belongs to the base rather than to the client's paths. */
@@ -33,8 +46,6 @@ const DEFAULTS = {
     GAMES_IDENTITY_URL: 'https://id.sparxstar.com',
     /** This site's own public origin. */
     GAMES_SITE_URL: 'https://games.sparxstar.com',
-    /** Webster dictionary REST namespace, including the WordPress prefix. */
-    GAMES_DICTIONARY_URL: 'https://dictionary.sparxstar.com/wp-json/sparxstar/v1/dictionary',
 };
 
 /**
@@ -77,7 +88,13 @@ function originOf(url) {
  * The distinct origins the page issues cross-origin requests to, in a stable
  * order so a regenerated headers file is byte-identical.
  *
- * The site's own origin is covered by `'self'` and is deliberately not listed.
+ * The site's own origin is covered by `'self'` and is deliberately not listed —
+ * which is also what covers every `/api/dictionary/*` call, since those are
+ * same-origin by construction.
+ *
+ * The dictionary origin is NOT here. That is the CSP half of the BFF change:
+ * even if some future code in the bundle tried to call the Dictionary API
+ * directly, the browser would refuse the connection.
  *
  * @param {Record<string, string>} endpoints From resolveEndpoints().
  * @returns {string[]}
@@ -85,7 +102,6 @@ function originOf(url) {
 function connectOrigins(endpoints) {
     const selfOrigin = originOf(endpoints.GAMES_SITE_URL);
     const origins = [
-        originOf(endpoints.GAMES_DICTIONARY_URL),
         originOf(endpoints.GAMES_IDENTITY_URL),
         originOf(endpoints.GAMES_ENGINE_URL),
     ].filter((origin) => origin !== selfOrigin);

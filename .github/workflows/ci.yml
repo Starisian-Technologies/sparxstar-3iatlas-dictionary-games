@@ -64,7 +64,7 @@ jobs:
               run: pnpm test
 
             # Cheap standing check that no credential was ever compiled into
-            # the deployable bundle. The site's configuration is four public
+            # the deployable bundle. The site's configuration is three public
             # URLs; anything key-shaped in dist-site/ is a mistake worth
             # failing the build over rather than discovering after it ships.
             - name: Assert no secrets in the website bundle
@@ -74,6 +74,69 @@ jobs:
                     exit 1
                   fi
                   echo "No credential patterns found in dist-site/."
+
+            # The Dictionary API is PRIVATE: no browser may call it. Three
+            # things enforce that, and this asserts two of them mechanically —
+            # the origin is not compiled into the bundle, and the CSP does not
+            # permit it. (The third, the deletion of the browser dictionary
+            # client, is enforced by the absence of the file.)
+            #
+            # Worth a standing check rather than a review habit: reintroducing
+            # a direct browser call would work in development against a
+            # permissive dictionary and fail only in production, as an opaque
+            # 401 with a PRIORITY_1 security event logged on the other side.
+            - name: Assert the browser cannot reach the Dictionary API
+              run: |
+                  if grep -rIl 'dictionary-api\.' dist-site/; then
+                    echo "::error::The Dictionary API origin is compiled into dist-site/. The browser must call /api/dictionary/* on this origin instead — see docs/dictionary-games-bff.md."
+                    exit 1
+                  fi
+                  if grep -q 'dictionary-api\.' deploy/nginx/games-security-headers.conf; then
+                    echo "::error::The CSP connect-src permits the Dictionary API origin. It must not — every /api/dictionary/* call is same-origin and covered by 'self'."
+                    exit 1
+                  fi
+                  # The HEADER literal, which is the thing that would actually
+                  # send a page token. Deliberately not a search for the words
+                  # "page token": those appear in comments, docs and a test
+                  # asserting the flow is absent, and none of those may fail
+                  # the build.
+                  if grep -rIn 'X-Page-Token' src/ server/; then
+                    echo "::error::The page-token flow is retired and the Dictionary Node has no /page-token route."
+                    exit 1
+                  fi
+                  # The flow only ever existed in these two files, so their
+                  # absence is the real guarantee.
+                  for gone in src/api/DictionaryApiClient.js src/api/pageToken.js; do
+                    if [ -e "$gone" ]; then
+                      echo "::error::$gone is a browser client for a private API and was deleted deliberately."
+                      exit 1
+                    fi
+                  done
+                  echo "Browser has no path to the Dictionary API."
+
+            # The package must not depend on the deployable website. Qodo
+            # caught a hook importing `src/site/config.js`, which reverses the
+            # one-way dependency the UMD package boundary rests on — a host
+            # mounting the package would then pull in this site's config.
+            - name: Assert the package layer never imports the site layer
+              run: |
+                  if grep -rn "from '\.\./site/\|from '\./site/" src/hooks/ src/components/; then
+                    echo "::error::src/hooks/ and src/components/ must not import from src/site/. Put the shared value in src/constants.js and re-export it from the site."
+                    exit 1
+                  fi
+                  echo "Package layer does not import the site layer."
+
+            # The BFF holds the deployment's only private key, so its
+            # dependency set is a security boundary: it is written against
+            # node:http and node:crypto ONLY. Every package it gained would be
+            # a package that could reach that key.
+            - name: Assert the BFF has no dependencies
+              run: |
+                  if grep -rn "require('" server/ | grep -vE "require\('(node:)?(crypto|fs|http|os|path)'\)|require\('\.\.?/" ; then
+                    echo "::error::server/ may only require node builtins and its own modules."
+                    exit 1
+                  fi
+                  echo "BFF requires node builtins and its own modules only."
 
             # Source maps are built for symbolicating crash reports and must
             # not be served. Nginx 404s them and the Dockerfile deletes them;
