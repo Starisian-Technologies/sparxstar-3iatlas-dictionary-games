@@ -380,6 +380,49 @@ and `connect-src` should not permit one.
 
 ---
 
+## 4a · Verify the reward rail reaches the engine
+
+Everything up to this point can pass while **no game result ever settles**.
+The chain has five links and four of them are already verifiable without a
+player:
+
+| Link                           | How to check it, no account needed                                                                                                                                                                                          | Expected                                                                                                  |
+| :----------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------- |
+| The engine is up               | `curl -s https://rlc-api.sparxstar.com/ready`                                                                                                                                                                               | `{"status":"ok","db":true,"identity_configured":true}`                                                    |
+| Its intake is mounted          | `curl -s -o /dev/null -w '%{http_code}' -X POST https://rlc-api.sparxstar.com/api/v1/events/batch`                                                                                                                          | **401** — mounted, refusing an unauthenticated caller. A **404** means the route is not there.            |
+| The classroom is correctly OFF | same, against `/api/v1/session/create`                                                                                                                                                                                      | **404**                                                                                                   |
+| The engine accepts this origin | `curl -s -i -X OPTIONS https://rlc-api.sparxstar.com/api/v1/events/batch -H 'Origin: https://games.sparxstar.com' -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: authorization,content-type'` | `access-control-allow-origin: https://games.sparxstar.com`, and `Authorization` among the allowed headers |
+| Identity accepts this origin   | the same OPTIONS against `https://id.sparxstar.com/auth/v1/login`                                                                                                                                                           | same allow-origin                                                                                         |
+
+**The fifth link needs a real signed-in player, and nothing else can stand in
+for it.** It is the one that proves the deployed engine accepts a token the
+deployed Identity issues — i.e. that the engine's `IDENTITY_AUDIENCE` matches
+what Identity puts in `aud` for a human login.
+
+```
+1. Open https://games.sparxstar.com and SIGN IN. (Signed out, results stay on
+   the device by design — a guest syncs nothing, so a guest cannot test this.)
+2. Open the browser's network tab.
+3. Play one word and answer it.
+4. Finish the round. Look for POST .../api/v1/events/batch
+```
+
+| What you see                                      | What it means                                                                                                                                                                                                             | What to do                                                                                     |
+| :------------------------------------------------ | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | :--------------------------------------------------------------------------------------------- |
+| `200` with `{"accepted":1,"failed":[]}`           | **The rail works.**                                                                                                                                                                                                       | Nothing.                                                                                       |
+| `200` with `accepted:0` and empty `failed`        | That `event_id` was already applied — a re-flush, not a fault                                                                                                                                                             | Play a new word.                                                                               |
+| `200` with a `failed[]` entry                     | The engine refused the envelope and NAMES the reason: `run_id_required` or `question_id_required` means the payload lost `session_id`/`deal_id`; `unsupported_game_type` means the manifest does not know the `game_type` | Fix the named field.                                                                           |
+| `401`                                             | The suite token was rejected. Most likely the deployed engine's `IDENTITY_AUDIENCE` does not match Identity's `IDENTITY_JWT_AUDIENCE`                                                                                     | Compare the two deployed values. Do **not** widen the engine's audience check to make it pass. |
+| A **CORS error**, while every `curl` above passed | Step 1 of this document was skipped or reverted                                                                                                                                                                           | Add `https://games.sparxstar.com` to the engine's `UI_ORIGINS`.                                |
+| No request at all                                 | The player is signed out, or the build has no `GAMES_ENGINE_URL`                                                                                                                                                          | Check the sign-in state first; it is the usual cause.                                          |
+
+**Results are not lost while this is broken.** Failed flushes stay queued in
+IndexedDB with a stable `event_id`, and the engine's per-question award claim
+means a replay cannot double-pay. Once the rail works, queued results settle on
+the next sync. So this is worth fixing calmly rather than urgently — but it is
+worth knowing, because until it works every signed-in player is accumulating an
+outbox that looks to them like XP that never arrives.
+
 ## Troubleshooting
 
 **Sign-in fails with a CORS error in the console, but `curl` to

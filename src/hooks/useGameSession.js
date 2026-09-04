@@ -120,15 +120,27 @@ export function useGameSession() {
      * @param {string} opts.langSource
      * @param {string} opts.domain
      * @param {Array}  opts.words  Shuffled game-set slice
+     * @param {string} [opts.level] The difficulty level this round began under.
      */
     const initSession = useCallback(
-        async ({ gameType, langSource, domain, words }) => {
+        async ({ gameType, langSource, domain, words, level }) => {
             const newSession = {
                 key: SESSION_KEY,
                 runId: newRunId(),
                 gameType,
                 langSource,
                 domain,
+                /*
+                 * The level the round STARTED under, stored so a resume plays
+                 * by the same rules.
+                 *
+                 * Without it, a session resumed after a reload came back under
+                 * the default level whatever it began as — the same words, but
+                 * different assistance and a different scoring shape than the
+                 * player chose. Optional, so a session persisted by an older
+                 * build still resumes; the caller supplies its own default.
+                 */
+                level,
                 words,
                 currentIndex: 0,
                 results: [],

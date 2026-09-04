@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Volume2 } from 'lucide-react';
+import { OUTCOME, xpFor } from '../../pedagogy.js';
 
 /**
  * DomainFlash — Game 4.6
@@ -13,6 +14,17 @@ import { Volume2 } from 'lucide-react';
  *   language   {string}   'en' | 'fr'
  *   onResult   {Function} (uuid, outcome, attempts, xp, timeMs) => void
  *   onComplete {Function} () => void
+ */
+/*
+ * `languageCode`, `mode` and `onEvent` are deliberately NOT taken.
+ *
+ * `GameShell` passes them to every game, and this one has no use for either:
+ * there is no headword to segment into orthographic units (the card shows the
+ * word whole) and no attempts to make help escalate over. Destructuring them
+ * to satisfy a signature would suggest they matter here. They do not.
+ *
+ * `onEvent` went with the self-rating hook: this game emits no telemetry while
+ * OQ-G4 is open (see `handleKnew`).
  */
 export default function DomainFlash({ words, language, onResult, onComplete }) {
     const deck = useMemo(() => shuffle(words), [words]);
@@ -35,17 +47,56 @@ export default function DomainFlash({ words, language, onResult, onComplete }) {
 
     const handleReveal = () => setFlipped(true);
 
+    /*
+     * DomainFlash is RECOGNITION, not production: the player reads the card,
+     * reveals the answer, and says honestly whether they knew it. That is the
+     * "recognition before production" step the pedagogical brief asks for, and
+     * it is why this game keeps one self-rated pass rather than three attempts
+     * — there is nothing to attempt.
+     *
+     * What it does NOT keep is the scoring. "I didn't know it" reported
+     * `learning`, which the engine's manifest pays +5 for, while the UI showed
+     * 0. Honest self-report should not be punished, but it should not be paid
+     * for either: it is `incorrect`, worth nothing, and it puts the word in the
+     * review queue — which is the actual reward for admitting it.
+     */
+    /*
+     * NO `game_self_rated` EVENT.
+     *
+     * An earlier revision emitted one here. `docs/dictionary-games-tech-spec.md`
+     * still lists **OQ-G4 — DomainFlash "I knew it" hook confirmation** as an
+     * OPEN question, and implementing behaviour that depends on an unresolved
+     * open question is exactly what this repository's rules forbid: it turns a
+     * decision nobody has taken into shipped behaviour, and the spec then
+     * describes something the code has already moved past.
+     *
+     * The scoring correction below is a different matter and stays — it fixes
+     * an outcome that paid +5 for a word the player said they did not know,
+     * which is a defect against the approved table rather than a new hook.
+     */
     const handleKnew = () => {
         if (answered) return;
         setAnswered(true);
-        onResult(word.uuid, 'correct', 1, 5, Date.now() - wordStartRef.current);
+        onResult(
+            word.uuid,
+            OUTCOME.CORRECT,
+            1,
+            xpFor(OUTCOME.CORRECT),
+            Date.now() - wordStartRef.current
+        );
         next();
     };
 
     const handleLearning = () => {
         if (answered) return;
         setAnswered(true);
-        onResult(word.uuid, 'learning', 1, 0, Date.now() - wordStartRef.current);
+        onResult(
+            word.uuid,
+            OUTCOME.INCORRECT,
+            1,
+            xpFor(OUTCOME.INCORRECT),
+            Date.now() - wordStartRef.current
+        );
         next();
     };
 

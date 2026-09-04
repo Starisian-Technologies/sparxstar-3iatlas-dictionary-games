@@ -245,13 +245,22 @@ describe('contract — limit=5 walks the whole chain', () => {
         const packWords = response.json.data.words;
         const adapted = adaptGamePackWords(packWords);
 
-        // The licensed entry's source glosses were withheld upstream. Nothing
-        // in this chain may put them back, under any name.
+        /*
+         * The licensed entry's source glosses were withheld upstream. Nothing
+         * in this chain may put them back.
+         *
+         * The assertion changed with the field-usage audit: the adapter now
+         * CARRIES `english_definition`, because 62.3% of sampled entries have
+         * one that no game could previously show. The rights mechanism is the
+         * empty string the Dictionary sets, so what must hold end-to-end is
+         * that a withheld value arrives withheld and is never reconstructed
+         * from a neighbouring field — which is what the next lines check.
+         */
         const licensedIndex = packWords.findIndex((word) => word.english_definition === '');
         expect(licensedIndex).toBeGreaterThanOrEqual(0);
         const restricted = adapted[licensedIndex];
-        expect(restricted.english_definition).toBeUndefined();
-        expect(restricted.french_definition).toBeUndefined();
+        expect(restricted.english_definition).toBe('');
+        expect(restricted.french_definition).toBe('');
         // The gloss the components show comes from the LEMMA, which the
         // Dictionary ships unconditionally — a different field, not a backfill.
         expect(restricted.translation_en).toBe(packWords[licensedIndex].english_lemma);

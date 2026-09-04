@@ -1,5 +1,9 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import AccessoryBar from '../AccessoryBar.jsx';
+import AnswerReveal from '../AnswerReveal.jsx';
+import { MODE, OUTCOME, xpFor } from '../../pedagogy.js';
+import { isSpellable, segmentHeadword } from '../../orthography.js';
+import { SkipForward } from 'lucide-react';
 
 /**
  * CompleteSentence — Game 4.4
@@ -18,13 +22,25 @@ import AccessoryBar from '../AccessoryBar.jsx';
  *   onResult   {Function} (uuid, outcome, attempts, xp, timeMs) => void
  *   onComplete {Function} () => void
  */
-export default function CompleteSentence({ words, language, onResult, onComplete }) {
+export default function CompleteSentence({
+    words,
+    language,
+    languageCode,
+    mode = MODE.PRACTICE,
+    onResult,
+    onComplete,
+    onEvent,
+}) {
     // Require the headword to actually appear in the sentence — otherwise the blank
     // substitution is a no-op and the answer is left visible, defeating the game.
     const deck = useMemo(
         () =>
             shuffle(
                 words.filter((w) => {
+                    /* Spellable first: the player has to WRITE the word into
+                     * the blank, so `0`, `00jo0` and `suno tey` are rounds
+                     * that cannot be won however good the sentence is. */
+                    if (!isSpellable(w.headword ?? '', languageCode)) return false;
                     const example = w.example ?? w.example_sentences?.[0] ?? null;
                     return (
                         example?.sentence &&
@@ -33,14 +49,24 @@ export default function CompleteSentence({ words, language, onResult, onComplete
                     );
                 })
             ),
-        [words]
+        /* `languageCode` belongs here: the spellable filter depends on it, so
+         * omitting it left the previous language's deck in place after a
+         * language change — the same stale-state class as the domain filter
+         * bug in GameShell. */
+        [words, languageCode]
     );
 
     const [index, setIndex] = useState(0);
     const [input, setInput] = useState('');
     const [attempts, setAttempts] = useState(0);
     const [revealed, setRevealed] = useState('');
-    const [status, setStatus] = useState(null); /* 'correct' | 'wrong' | null */
+    const [status, setStatus] = useState(null);
+    /*
+     * The outcome this word resolved to. Held rather than derived from
+     * `status`, because `status: 'wrong'` cannot distinguish out-of-attempts
+     * from skipped, and those are different outcomes.
+     */
+    const [outcome, setOutcome] = useState(null); /* 'correct' | 'wrong' | null */
     const inputRef = useRef(null);
     const wordStartRef = useRef(Date.now());
 
@@ -69,7 +95,28 @@ export default function CompleteSentence({ words, language, onResult, onComplete
         );
     }
 
-    if (!word) return null;
+    if (!word) {
+        /*
+         * Nothing this game can deal. Returning null rendered a BLANK SCREEN,
+         * which reads as a loading failure and leaves the player with nothing
+         * to press — the same dead end, arrived at differently. Say what
+         * happened and offer the way out.
+         */
+        return (
+            <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+                <p className="text-gray-700 dark:text-gray-200">
+                    None of these words have a sentence that can be completed.
+                </p>
+                <button
+                    type="button"
+                    onClick={onComplete}
+                    className="min-h-[44px] rounded-xl bg-gray-900 px-5 font-semibold text-white dark:bg-gray-100 dark:text-gray-900"
+                >
+                    Back
+                </button>
+            </div>
+        );
+    }
 
     const target = word.headword;
     const example = word.example ?? word.example_sentences?.[0] ?? null;
@@ -96,8 +143,22 @@ export default function CompleteSentence({ words, language, onResult, onComplete
 
         if (isCorrect) {
             setStatus('correct');
-            onResult(word.uuid, 'correct', attempts + 1, 8, Date.now() - wordStartRef.current);
-            setTimeout(() => advance(), 1500);
+            /*
+             * Full credit only on the first attempt with no letters given.
+             * After a retry this is the engine manifest's `learning` — got
+             * there, with help — which is what pays 5 rather than 10. The old
+             * code always reported `correct`, so a player who needed all three
+             * attempts was paid the same as one who knew it outright.
+             */
+            const resolved = attempts === 0 ? OUTCOME.CORRECT : OUTCOME.LEARNING;
+            setOutcome(resolved);
+            onResult(
+                word.uuid,
+                resolved,
+                attempts + 1,
+                xpFor(resolved),
+                Date.now() - wordStartRef.current
+            );
         } else {
             const nextAttempts = attempts + 1;
             setAttempts(nextAttempts);
@@ -107,13 +168,55 @@ export default function CompleteSentence({ words, language, onResult, onComplete
                 /* Show full word and advance. */
                 setRevealed(target);
                 setStatus('wrong');
-                onResult(word.uuid, 'learning', 3, 0, Date.now() - wordStartRef.current);
-                setTimeout(() => advance(), 2000);
+                /*
+                 * Out of attempts is `incorrect`, worth nothing. This reported
+                 * `learning`, which the engine's manifest scores at +5 — so a
+                 * word the player never got right was paid for server-side
+                 * while the screen showed 0. The ledger and the UI disagreed,
+                 * and the ledger was the generous one.
+                 */
+                setOutcome(OUTCOME.INCORRECT);
+                onResult(
+                    word.uuid,
+                    OUTCOME.INCORRECT,
+                    nextAttempts,
+                    xpFor(OUTCOME.INCORRECT),
+                    Date.now() - wordStartRef.current
+                );
             } else {
-                /* Reveal next letter. */
-                setRevealed(target.substring(0, nextAttempts));
+                /*
+                 * Reveal the next ORTHOGRAPHIC UNIT, not the next character.
+                 * `substring(0, 1)` of `njemboo` gives `n`, which is half of
+                 * `nj` and teaches the wrong shape of the word.
+                 */
+                /*
+                 * Challenge mode holds the reveal back one attempt, matching
+                 * `hintLevelFor`. It does not remove it: a player who cannot
+                 * get the word must still be able to finish, in either mode.
+                 */
+                const unitsGiven = mode === MODE.CHALLENGE ? nextAttempts - 1 : nextAttempts;
+                setRevealed(
+                    segmentHeadword(target, languageCode).slice(0, Math.max(0, unitsGiven)).join('')
+                );
             }
         }
+    };
+
+    /* Skip. Always available, in both modes — neither game had any way out
+     * short of spending all three attempts. */
+    const handleSkip = () => {
+        if (status === 'correct' || outcome !== null) return;
+        setRevealed(target);
+        setStatus('wrong');
+        setOutcome(OUTCOME.SKIPPED);
+        onResult(
+            word.uuid,
+            OUTCOME.SKIPPED,
+            Math.max(1, attempts),
+            xpFor(OUTCOME.SKIPPED),
+            Date.now() - wordStartRef.current
+        );
+        onEvent?.({ type: 'game_skip_used', game: 'complete_sentence', word_uuid: word.uuid });
     };
 
     const advance = () => {
@@ -125,6 +228,7 @@ export default function CompleteSentence({ words, language, onResult, onComplete
             setAttempts(0);
             setRevealed('');
             setStatus(null);
+            setOutcome(null);
         }
     };
 
@@ -176,18 +280,38 @@ export default function CompleteSentence({ words, language, onResult, onComplete
                 })}
             </div>
 
-            {/* Feedback */}
-            {status === 'correct' && (
-                <p className="text-center text-green-600 font-bold shrink-0">+8 XP ✓</p>
+            {/* Resolved: the shared answer panel. Nothing auto-advances —
+             *  the 1500/2000ms timers took the answer away before it could be
+             *  read, which is the opposite of what feedback is for. */}
+            {outcome !== null && (
+                <div className="flex-1 overflow-y-auto">
+                    <AnswerReveal
+                        word={word}
+                        outcome={outcome}
+                        languageCode={languageCode}
+                        language={language}
+                        onContinue={advance}
+                        isLast={index + 1 >= deck.length}
+                    />
+                </div>
             )}
-            {status === 'wrong' && (
-                <p className="text-center text-gray-500 text-sm shrink-0">
-                    The word was: <strong>{target}</strong>
-                </p>
+
+            {/* Escape, always available. */}
+            {outcome === null && (
+                <div className="flex shrink-0 justify-end">
+                    <button
+                        type="button"
+                        onClick={handleSkip}
+                        className="flex min-h-[44px] items-center gap-2 rounded-xl border border-gray-300 px-4 text-sm font-medium text-gray-700 dark:border-gray-600 dark:text-gray-200"
+                    >
+                        Skip
+                        <SkipForward size={16} aria-hidden="true" />
+                    </button>
+                </div>
             )}
 
             {/* Input form */}
-            {!status && (
+            {outcome === null && (
                 <form onSubmit={handleSubmit} className="flex gap-2 shrink-0">
                     <input
                         ref={inputRef}

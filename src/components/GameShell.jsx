@@ -3,6 +3,20 @@ import { Loader2, ChevronDown } from 'lucide-react';
 import { useGameSet } from '../hooks/useGameSet.js';
 import { useGameSession } from '../hooks/useGameSession.js';
 import { useProgressSync } from '../hooks/useProgressSync.js';
+import { MODE, needsReview } from '../pedagogy.js';
+import {
+    ADJUST,
+    ADJUST_MESSAGE,
+    GAME_SKILL,
+    LEVEL,
+    LEVEL_PROFILE,
+    applyAdjustment,
+    decideAdjustment,
+    emptyPerformance,
+    progressKey,
+    recordOutcome,
+    selectForLevel,
+} from '../difficulty.js';
 import SessionComplete from './SessionComplete.jsx';
 import DomainFlash from './games/DomainFlash.jsx';
 import MeaningMatch from './games/MeaningMatch.jsx';
@@ -60,6 +74,9 @@ const GAME_TYPES = [
     },
 ];
 
+/** Where per-language, per-skill difficulty offsets live for a guest. */
+const OFFSETS_KEY = 'aiwa-dict-difficulty-offsets';
+
 const getLocalStorageItem = (key) => {
     try {
         return {
@@ -82,6 +99,29 @@ const setLocalStorageItem = (key, value) => {
         return false;
     }
 };
+
+/**
+ * Read stored difficulty offsets, tolerating anything unexpected.
+ *
+ * A corrupt or hand-edited value must not stop the games loading, and a
+ * non-numeric offset must not reach `applyAdjustment` — so every entry is
+ * validated rather than trusted, and anything odd is simply dropped.
+ */
+function readStoredOffsets() {
+    const { value } = getLocalStorageItem(OFFSETS_KEY);
+    if (!value) return {};
+    try {
+        const parsed = JSON.parse(value);
+        if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+        return Object.fromEntries(
+            Object.entries(parsed).filter(
+                ([key, offset]) => typeof key === 'string' && Number.isFinite(offset)
+            )
+        );
+    } catch {
+        return {};
+    }
+}
 
 /**
  * GameShell — top-level game orchestrator.
@@ -139,6 +179,45 @@ export default function GameShell({
         [sourceLanguage]
     );
     const [selectedGame, setSelectedGame] = useState(GAME_TYPES[0].id);
+    /*
+     * The player's chosen level, and whether the system may fine-tune within it.
+     *
+     * Manual choice plus automatic fine-tuning, in that order of authority: the
+     * player picks the level and can change or freeze it at any time, and
+     * adaptation only reorders and reselects questions INSIDE that choice. It
+     * never moves anybody between levels.
+     *
+     * Practice is the default — the middle of the three, and the one that does
+     * not assume anything about a player nobody has met yet.
+     */
+    const [playerLevel, setPlayerLevel] = useState(LEVEL.PRACTICE);
+    const [adaptive, setAdaptive] = useState(true);
+    /* What the last adjustment was, so the player can be told plainly. */
+    const [adjustNotice, setAdjustNotice] = useState(null);
+
+    /*
+     * Difficulty offsets, keyed `${languageCode}:${skill}`.
+     *
+     * Separate by BOTH, deliberately: a learner may read meanings readily and
+     * still be working out spelling, and Mandinka progress says nothing about
+     * Wolof. One general ability score would let strength in one skill raise
+     * the difficulty of another.
+     *
+     * Guest progress stays on the device, in localStorage. Nothing is sent
+     * anywhere and no RLC change is needed for any of it.
+     *
+     * The previous version of this comment claimed localStorage and there was
+     * none — every learned offset was discarded on remount. A comment that
+     * promises a behaviour the code does not have is worse than the missing
+     * behaviour, because the next reader stops looking.
+     *
+     * Only the OFFSETS persist. The rolling performance window stays
+     * session-scoped on purpose: it is meant to reflect how the last few
+     * minutes went, and a window restored from last week would adapt on
+     * evidence the player has outgrown.
+     */
+    const [offsets, setOffsets] = useState(() => readStoredOffsets());
+    const performanceRef = useRef({});
     const [wordCount, setWordCount] = useState(20);
     const [domains, setDomains] = useState([]);
     const [domainsLoading, setDomainsLoading] = useState(false);
@@ -159,7 +238,19 @@ export default function GameShell({
         bffPath,
         language: sourceLanguage,
         domain: selectedDomain,
-        limit: wordCount,
+        /*
+         * A SURPLUS, not `wordCount`.
+         *
+         * `selectForLevel` was being handed exactly as many candidates as the
+         * round needed, so it returned all of them whatever the level or the
+         * adaptation offset — the level selector changed nothing about which
+         * words were played. Selection needs more candidates than it keeps.
+         *
+         * Three times the round, capped at the hook's own 50 ceiling. The
+         * Dictionary charges budget per returned entry, so this is deliberately
+         * a small multiple rather than "fetch everything".
+         */
+        limit: Math.min(50, wordCount * 3),
         /*
          * `listen_write` is the one game that cannot be played without audio,
          * so it asks the Dictionary for audio-verified entries only. The old
@@ -256,6 +347,15 @@ export default function GameShell({
                 setGameWords(remainingWords);
                 setSelectedGame(session.gameType);
                 /*
+                 * Restore the level the round BEGAN under, so a resume plays by
+                 * the rules the player chose rather than the default. A session
+                 * persisted before levels existed has no `level`, so it keeps
+                 * whatever is currently selected.
+                 */
+                if (session.level && LEVEL_PROFILE[session.level]) {
+                    setPlayerLevel(session.level);
+                }
+                /*
                  * Restored as a PAIR, tagged with the session's own language.
                  * `onSourceLanguage` is the parent's state, so it lands on a
                  * later render; tagging the resumed domain with whatever
@@ -289,7 +389,24 @@ export default function GameShell({
                 return;
             }
 
-            const sliced = fetchedWords.slice(0, wordCount);
+            /*
+             * Choose FOR THE LEVEL rather than taking the first N.
+             *
+             * `selectForLevel` orders by the Dictionary's own `difficulty`
+             * band first and only then by the other factors, and applies this
+             * skill's adaptation offset. It only orders and selects: the
+             * playability rules still run inside each game afterwards, which
+             * is what makes it impossible for any offset to deal an unplayable
+             * word.
+             */
+            const skill = GAME_SKILL[selectedGame];
+            const sliced = selectForLevel(fetchedWords, {
+                level: playerLevel,
+                languageCode: sourceLanguage ?? '',
+                gameId: selectedGame,
+                offset: offsets[progressKey(sourceLanguage ?? '', skill)] ?? 0,
+                count: wordCount,
+            });
             setSetupError(null);
 
             try {
@@ -297,6 +414,7 @@ export default function GameShell({
                     gameType: selectedGame,
                     langSource: sourceLanguage ?? '',
                     domain: selectedDomain,
+                    level: playerLevel,
                     words: sliced,
                 });
             } catch (error) {
@@ -321,6 +439,12 @@ export default function GameShell({
 
         load();
     }, [
+        /* `playerLevel` and `offsets` belong here: they choose WHICH words the
+         * round gets, so a stale pair would deal the previous level's deck.
+         * The effect is gated on `phase === 'loading'`, so listing them cannot
+         * refetch a round already in play. */
+        playerLevel,
+        offsets,
         phase,
         gameSetLoading,
         gameSetError,
@@ -332,6 +456,14 @@ export default function GameShell({
         initSession,
         addEvent,
     ]);
+
+    /* Persist the offsets whenever they change. Storage may be unavailable
+     * (private browsing, quota); `setLocalStorageItem` already swallows that,
+     * and losing an offset is a degraded nudge, never a lost reward. */
+    useEffect(() => {
+        if (Object.keys(offsets).length === 0) return;
+        setLocalStorageItem(OFFSETS_KEY, JSON.stringify(offsets));
+    }, [offsets]);
 
     /* ── Handle a single word result from any game component ── */
     const handleWordResult = useCallback(
@@ -363,6 +495,18 @@ export default function GameShell({
                      * than settled without idempotency. The run id comes from the
                      * session recordResult just wrote, so it is the same id for
                      * every result in this play-through. */
+                    /*
+                     * Fold the outcome into this language-and-skill's rolling
+                     * window. A window, not lifetime XP: a player who has
+                     * improved should not be held back by old answers, and a
+                     * bad ten minutes should recover within the session.
+                     */
+                    const skillKey = progressKey(sourceLanguage ?? '', GAME_SKILL[selectedGame]);
+                    performanceRef.current[skillKey] = recordOutcome(
+                        performanceRef.current[skillKey] ?? emptyPerformance(),
+                        { outcome, attempts, timeMs }
+                    );
+
                     await addEvent({
                         type: 'game_result',
                         run_id: updatedSession?.runId ?? '',
@@ -431,18 +575,57 @@ export default function GameShell({
                     console.error('Failed to record word result:', error);
                 });
         },
-        [recordResult, addEvent, selectedGame]
+        [recordResult, addEvent, selectedGame, sourceLanguage]
     );
 
     /* ── Handle game session complete ── */
     const handleComplete = useCallback(async () => {
         /* Await any in-flight result write before marking the session complete. */
         await pendingResultRef.current;
+
+        /*
+         * Adapt ONCE, at the end of a round — the conservative boundary this
+         * change deliberately stays inside.
+         *
+         * Adjusting mid-round would change the difficulty of a session a player
+         * is in the middle of, from a window that is still filling. At the end
+         * there is a whole round of evidence, the change applies to the NEXT
+         * round, and the player is told about it rather than discovering it.
+         *
+         * `decideAdjustment` holds below its evidence floor, so a short round
+         * moves nothing, and one mistake never moves anything.
+         */
+        const skillKey = progressKey(sourceLanguage ?? '', GAME_SKILL[selectedGame]);
+        const adjustment = decideAdjustment(performanceRef.current[skillKey], { adaptive });
+        if (adjustment !== ADJUST.HOLD) {
+            setOffsets((prev) => ({
+                ...prev,
+                [skillKey]: applyAdjustment(prev[skillKey] ?? 0, adjustment),
+            }));
+            setAdjustNotice(ADJUST_MESSAGE[adjustment]);
+            await addEvent({
+                type: 'game_difficulty_adjusted',
+                game: selectedGame,
+                skill: GAME_SKILL[selectedGame],
+                direction: adjustment,
+            });
+        } else {
+            setAdjustNotice(null);
+        }
+
         await completeSession();
         await addEvent({ type: 'aiwa_game_session_complete', domain: selectedDomain });
         await syncNow();
         setPhase('complete');
-    }, [completeSession, addEvent, syncNow, selectedDomain]);
+    }, [
+        completeSession,
+        addEvent,
+        syncNow,
+        selectedDomain,
+        selectedGame,
+        sourceLanguage,
+        adaptive,
+    ]);
 
     /* ── Start button ── */
     const handleStart = () => {
@@ -454,8 +637,17 @@ export default function GameShell({
     /* ── Practice missed words ── */
     const handlePracticeMissed = useCallback(async () => {
         if (!session) return;
+        /*
+         * Every word the player did not get first time, not just `learning`.
+         *
+         * This filtered `outcome === 'learning'` only, so a word answered
+         * outright wrong — or skipped — never came back. Those are precisely
+         * the words that need reinforcing, and they were the ones being
+         * dropped. `needsReview` is the single definition of "missed", shared
+         * with the games so the queue and the scoring cannot drift apart.
+         */
         const missed = session.results
-            .filter((r) => r.outcome === 'learning')
+            .filter((r) => needsReview(r.outcome))
             .map((r) => session.words.find((w) => w.uuid === r.wordUuid))
             .filter(Boolean);
 
@@ -468,6 +660,7 @@ export default function GameShell({
                 gameType: selectedGame,
                 langSource: sourceLanguage ?? '',
                 domain: selectedDomain,
+                level: playerLevel,
                 words: missed,
             });
         } catch (error) {
@@ -478,7 +671,7 @@ export default function GameShell({
 
         setGameWords(missed);
         setPhase('playing');
-    }, [session, initSession, selectedGame, sourceLanguage, selectedDomain]);
+    }, [session, initSession, selectedGame, sourceLanguage, selectedDomain, playerLevel]);
 
     /* ── Play again ── */
     const handlePlayAgain = useCallback(async () => {
@@ -502,7 +695,80 @@ export default function GameShell({
     if (phase === 'playing') {
         return (
             <div className="flex-1 flex flex-col overflow-hidden bg-white dark:bg-gray-900">
-                {renderGame(selectedGame, gameWords, language, handleWordResult, handleComplete)}
+                {/*
+                 * Transparency strip. The current level is always visible and
+                 * the player can change it or freeze adaptation at any time.
+                 * Nobody is silently locked into a tier.
+                 *
+                 * A level change takes effect at the NEXT question, and the
+                 * control says so rather than leaving the player to infer it.
+                 * Two reasons, both found in review: the words for a round are
+                 * chosen when the round loads, so changing level mid-round
+                 * cannot re-deal a deck already in play; and changing the
+                 * assistance mid-WORD reset the tiles, attempt counter and
+                 * clock of the question in front of the player — discarding
+                 * their work, and letting retries be refreshed by toggling the
+                 * control.
+                 *
+                 * So: assistance from the next question, deck from the next
+                 * round. Play again is one tap from the summary.
+                 */}
+                <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-gray-100 px-3 py-2 text-xs dark:border-gray-800">
+                    <span className="text-gray-400">Level</span>
+                    {Object.entries(LEVEL_PROFILE).map(([id, p]) => (
+                        <button
+                            key={id}
+                            type="button"
+                            onClick={() => setPlayerLevel(id)}
+                            aria-pressed={playerLevel === id}
+                            className="min-h-[32px] rounded-lg border px-2 font-medium"
+                            style={
+                                playerLevel === id
+                                    ? {
+                                          background: '#7B3FA0',
+                                          borderColor: 'transparent',
+                                          color: 'white',
+                                      }
+                                    : { borderColor: '#e5e7eb', color: '#6b7280' }
+                            }
+                        >
+                            {p.label}
+                        </button>
+                    ))}
+                    <span className="w-full text-[11px] text-gray-400">
+                        Applies from the next question
+                    </span>
+                    <button
+                        type="button"
+                        onClick={() => setAdaptive((a) => !a)}
+                        aria-pressed={adaptive}
+                        className="ml-auto min-h-[32px] rounded-lg border border-gray-200 px-2 font-medium text-gray-500 dark:border-gray-700 dark:text-gray-400"
+                    >
+                        Adaptive: {adaptive ? 'on' : 'off'}
+                    </button>
+                </div>
+
+                {adjustNotice && (
+                    <p className="shrink-0 px-3 py-1.5 text-center text-xs text-gray-500 dark:text-gray-400">
+                        {adjustNotice}
+                    </p>
+                )}
+
+                {renderGame({
+                    gameType: selectedGame,
+                    words: gameWords,
+                    language,
+                    languageCode: sourceLanguage ?? '',
+                    /* The learn-loop takes a MODE (how much help, how soon);
+                     * the player chooses a LEVEL. Learn and Practice both want
+                     * help early, so both map to the loop's practice mode;
+                     * Challenge holds it back. The level itself drives which
+                     * words are dealt, above. */
+                    mode: playerLevel === LEVEL.CHALLENGE ? MODE.CHALLENGE : MODE.PRACTICE,
+                    onResult: handleWordResult,
+                    onComplete: handleComplete,
+                    onEvent: addEvent,
+                })}
             </div>
         );
     }
@@ -640,6 +906,47 @@ export default function GameShell({
                         </div>
                     </section>
 
+                    {/* Level. Three, chosen by the player and changeable at any
+                     *  time — including mid-round from the strip below the game.
+                     *  What no level changes is that Skip, reveal and navigation
+                     *  stay available: a harder level is not a trap. */}
+                    <section>
+                        <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                            Level
+                        </h3>
+                        <div className="flex gap-2">
+                            {Object.entries(LEVEL_PROFILE)
+                                .map(([id, p]) => ({
+                                    id,
+                                    label: p.label,
+                                    hint: p.blurb,
+                                }))
+                                .map((m) => (
+                                    <button
+                                        key={m.id}
+                                        type="button"
+                                        onClick={() => setPlayerLevel(m.id)}
+                                        aria-pressed={playerLevel === m.id}
+                                        className="flex-1 rounded-xl border-2 px-3 py-2.5 text-left transition-colors"
+                                        style={
+                                            playerLevel === m.id
+                                                ? {
+                                                      background: '#7B3FA0',
+                                                      borderColor: 'transparent',
+                                                      color: 'white',
+                                                  }
+                                                : { borderColor: '#f3f4f6', color: '#374151' }
+                                        }
+                                    >
+                                        <span className="block text-sm font-semibold">
+                                            {m.label}
+                                        </span>
+                                        <span className="block text-xs opacity-80">{m.hint}</span>
+                                    </button>
+                                ))}
+                        </div>
+                    </section>
+
                     {/* Word count */}
                     <section>
                         <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">
@@ -683,9 +990,29 @@ export default function GameShell({
     );
 }
 
-/** Route to the correct game component based on game type. */
-function renderGame(gameType, words, language, onResult, onComplete) {
-    const props = { words, language, onResult, onComplete };
+/**
+ * Route to the correct game component based on game type.
+ *
+ * `languageCode` is the language being LEARNED and is distinct from `language`,
+ * which is the interface language. The games need the first to segment a
+ * headword into orthographic units; passing the second would segment Mandinka
+ * with an English profile, which is the class of bug `src/orthography.js`
+ * exists to remove.
+ *
+ * `mode` and `onEvent` are threaded through the same way so every game gets the
+ * same learn-loop and the same telemetry, rather than six variations.
+ */
+function renderGame({
+    gameType,
+    words,
+    language,
+    languageCode,
+    mode,
+    onResult,
+    onComplete,
+    onEvent,
+}) {
+    const props = { words, language, languageCode, mode, onResult, onComplete, onEvent };
 
     switch (gameType) {
         case 'listen_write':

@@ -322,16 +322,37 @@ pre-Phase-3 behavior — see §4 and §11.
 { event_id, event_type: 'game.result', payload: { … } }
 ```
 
-| Field                | Source                                                | Why the engine needs it                                                                                                                                      |
-| :------------------- | :---------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `event_id`           | minted once at queue time (`newEventId`)              | Transport idempotency. `processed_events` dedupes on it, so re-flushing an unconfirmed outbox is a no-op. Never regenerated on retry — that would defeat it. |
-| `payload.game_type`  | constant `dictionary_quiz`                            | The one manifest registered for this client. Not a per-minigame id; the minigame stays local. An unregistered value is rejected `unsupported_game_type`.     |
-| `payload.session_id` | the session's `runId`                                 | The run. Namespaced `solo:` server-side and used as `run_id` in the award claim. Empty ⇒ `run_id_required`.                                                  |
-| `payload.deal_id`    | the dictionary entry `uuid`                           | The question. Empty ⇒ `question_id_required`.                                                                                                                |
-| `payload.word_uuid`  | the same `uuid`                                       | Retained alongside `deal_id` so a later change to how a question is keyed cannot silently re-point the dictionary reference. Ignored by the engine today.    |
-| `payload.outcome`    | `correct` \| `learning` (this client emits these two) | Scored from the manifest. The manifest also accepts `incorrect` and `skipped`; anything else is refused, never silently scored.                              |
-| `payload.attempts`   | per-word attempt count                                | Recorded alongside the award; never an input to it. Non-negative.                                                                                            |
-| `payload.time_ms`    | measured per-word elapsed time                        | Same. Non-negative.                                                                                                                                          |
+| Field                | Source                                                                           | Why the engine needs it                                                                                                                                      |
+| :------------------- | :------------------------------------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `event_id`           | minted once at queue time (`newEventId`)                                         | Transport idempotency. `processed_events` dedupes on it, so re-flushing an unconfirmed outbox is a no-op. Never regenerated on retry — that would defeat it. |
+| `payload.game_type`  | constant `dictionary_quiz`                                                       | The one manifest registered for this client. Not a per-minigame id; the minigame stays local. An unregistered value is rejected `unsupported_game_type`.     |
+| `payload.session_id` | the session's `runId`                                                            | The run. Namespaced `solo:` server-side and used as `run_id` in the award claim. Empty ⇒ `run_id_required`.                                                  |
+| `payload.deal_id`    | the dictionary entry `uuid`                                                      | The question. Empty ⇒ `question_id_required`.                                                                                                                |
+| `payload.word_uuid`  | the same `uuid`                                                                  | Retained alongside `deal_id` so a later change to how a question is keyed cannot silently re-point the dictionary reference. Ignored by the engine today.    |
+| `payload.outcome`    | `correct` \| `learning` \| `incorrect` \| `skipped` (this client emits all four) | Scored from the manifest, which accepts exactly these four; anything else is refused, never silently scored. See the outcome semantics below.                |
+| `payload.attempts`   | per-word attempt count                                                           | Recorded alongside the award; never an input to it. Non-negative.                                                                                            |
+| `payload.time_ms`    | measured per-word elapsed time                                                   | Same. Non-negative.                                                                                                                                          |
+
+#### Outcome semantics
+
+The client emits all four outcomes the manifest scores. It previously emitted
+only two, and the reason it now emits four is a scoring correction rather than
+an expansion: every game used to report `learning` when the player FAILED, and
+the engine's `dictionaryQuizManifest` pays **+5** for `learning` — so a word
+the player never got right was paid for in the reward ledger while the screen
+showed 0.
+
+| Outcome     | What it means                                                    | XP (engine) |
+| :---------- | :--------------------------------------------------------------- | ----------: |
+| `correct`   | Right on the first attempt, no hint taken                        |          10 |
+| `learning`  | Right after a retry or with help — the manifest's own definition |           5 |
+| `incorrect` | Attempts exhausted, or the answer revealed before being reached  |           0 |
+| `skipped`   | The player chose to move on                                      |           0 |
+
+XP is the engine's to compute from `game_type` + `outcome`; the client sends no
+score and any it sent would be ignored. `src/pedagogy.js` mirrors this table so
+the number a player SEES matches the number the ledger will hold, and a test
+asserts the two agree.
 
 **No `xp` or `score` is ever sent.** The engine derives the award from
 `game_type` + `outcome` (Reward Rail Contract §3); a client-supplied amount

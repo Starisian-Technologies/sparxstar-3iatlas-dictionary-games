@@ -52,6 +52,44 @@ const OUTBOX_KEY = 'progress-outbox:pending';
 const BATCH_MAX = 200; // matches the engine's `batch_too_large` cap (spec §3.10)
 
 /**
+ * How many LOCAL-ONLY events to retain.
+ *
+ * `game_result` events drain when they settle. Everything else — the
+ * `aiwa_game_*` bonus signals and the gameplay-analytics events — is never
+ * sent, so nothing ever removed it and the outbox grew without bound for the
+ * life of the install.
+ *
+ * That was survivable while local-only events were occasional (a streak, a
+ * session completion). It is not once per-question events exist: twenty words a
+ * session, several sessions a day, on a phone with little storage and an
+ * IndexedDB quota that fails writes when it is reached — at which point the
+ * `game_result` events that DO need to settle cannot be queued either.
+ *
+ * So the local log is a ring: the newest `LOCAL_EVENT_MAX` are kept and older
+ * ones are dropped. Analytics tolerate that; a reward cannot, which is why the
+ * cap deliberately applies to local-only events and never to `game_result`.
+ */
+const LOCAL_EVENT_MAX = 500;
+
+/** Event types that are sent to the engine and must never be dropped locally. */
+const SETTLING_TYPES = new Set(['game_result']);
+
+/**
+ * Trim local-only events to the retention bound, keeping every settling event.
+ *
+ * Order is preserved so the log still reads chronologically.
+ */
+export function trimLocalEvents(events, max = LOCAL_EVENT_MAX) {
+    const localOnly = events.filter((e) => !SETTLING_TYPES.has(e.type));
+    if (localOnly.length <= max) return events;
+
+    /* Drop the oldest local-only events, by identity so a settling event
+     * sitting between them is never disturbed. */
+    const doomed = new Set(localOnly.slice(0, localOnly.length - max));
+    return events.filter((e) => !doomed.has(e));
+}
+
+/**
  * The engine's `game_type` for every game in this suite.
  *
  * Not a per-minigame id: `listen_write`, `arrange_word` and the rest all settle
@@ -150,7 +188,10 @@ export function useProgressSync({ engineUrl, getSuiteToken }) {
 
             await putRecord('progress-outbox', {
                 key: OUTBOX_KEY,
-                events: [...events, { event_id: newEventId(), ...event, ts: Date.now() }],
+                events: trimLocalEvents([
+                    ...events,
+                    { event_id: newEventId(), ...event, ts: Date.now() },
+                ]),
             }).then((ok) => {
                 if (!ok) {
                     console.warn(

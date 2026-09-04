@@ -230,7 +230,15 @@ describe('useGameSet — hands components THEIR shape, not the pack shape', () =
         expect(word.header_word).toBeUndefined();
     });
 
-    it('carries no rights-gated definition field through under any name', async () => {
+    it('carries a withheld definition through as withheld, never reconstructed', async () => {
+        /*
+         * This assertion changed with the field-usage audit, and the reason is
+         * in `src/api/__tests__/gamePackAdapter.test.js`: the rights mechanism
+         * is the EMPTY STRING set upstream, not the absence of the field. The
+         * adapter now carries `english_definition` because 62.3% of sampled
+         * entries have one that no game could previously show — but an empty
+         * value stays empty and is never backfilled.
+         */
         window.fetch.mockResolvedValue(
             okPack([packWord({ english_definition: '', french_definition: '' })])
         );
@@ -239,8 +247,8 @@ describe('useGameSet — hands components THEIR shape, not the pack shape', () =
         await flushMicrotasks();
 
         const [word] = result.current.words;
-        expect(word.english_definition).toBeUndefined();
-        expect(word.french_definition).toBeUndefined();
+        expect(word.english_definition).toBe('');
+        expect(word.french_definition).toBe('');
         // The gloss comes from the lemma, which is never rights-gated.
         expect(word.translation_en).toBe('river');
     });
