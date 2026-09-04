@@ -234,12 +234,12 @@ field list explicitly.
 - **IndexedDB database:** `aiwa-games-db`, version 1, key path `key` on every
   store.
 
-    | Store             | Contents                                                                  |
-    | ----------------- | ------------------------------------------------------------------------- |
-    | `game-sets`       | Cached `/game-set` responses, keyed by lang+domain+limit+audio; 3-day TTL |
-    | `game-sessions`   | Current session (`game-session:current`), persisted per word result       |
-    | `progress-outbox` | Pending event queue (`progress-outbox:pending`)                           |
-    | `learned-words`   | Cumulative correctly-written UUIDs (`learned-words:production`)           |
+    | Store             | Contents                                                                                                                                                                                                                                   |
+    | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+    | `game-sets`       | **Unused since the BFF change.** The store is still created (`idbUtils.js` `STORES`) but nothing reads or writes it: game words carry rights and consent restrictions and can be withdrawn, and a TTL is not a withdrawal mechanism (§6a). |
+    | `game-sessions`   | Current session (`game-session:current`), persisted per word result                                                                                                                                                                        |
+    | `progress-outbox` | Pending event queue (`progress-outbox:pending`)                                                                                                                                                                                            |
+    | `learned-words`   | Cumulative correctly-written UUIDs (`learned-words:production`)                                                                                                                                                                            |
 
 - **Run identifier (2026-08-25).** Every `game-sessions` record carries a
   `runId`, minted once per `initSession` (`src/ids.js`) and stable for the whole
@@ -833,6 +833,18 @@ same, and port it there if not.
   payload. The dictionary repository's decision to close.
 - `DICTIONARY_BFF_PATH` lives in the neutral `src/constants.js`, re-exported by
   `src/site/config.js`, so `src/hooks/` never imports from `src/site/`.
+- **The domain filter is scoped to its language.** Domain codes are per
+  language, so `GameShell` stores the selection as `{ language, code }` and
+  DERIVES the effective filter (`domainChoice.language === sourceLanguage`).
+  Clearing it in an effect is not sufficient: `useGameSet` is called above that
+  effect, so on the render where the language changes its own effect runs first
+  and would issue one request pairing the new language with the old domain —
+  an empty pack for a filter the player cannot see. Resume restores the pair
+  together, tagged with the session's own `langSource`, because
+  `onSourceLanguage` is the parent's state and lands a render later. Covered by
+  `src/components/__tests__/GameShell.domains.test.jsx`.
+- **§7 correction.** The `game-sets` IndexedDB store is now unused; the row
+  describing a three-day cache described behaviour this change removed.
 
 - **2026-08-26** — Consistency correction. Aligned OQ-I3 wording so this spec,
   `AGENTS.md`, and `ROLE.md` all point to the same blocker (Identity Service

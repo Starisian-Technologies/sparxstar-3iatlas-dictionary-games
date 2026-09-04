@@ -116,7 +116,28 @@ export default function GameShell({
     getSuiteToken,
 }) {
     /* ── Setup state ── */
-    const [selectedDomain, setSelectedDomain] = useState('');
+    /*
+     * The domain selection is TAGGED WITH THE LANGUAGE IT WAS MADE FOR, and
+     * the effective filter is derived from that tag rather than stored.
+     *
+     * Storing the bare code and clearing it in an effect is not enough, and the
+     * reason is ordering: `useGameSet` is called above the effect that would do
+     * the clearing, so its own effect runs FIRST on the render where the
+     * language changed. For that one commit the hook sees the new language
+     * beside the old language's domain code, and issues a request for a filter
+     * that does not exist in the corpus it is now asking about — the player
+     * gets an empty pack, and the corrected request follows behind it.
+     *
+     * Deriving it closes the window instead of narrowing it: a selection made
+     * for `mnk` is simply not a selection once the language is `wol`, on the
+     * very first render, with no effect involved.
+     */
+    const [domainChoice, setDomainChoice] = useState({ language: null, code: '' });
+    const selectedDomain = domainChoice.language === sourceLanguage ? domainChoice.code : '';
+    const setSelectedDomain = useCallback(
+        (code) => setDomainChoice({ language: sourceLanguage, code }),
+        [sourceLanguage]
+    );
     const [selectedGame, setSelectedGame] = useState(GAME_TYPES[0].id);
     const [wordCount, setWordCount] = useState(20);
     const [domains, setDomains] = useState([]);
@@ -168,8 +189,19 @@ export default function GameShell({
         let cancelled = false;
         const controller = new AbortController();
 
+        /*
+         * CLEARED FIRST, not on success.
+         *
+         * Domain codes are per-language, so leaving the previous language's
+         * list on screen while the new one loads — or forever, if the request
+         * fails — offers the player domains that do not exist in the language
+         * they selected. The SELECTION is handled by deriving it (see
+         * `domainChoice` above) rather than clearing it here, because an effect
+         * runs too late to keep a stale code out of the first request.
+         */
+        setDomains([]);
+
         if (!sourceLanguage) {
-            setDomains([]);
             setDomainsLoading(false);
             setSetupError(null);
             return;
@@ -223,7 +255,18 @@ export default function GameShell({
             if (remainingWords.length > 0) {
                 setGameWords(remainingWords);
                 setSelectedGame(session.gameType);
-                setSelectedDomain(session.domain ?? '');
+                /*
+                 * Restored as a PAIR, tagged with the session's own language.
+                 * `onSourceLanguage` is the parent's state, so it lands on a
+                 * later render; tagging the resumed domain with whatever
+                 * language happens to be selected right now would make the
+                 * resumed filter evaporate the moment the resumed language
+                 * arrives.
+                 */
+                setDomainChoice({
+                    language: session.langSource ?? '',
+                    code: session.domain ?? '',
+                });
                 onSourceLanguage(session.langSource ?? '');
                 setPhase('playing');
             }
