@@ -48,6 +48,12 @@ export const SITE_URL = process.env.GAMES_SITE_URL;
 /**
  * The games BFF, SAME-ORIGIN and therefore not configurable.
  *
+ * RE-EXPORTED from `src/constants.js`, which is where it is defined. The
+ * package's own hooks need this value, and a hook importing from `src/site/`
+ * would reverse the one-way dependency the package boundary rests on — so the
+ * constant lives in the neutral module and the site re-exports it for the
+ * convenience of code already importing from here.
+ *
  * A relative path, deliberately — not an origin, and not a build-time
  * override. Three things follow from that, all of them the point:
  *
@@ -64,7 +70,7 @@ export const SITE_URL = process.env.GAMES_SITE_URL;
  * The Dictionary API is private. Only the BFF holds a credential for it, and
  * the BFF runs on this origin behind Nginx — see `docs/dictionary-games-bff.md`.
  */
-export const DICTIONARY_BFF_PATH = '/api/dictionary';
+export { DICTIONARY_BFF_PATH } from '../constants.js';
 
 /**
  * The interface language of the site chrome. The *source* language (the

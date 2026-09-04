@@ -43,6 +43,20 @@
 
 const { createPrivateKey, createSign, randomUUID } = require('crypto');
 
+/**
+ * Ceiling on a token-endpoint response, bytes.
+ *
+ * A token response is a handful of JSON fields around one JWT — kilobytes at
+ * the very most. `response.json()` would buffer whatever arrives, so a
+ * misrouted or misbehaving endpoint could spend this process's memory on the
+ * one path that mints its credential. The Dictionary path was already bounded
+ * (`readBounded` in dictionaryClient.js); this closes the same hole here.
+ *
+ * Generous by two orders of magnitude so a legitimate response can never trip
+ * it, and small enough that an illegitimate one cannot hurt.
+ */
+const MAX_TOKEN_RESPONSE_BYTES = 64 * 1024;
+
 /** RFC 7523 §2.2 — the assertion type the Identity Node requires, exactly. */
 const CLIENT_ASSERTION_TYPE = 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer';
 
@@ -104,6 +118,43 @@ class IdentityUnavailableError extends Error {
         super(message);
         this.name = 'IdentityUnavailableError';
         this.cause = cause;
+    }
+}
+
+/**
+ * Read a response body as text with a hard byte ceiling.
+ *
+ * Applied to success AND error responses: an error body is exactly where a
+ * misbehaving endpoint would put something large, and it is read anyway to
+ * extract the OAuth error code.
+ */
+async function readBoundedText(response) {
+    const body = response.body;
+    if (!body) return '';
+
+    const chunks = [];
+    let total = 0;
+
+    for await (const chunk of body) {
+        total += chunk.length;
+        if (total > MAX_TOKEN_RESPONSE_BYTES) {
+            throw new IdentityUnavailableError(
+                `identity node response exceeded ${MAX_TOKEN_RESPONSE_BYTES} bytes — refusing to buffer it`
+            );
+        }
+        chunks.push(chunk);
+    }
+
+    return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString('utf8');
+}
+
+/** Parse a bounded body as JSON. Returns null when the body is not JSON. */
+async function readBoundedJson(response) {
+    const text = await readBoundedText(response);
+    try {
+        return JSON.parse(text);
+    } catch {
+        return null;
     }
 }
 
@@ -190,7 +241,7 @@ function createIdentityClient({
              */
             let code = '';
             try {
-                const parsed = await response.json();
+                const parsed = await readBoundedJson(response);
                 code = typeof parsed?.error === 'string' ? parsed.error : '';
             } catch {
                 // A non-JSON error body tells us nothing; the status is the signal.
@@ -202,12 +253,18 @@ function createIdentityClient({
 
         let payload;
         try {
-            payload = await response.json();
+            payload = await readBoundedJson(response);
         } catch (err) {
+            // Includes the over-ceiling case, which readBoundedText raises as
+            // an IdentityUnavailableError; re-wrapping keeps the type the route
+            // maps to a 503.
             throw new IdentityUnavailableError(
                 `identity node returned an unreadable token response: ${err.message}`,
                 err
             );
+        }
+        if (payload === null) {
+            throw new IdentityUnavailableError('identity node returned a non-JSON token response');
         }
 
         const token = payload?.access_token;

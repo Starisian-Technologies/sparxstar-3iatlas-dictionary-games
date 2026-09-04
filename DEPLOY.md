@@ -125,8 +125,29 @@ RSA 3072 minimum (the Identity Node's CLI refuses smaller):
 sudo mkdir -p /etc/sparxstar
 sudo openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 \
     -out /etc/sparxstar/games-identity.pem
+
+# Owned by the uid the BFF container runs as, readable by nobody else.
+sudo chown 1000:1000 /etc/sparxstar/games-identity.pem
 sudo chmod 400 /etc/sparxstar/games-identity.pem
 ```
+
+**The `chown` is not optional, and getting it wrong is the most likely way this
+deployment fails.** A bind mount carries the host's numeric ownership straight
+through, and the BFF container runs unprivileged as `node` — uid **1000** in
+`node:22-alpine`. A root-owned mode-0400 key is therefore unreadable inside the
+container, `loadConfig()` treats an unreadable key as fatal, and the BFF never
+opens its listener: every `/api/dictionary/*` call becomes a 502 from Nginx that
+looks like an upstream outage rather than a permissions mistake.
+
+Confirm the uid on your base image rather than trusting the number here:
+
+```bash
+docker run --rm node:22-alpine id -u node    # expect 1000
+```
+
+Do **not** reach for `chmod 444` to make it work. That makes the deployment's
+only private key readable by every user and every process on the host, which is
+a worse problem than the one it solves.
 
 Never commit it, never bake it into an image, never pass it as a `--build-arg`
 (visible in `docker history`) or an environment variable (visible in `docker

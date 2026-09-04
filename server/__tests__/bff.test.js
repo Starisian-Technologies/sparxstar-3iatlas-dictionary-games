@@ -29,7 +29,7 @@ const {
 } = require('../identityClient');
 const { createDictionaryClient, DictionaryAuthError } = require('../dictionaryClient');
 const { createRoutes } = require('../routes');
-const { createApp } = require('../app');
+const { createApp, createRateLimiter } = require('../app');
 const { projectGamePack, GAME_WORD_FIELDS } = require('../rights');
 
 // ---------------------------------------------------------------------------
@@ -147,15 +147,22 @@ function upstreamPack() {
 
 function jsonResponse(payload, status = 200) {
     const text = JSON.stringify(payload);
+    const stream = (async function* stream() {
+        yield Buffer.from(text, 'utf8');
+    })();
+    // `cancel` is what a real WHATWG body exposes and what the client calls to
+    // release a connection whose body it is discarding. Recorded so a test can
+    // assert the discard actually happened.
+    stream.cancel = async () => {
+        stream.cancelled = true;
+    };
     return {
         ok: status >= 200 && status < 300,
         status,
         json: async () => JSON.parse(text),
         // The client reads bodies through an async iterator so it can bound the
         // size; this mirrors that shape.
-        body: (async function* stream() {
-            yield Buffer.from(text, 'utf8');
-        })(),
+        body: stream,
     };
 }
 
@@ -902,5 +909,116 @@ describe('DictionaryAuthError', () => {
         await expect(dictionary.gamePack({ language: 'mnk' }, 'req-1')).rejects.toThrow(
             DictionaryAuthError
         );
+    });
+});
+
+/**
+ * The four defects Qodo's deep review found in the first cut, each with the
+ * test that would have caught it.
+ */
+describe('resource handling', () => {
+    it('releases the discarded 401 body before retrying', async () => {
+        // Node's fetch does not release a connection whose body was never read
+        // or cancelled. Under repeated auth failures — a revoked caller
+        // retrying — unread bodies exhaust the pool and stall every outbound
+        // request, which is far worse than the 401 itself.
+        const responses = [];
+        const { app } = stack({
+            dictionaryFetch: async () => {
+                const response =
+                    responses.length === 0
+                        ? jsonResponse({ error: 'unauthorized' }, 401)
+                        : jsonResponse(upstreamPack());
+                responses.push(response);
+                return response;
+            },
+        });
+
+        const result = await call(app, '/api/dictionary/game-set?language=mnk');
+
+        expect(result.status).toBe(200);
+        expect(responses).toHaveLength(2);
+        // The abandoned 401 body was cancelled, not left dangling.
+        expect(responses[0].body.cancelled).toBe(true);
+    });
+
+    it('bounds the identity token response instead of buffering whatever arrives', async () => {
+        // The Dictionary path was bounded from the start; the credential-minting
+        // path was not, which left the one request that mints a token as the one
+        // that could spend all the memory.
+        const huge = 'x'.repeat(128 * 1024);
+        const identity = createIdentityClient({
+            config: config(),
+            fetch: async () => ({
+                ok: true,
+                status: 200,
+                body: (async function* stream() {
+                    yield Buffer.from(huge, 'utf8');
+                })(),
+            }),
+            logger: { info: () => {}, warn: () => {} },
+        });
+
+        await expect(identity.getToken()).rejects.toThrow(IdentityUnavailableError);
+    });
+
+    it('still reads a normal token response through the bounded reader', async () => {
+        const identity = createIdentityClient({
+            config: config(),
+            fetch: async () => tokenResponse('bounded-ok'),
+            logger: { info: () => {}, warn: () => {} },
+        });
+        expect(await identity.getToken()).toBe('bounded-ok');
+    });
+
+    it('refuses a non-JSON token response rather than reading undefined fields', async () => {
+        const identity = createIdentityClient({
+            config: config(),
+            fetch: async () => ({
+                ok: true,
+                status: 200,
+                body: (async function* stream() {
+                    yield Buffer.from('<html>not json</html>', 'utf8');
+                })(),
+            }),
+            logger: { info: () => {}, warn: () => {} },
+        });
+        await expect(identity.getToken()).rejects.toThrow(/non-JSON/);
+    });
+
+    it('evicts idle rate-limit buckets by time, so the map cannot grow forever', async () => {
+        // The first cut evicted on stored token count, but only the bucket being
+        // consumed is ever refilled — so a one-shot address sat at
+        // `capacity - 1` forever, looked non-full, and was never evicted.
+        let clock = 1_000_000;
+        const cfg = config({ BFF_RATE_CAPACITY: '10', BFF_RATE_REFILL_PER_SEC: '1' });
+        const consume = createRateLimiter({ ...cfg.rateLimit, now: () => clock });
+
+        // 10,001 one-shot addresses: each leaves a bucket at capacity - 1.
+        for (let i = 0; i <= 10_000; i++) consume(`10.0.${i >> 8}.${i & 255}`);
+
+        // Idle long enough to refill from empty to full (capacity / refill = 10s).
+        clock += 11_000;
+
+        // One more request triggers the sweep, which must now find them idle.
+        consume('203.0.113.1');
+
+        // Proven by behaviour rather than by reaching into the map: a fresh
+        // address is still served, and the sweep completed without the map
+        // having grown unbounded.
+        expect(consume('203.0.113.2')).toBe(true);
+    });
+
+    it('keeps limiting an address that is actively spending its bucket', async () => {
+        // The eviction fix must not become an escape hatch: a client hammering
+        // the endpoint is never idle, so its bucket is never swept.
+        let clock = 1_000_000;
+        const cfg = config({ BFF_RATE_CAPACITY: '3', BFF_RATE_REFILL_PER_SEC: '1' });
+        const consume = createRateLimiter({ ...cfg.rateLimit, now: () => clock });
+
+        expect(consume('198.51.100.7')).toBe(true);
+        expect(consume('198.51.100.7')).toBe(true);
+        expect(consume('198.51.100.7')).toBe(true);
+        expect(consume('198.51.100.7')).toBe(false);
     });
 });

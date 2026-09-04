@@ -42,7 +42,17 @@ COPY server ./server
 # filesystem is owned by root and not writable by it, because a service that
 # holds a key has no reason to be able to modify its own code.
 RUN chown -R root:root /app && chmod -R a-w /app
+
+# The `node` user from the base image. Named by NUMBER as well, because the
+# host must chown the mounted signing key to the same uid: a bind mount carries
+# the host's numeric ownership straight through, so "readable by node" is a
+# statement about uid 1000 on the host, not about a name the host has never
+# heard of. If a future base image renumbers this user, the key mount breaks
+# loudly at boot (config.js treats an unreadable key as fatal) rather than
+# quietly — and DEPLOY.md's §2a step 1 is where the number is used.
 USER node
+# uid 1000 = `node` in node:22-alpine. Verify with:
+#   docker run --rm node:22-alpine id -u node
 
 # Matches BFF_PORT's default and the `upstream games_bff` in
 # deploy/nginx/games-site.conf.

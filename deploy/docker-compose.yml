@@ -9,10 +9,14 @@
 #
 # BEFORE THE FIRST RUN, the key pair has to exist and be registered. In order:
 #
-#   1. Generate it OUTSIDE source control, RSA 3072 (spec §9):
+#   1. Generate it OUTSIDE source control, RSA 3072 (spec §9), and give it to
+#      the uid the BFF container runs as — 1000 (`node`). A bind mount carries
+#      numeric ownership through unchanged, so a root-owned 0400 key is
+#      unreadable in the container and the BFF refuses to boot:
 #
 #        openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 \
 #          -out /etc/sparxstar/games-identity.pem
+#        chown 1000:1000 /etc/sparxstar/games-identity.pem
 #        chmod 400 /etc/sparxstar/games-identity.pem
 #
 #   2. Derive the PUBLIC JWK and register it with the Identity Node, which
@@ -95,8 +99,20 @@ services:
             GAMES_DICTIONARY_LANGUAGES: ${GAMES_DICTIONARY_LANGUAGES:-mnk:Mandinka}
         volumes:
             # READ-ONLY, and a file rather than a directory so nothing else in
-            # the mount is exposed. The host file should be mode 400 and owned
-            # by a user the container's `node` user maps to for reading.
+            # the mount is exposed.
+            #
+            # OWNERSHIP MATTERS AND IS EASY TO GET WRONG. A bind mount carries
+            # the host's numeric uid/gid and mode through unchanged, and this
+            # container runs unprivileged as `node` (uid 1000). A root-owned
+            # mode-0400 key is therefore UNREADABLE here, and `loadConfig()`
+            # treats an unreadable key as fatal — so the BFF never opens its
+            # listener and the failure looks like an upstream outage.
+            #
+            # The host file must be `chown 1000:1000` and mode 0400: owned by
+            # the uid the container runs as, readable by nobody else. Do NOT
+            # reach for 0444 to make it "just work" — that makes the
+            # deployment's only private key readable by every user on the host.
+            # DEPLOY.md §2a step 1 has the exact commands.
             - ${GAMES_IDENTITY_KEY_PATH:?set the host path of the RSA private key}:/run/secrets/games-identity-key.pem:ro
         # Defence in depth around the one process that holds a key.
         read_only: true

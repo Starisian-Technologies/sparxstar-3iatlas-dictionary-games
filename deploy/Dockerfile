@@ -90,6 +90,19 @@ RUN rm -f /etc/nginx/conf.d/default.conf
 COPY deploy/nginx/games-site.conf /etc/nginx/conf.d/games-site.conf
 COPY --from=build /app/deploy/nginx/games-security-headers.conf /etc/nginx/conf.d/games-security-headers.conf
 
+# Placeholder for the Cloudflare real-client-IP ranges that games-site.conf
+# includes. Empty on purpose: the ranges are generated at deploy time from
+# Cloudflare's published endpoint (the command is in games-site.conf) because a
+# list baked into an image goes stale silently — a retired range keeps being
+# trusted and a new one is not. The include is a wildcard, so an empty file is
+# valid; what it costs is that visitors share one rate-limit bucket until the
+# real file is written, which DEPLOY.md's verification step checks for.
+RUN printf '%s\n' \
+    '# Generated at deploy time — see the real_ip block in games-site.conf.' \
+    '# EMPTY means no range is trusted to assert a client address, so every' \
+    '# visitor behind a proxy shares one rate-limit bucket.' \
+    > /etc/nginx/conf.d/cloudflare-real-ip.inc
+
 # NOTE: an earlier revision rewrote connect-src here with `sed` against the
 # committed snippet. That is no longer needed and was removed: the snippet the
 # line above copies was generated in the build stage from the same endpoint

@@ -56,9 +56,25 @@ function okPack(words) {
     };
 }
 
+/** One word in the shape the BFF actually returns (the Dictionary's GamePack). */
+function packWord(overrides = {}) {
+    return {
+        entry_id: 'entry-1',
+        header_word: 'baa',
+        ipa_pronunciation: 'baː',
+        domain_code: '1.3',
+        english_lemma: 'river',
+        french_lemma: 'rivière',
+        english_definition: 'a large natural stream',
+        audio_url: null,
+        example: { sentence: 'Baa be jan.', translation_en: 'The river is far.' },
+        ...overrides,
+    };
+}
+
 describe('useGameSet — GET {bffPath}/game-set (private dictionary, via the BFF)', () => {
     it('fetches words from the same-origin BFF and never issues a write request', async () => {
-        window.fetch.mockResolvedValue(okPack([{ entry_id: 'w1', header_word: 'baa' }]));
+        window.fetch.mockResolvedValue(okPack([packWord()]));
 
         const props = { bffPath: BFF, language: 'mnk', domain: '', limit: 20 };
         const { result, rerender } = renderHook(useGameSet, props);
@@ -79,7 +95,6 @@ describe('useGameSet — GET {bffPath}/game-set (private dictionary, via the BFF
         expect(opts.method ?? 'GET').toBe('GET');
         expect(opts.body).toBeUndefined();
 
-        expect(result.current.words).toEqual([{ entry_id: 'w1', header_word: 'baa' }]);
         expect(result.current.error).toBeNull();
     });
 
@@ -116,7 +131,7 @@ describe('useGameSet — GET {bffPath}/game-set (private dictionary, via the BFF
     });
 
     it('persists nothing — a withdrawn word must not outlive its withdrawal', async () => {
-        window.fetch.mockResolvedValue(okPack([{ entry_id: 'w1', header_word: 'baa' }]));
+        window.fetch.mockResolvedValue(okPack([packWord()]));
 
         renderHook(useGameSet, { bffPath: BFF, language: 'mnk' });
         await flushMicrotasks();
@@ -177,5 +192,56 @@ describe('useGameSet — GET {bffPath}/game-set (private dictionary, via the BFF
         expect(result.current.error).toBe('HTTP 503');
         expect(result.current.words).toEqual([]);
         expect(result.current.loading).toBe(false);
+    });
+});
+
+/**
+ * The regression this file did not previously catch.
+ *
+ * The hook used to hand the BFF's GamePack straight to the components, which
+ * read a different set of field names — so every prompt rendered blank and
+ * every result carried `word_uuid: undefined`. The suite above tested the hook
+ * against a BFF response and the BFF suite tested the BFF against a Dictionary
+ * response; nothing tested the pair, which is exactly where the break lived.
+ */
+describe('useGameSet — hands components THEIR shape, not the pack shape', () => {
+    it('adapts GamePack field names to the ones the components read', async () => {
+        window.fetch.mockResolvedValue(okPack([packWord()]));
+
+        const { result } = renderHook(useGameSet, { bffPath: BFF, language: 'mnk' });
+        await flushMicrotasks();
+
+        const [word] = result.current.words;
+
+        // What the components read.
+        expect(word.uuid).toBe('entry-1');
+        expect(word.headword).toBe('baa');
+        expect(word.ipa).toBe('baː');
+        expect(word.domain).toBe('1.3');
+        expect(word.translation_en).toBe('river');
+        expect(word.translation_fr).toBe('rivière');
+        expect(word.example_sentences).toEqual([
+            { sentence: 'Baa be jan.', translation_en: 'The river is far.' },
+        ]);
+
+        // And the raw pack names are gone, so nothing downstream can start
+        // depending on both spellings at once.
+        expect(word.entry_id).toBeUndefined();
+        expect(word.header_word).toBeUndefined();
+    });
+
+    it('carries no rights-gated definition field through under any name', async () => {
+        window.fetch.mockResolvedValue(
+            okPack([packWord({ english_definition: '', french_definition: '' })])
+        );
+
+        const { result } = renderHook(useGameSet, { bffPath: BFF, language: 'mnk' });
+        await flushMicrotasks();
+
+        const [word] = result.current.words;
+        expect(word.english_definition).toBeUndefined();
+        expect(word.french_definition).toBeUndefined();
+        // The gloss comes from the lemma, which is never rights-gated.
+        expect(word.translation_en).toBe('river');
     });
 });

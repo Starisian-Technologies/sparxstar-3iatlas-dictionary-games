@@ -114,6 +114,18 @@ jobs:
                   done
                   echo "Browser has no path to the Dictionary API."
 
+            # The package must not depend on the deployable website. Qodo
+            # caught a hook importing `src/site/config.js`, which reverses the
+            # one-way dependency the UMD package boundary rests on — a host
+            # mounting the package would then pull in this site's config.
+            - name: Assert the package layer never imports the site layer
+              run: |
+                  if grep -rn "from '\.\./site/\|from '\./site/" src/hooks/ src/components/; then
+                    echo "::error::src/hooks/ and src/components/ must not import from src/site/. Put the shared value in src/constants.js and re-export it from the site."
+                    exit 1
+                  fi
+                  echo "Package layer does not import the site layer."
+
             # The BFF holds the deployment's only private key, so its
             # dependency set is a security boundary: it is written against
             # node:http and node:crypto ONLY. Every package it gained would be

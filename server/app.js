@@ -41,12 +41,25 @@ function createRateLimiter({ capacity, refillPerSec, now = Date.now }) {
         bucket.tokens = Math.min(capacity, bucket.tokens + elapsedSec * refillPerSec);
         bucket.updated = at;
 
-        // Bounded so a spray of distinct source addresses cannot grow this map
-        // without limit. Full buckets are indistinguishable from absent ones,
-        // so dropping them costs nothing.
+        /*
+         * Bounded so a spray of distinct source addresses cannot grow this map
+         * without limit.
+         *
+         * EVICTION IS BY IDLE TIME, not by stored token count. Only the bucket
+         * being consumed is refilled, so every OTHER bucket holds whatever
+         * count it had when it was last touched — a one-shot client sits at
+         * `capacity - 1` forever and would never look full. Testing the stored
+         * count therefore evicted almost nothing and the map grew without
+         * bound, which is the opposite of what this block is for.
+         *
+         * `updated` is the honest signal: a bucket idle for the time it takes
+         * to refill from empty to full has no state left worth keeping, since
+         * recreating it yields a full bucket anyway.
+         */
         if (buckets.size > 10_000) {
+            const idleMsToFull = (capacity / refillPerSec) * 1000;
             for (const [existingKey, existing] of buckets) {
-                if (existing.tokens >= capacity) buckets.delete(existingKey);
+                if (at - existing.updated >= idleMsToFull) buckets.delete(existingKey);
                 if (buckets.size <= 5_000) break;
             }
         }

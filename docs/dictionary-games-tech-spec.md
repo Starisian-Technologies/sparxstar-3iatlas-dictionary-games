@@ -14,11 +14,21 @@
 - **Name:** 3iAtlas Dictionary Games (a.k.a. RLC Games).
 - **Package:** `sparxstar-rlc-games` (npm `name`), built as the UMD global
   `RlcGames`.
-- **What it is:** A standalone, browser-only React package providing a game
-  shell, six learning-game components, client-side session/progress hooks, an
-  IndexedDB caching layer, and a typed REST client for the 3iAtlas dictionary
-  API. Extracted from `sparxstar-3iatlas-dictionary`; it carries no PHP and no
-  server-side logic.
+- **What it is:** A React package providing a game shell, six learning-game
+  components, client-side session/progress hooks and an IndexedDB layer for
+  session state — **plus one server-side component**, the Dictionary Games BFF
+  (`server/`), which is how all dictionary content is read. Extracted from
+  `sparxstar-3iatlas-dictionary`; it carries no PHP.
+- **⚠️ CHANGED 2026-09-04 — this repo is no longer browser-only.** Earlier
+  revisions of this spec said it "carries no PHP and no server-side logic" and
+  described a typed browser REST client for the dictionary. Both are now false.
+  The **Dictionary API is private**: every endpoint on
+  `sparxstar-3iatlas-dictionary-node` is authenticated machine-to-machine,
+  there is no open tier, and it records a browser-shaped header on a
+  credentialed request as a PRIORITY_1 security event. A server-side credential
+  holder is therefore the only way the games can read words at all. See §4a and
+  `docs/dictionary-games-bff.md`. The BFF is the **only** server-side code
+  permitted in this repo and must not grow into a general application server.
 - **Primary surface:** `<GameShell />`, mounted by host shells (AIWA Browse App
   Play tab, RLC standalone builds, WordPad/S2S).
 
@@ -124,7 +134,102 @@ timeMs)` → `useGameSession.recordResult` → IndexedDB session +
   engine, when reachable, is a settlement/reward sink for already-recorded
   local results, not an authority this repo reads from.
 
+### 4a. The Dictionary Games BFF (added 2026-09-04)
+
+The Dictionary API is private, so dictionary content reaches a player like this:
+
+```
+browser ──same-origin──▶ Nginx ──▶ Games BFF ──private_key_jwt──▶ Identity Node
+                                       │                              │
+                                       │◀─────── 5-min RS256 token ───┘
+                                       │         (aud: dictionary)
+                                       └──Bearer──▶ Dictionary API
+                                                    GET /v1/m2m/gamepack
+```
+
+| Fact                 | Value                                               |
+| :------------------- | :-------------------------------------------------- |
+| Identity subject     | `service:dictionary-games`                          |
+| Identity client id   | `sparxstar-dictionary-games`                        |
+| Audience             | `dictionary`                                        |
+| Upstream             | `GET /v1/m2m/gamepack`                              |
+| Access token         | RS256, 300s, renewed ~240s with jitter, memory only |
+| Runtime dependencies | **none** — `node:http` and `node:crypto` only       |
+
+The RLC engine is **not** in this path: Dictionary Contract A.5 keeps it out of
+the content plane, and the BFF is a games-side component rather than an engine
+route.
+
+**Browser-facing routes** (exact-match only; no catch-all, no caller-chosen
+upstream, unknown query parameters dropped):
+
+| Route                           | Upstream                          |
+| :------------------------------ | :-------------------------------- |
+| `GET /api/dictionary/game-set`  | `GET /v1/m2m/gamepack`            |
+| `GET /api/dictionary/languages` | _none_ — deployment configuration |
+| `GET /api/dictionary/domains`   | _none_ — empty list               |
+
+`/languages` and `/domains` have **no upstream**: the Node service publishes
+neither route. The BFF answers both locally and says so in the payload
+(`source: "games-bff-configuration"`). Closing that gap is the dictionary
+repository's decision.
+
+**One-way dependency, unchanged.** `src/hooks/` and `src/components/` still must
+not import from `src/site/`. The BFF's default base path therefore lives in the
+neutral `src/constants.js` (`DICTIONARY_BFF_PATH`), which `src/site/config.js`
+re-exports; a hook importing the site layer would reverse the dependency the
+package boundary rests on.
+
+**GamePack ≠ GameWord.** The Dictionary's pack shape and this package's
+component shape differ, and `src/api/gamePackAdapter.js` translates at the
+boundary — see §5.
+
+Full design, failure semantics, key handling and rotation:
+`docs/dictionary-games-bff.md`.
+
 ## 5. Data model
+
+### 5.0 GamePack vs GameWord — the adapter (added 2026-09-04)
+
+The Dictionary's pack shape and this package's component shape are **not the
+same**, and `src/api/gamePackAdapter.js` translates between them at the
+boundary where upstream data enters the package.
+
+| Component reads     | Sourced from the pack's | Note                                                       |
+| :------------------ | :---------------------- | :--------------------------------------------------------- |
+| `uuid`              | `entry_id`              | The settlement question identifier the engine matches on   |
+| `headword`          | `header_word`           |                                                            |
+| `ipa`               | `ipa_pronunciation`     |                                                            |
+| `domain`            | `domain_code`           |                                                            |
+| `translation_en`    | `english_lemma`         | **Not** `english_definition` — see below                   |
+| `translation_fr`    | `french_lemma`          | **Not** `french_definition`                                |
+| `example_sentences` | `example`               | One example becomes a one-element array; null becomes `[]` |
+| `audio_url`         | `audio_url`             | Verbatim, including `null`                                 |
+
+**Why the lemma and not the definition.** `english_definition` and
+`french_definition` come back **empty** for an entry whose sourced fields are
+licensed third-party material — that emptiness is the Dictionary's §2b rights
+decision, not a gap. The adapter does not read those fields at all, so there is
+no path by which an empty one could be papered over. `english_lemma` and
+`french_lemma` are shipped **unconditionally** by the Dictionary's own compiler
+(`gamepack.ts` sets them outside the `mayShipSource` branch), so sourcing a
+gloss from them is a rename, not a backfill — and a lemma is the right shape for
+a matching game anyway, where the prompt wants "the English word" rather than a
+dictionary definition.
+
+**Why an adapter rather than renaming in the BFF.** The BFF's contract describes
+what the Dictionary said, narrowed and unrenamed; emitting legacy names from
+there would make it a description of this package's history instead. Adapting in
+the package also means a host mounting `<GameShell />` against its own BFF gets
+the translation for free.
+
+**This gap shipped once.** The first cut of the BFF work changed the data shape
+entering the package without changing the components, and a green suite did not
+catch it: the hook was tested against a BFF response, the BFF against a
+Dictionary response, and nothing against the pair. Every prompt rendered blank
+and every result submitted `word_uuid: undefined`.
+`src/api/__tests__/gamePackAdapter.test.js` now asserts the component-facing
+field list explicitly.
 
 - **IndexedDB database:** `aiwa-games-db`, version 1, key path `key` on every
   store.
@@ -156,7 +261,17 @@ timeMs)` → `useGameSession.recordResult` → IndexedDB session +
 
 ## 6. API surface
 
-### 6a. Consumed REST endpoints (namespace `sparxstar/v1/dictionary`)
+### 6a. Consumed REST endpoints
+
+> **⚠️ SUPERSEDED 2026-09-04.** The browser consumes **no** dictionary endpoint.
+> It calls this site's own same-origin `/api/dictionary/*` (§4a); the BFF calls
+> the Dictionary's authenticated M2M tier. The WordPress namespace below,
+> `X-Api-Key`, the ephemeral page-token flow and `/wordlist` are all retired —
+> `/page-token` and `/wordlist` do not exist on the Node service, and
+> `/languages` and `/domains` were not carried into the port either (§4a).
+> The table is kept only as a record of what the retired client called.
+
+#### Retired: the WordPress namespace (`sparxstar/v1/dictionary`)
 
 | Method | Path           | Auth                            | Used by                                                      |
 | ------ | -------------- | ------------------------------- | ------------------------------------------------------------ |
@@ -181,10 +296,17 @@ page-token refresh and retry.
 
 `GameShell`, `AccessoryBar`, `SessionComplete`, `useGameSet`, `useGameSession`,
 `useProgressSync`, `openDB`, `getRecord`, `putRecord`, `getAllRecords`,
-`deleteRecord`, `PRODUCTION_GAMES`, `createDictionaryApiClient`,
-`DictionaryApiError`.
+`deleteRecord`, `PRODUCTION_GAMES`.
 
-`<GameShell />` props: `restUrl`, `language`, `sourceLanguage`, `languages`,
+**Removed 2026-09-04:** `createDictionaryApiClient` and `DictionaryApiError`.
+They existed to call the Dictionary REST API from a browser, carrying a page
+token or a consumer API key; the Dictionary API is private, so a browser client
+for it is the capability the BFF exists to remove (§4a). A host needing
+dictionary content runs its own BFF and passes `bffPath`.
+
+`<GameShell />` props: `bffPath` (same-origin base path of a BFF — **replaces
+`restUrl`**, which was the Dictionary's own origin), `language`,
+`sourceLanguage`, `languages`,
 `onSourceLanguage`, `onBrowse`, plus (Phase 3, both optional, no default)
 `engineUrl` (node-engine base URL) and `getSuiteToken` (`() =>
 string|null|Promise<string|null>`, the bearer token for the engine's batch
@@ -259,7 +381,10 @@ screening exists to prevent. Covered by
   design — see §11), but because the engine side of the authenticated path is
   not built yet: `sparxstar-identity` can mint the token, and
   `/events/batch` cannot yet verify it (§11).
-- **Global config seam:** `window.sparxstarDictionarySettings` (`restUrl`,
+- **Global config seam (RETIRED 2026-09-04 for the dictionary path):** the
+  `pageToken` field of `window.sparxstarDictionarySettings` is gone with the
+  page-token flow; dictionary content comes from the BFF via `bffPath` (§4a).
+  Historic shape: `window.sparxstarDictionarySettings` (`restUrl`,
   `pageToken`) is read/refreshed by `useGameSet`.
 
 ## 8. Dependencies
@@ -687,6 +812,27 @@ options, the cache TTL) — confirm the upstream implementation documents the
 same, and port it there if not.
 
 ## 13. Changelog
+
+### 2026-09-04 — the Dictionary API is private; server-side BFF
+
+- **§1, §4a, §5.0, §6a.** This repo is no longer browser-only. It owns one
+  server-side component, the Dictionary Games BFF (`server/`), because the
+  Dictionary API is authenticated machine-to-machine with no open tier — a
+  server-side credential holder is the only way the games can read words.
+- Identity subject `service:dictionary-games`, `aud: dictionary`, five-minute
+  RS256 tokens obtained by `private_key_jwt`. Zero runtime dependencies.
+- **Retired:** the browser dictionary client (`createDictionaryApiClient`), the
+  ephemeral page-token flow, `X-Api-Key`, `/wordlist`, and `GameShell`'s
+  `restUrl` prop — replaced by same-origin `bffPath`.
+- **Rights:** withheld definitions and null `audio_url` are preserved end to
+  end and never backfilled; `useGameSet`'s three-day IndexedDB cache was
+  removed, because a cached copy is a place a withdrawn word outlives its
+  withdrawal. A TTL is not a withdrawal mechanism.
+- **Known gap:** the Node service publishes no `/languages` and no `/domains`
+  route. The BFF answers both from deployment configuration and says so in the
+  payload. The dictionary repository's decision to close.
+- `DICTIONARY_BFF_PATH` lives in the neutral `src/constants.js`, re-exported by
+  `src/site/config.js`, so `src/hooks/` never imports from `src/site/`.
 
 - **2026-08-26** — Consistency correction. Aligned OQ-I3 wording so this spec,
   `AGENTS.md`, and `ROLE.md` all point to the same blocker (Identity Service

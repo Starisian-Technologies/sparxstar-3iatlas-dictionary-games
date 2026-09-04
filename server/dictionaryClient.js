@@ -90,6 +90,21 @@ async function readBounded(response, maxBytes) {
 }
 
 /**
+ * Release a response whose body we are throwing away.
+ *
+ * Never throws: this runs on an error path, and failing to discard a body must
+ * not replace the real error with a secondary one.
+ */
+async function discard(response) {
+    try {
+        await response.body?.cancel?.();
+    } catch {
+        // Already consumed, already errored, or a stub without cancel(). Either
+        // way there is nothing holding a connection.
+    }
+}
+
+/**
  * @param {object} deps
  * @param {ReturnType<import('./config').loadConfig>} deps.config
  * @param {{ getToken: (options?: { force?: boolean }) => Promise<string> }} deps.identity
@@ -142,6 +157,22 @@ function createDictionaryClient({ config, identity, fetch: fetchImpl = fetch, lo
         let response = await attempt(false);
 
         if (response.status === 401) {
+            /*
+             * DISCARD THE BODY BEFORE RETRYING.
+             *
+             * We are about to overwrite `response`, and Node's fetch does not
+             * release a connection whose body was never read or cancelled —
+             * undici's own docs warn that unconsumed bodies cause excessive
+             * connection use and eventually stalls. Under repeated auth
+             * failures (a revoked caller retrying) that would quietly exhaust
+             * the pool and take out every outbound request, which is a far
+             * worse outcome than the 401 itself.
+             *
+             * `cancel()` rather than a read: the body is an error payload we
+             * must not log anyway, so there is nothing in it worth buffering.
+             */
+            await discard(response);
+
             // The one legitimate retry: the token may have expired between the
             // cache read and the upstream's clock.
             logger.warn?.(

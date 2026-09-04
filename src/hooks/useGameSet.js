@@ -33,7 +33,10 @@
  */
 
 import { useState, useEffect } from 'react';
-import { DICTIONARY_BFF_PATH } from '../site/config.js';
+// From the NEUTRAL package module, never from `src/site/` — a hook importing
+// the site layer reverses the one-way dependency the package boundary rests on.
+import { DICTIONARY_BFF_PATH } from '../constants.js';
+import { adaptGamePackWords } from '../api/gamePackAdapter.js';
 
 /**
  * @param {object} opts
@@ -104,7 +107,17 @@ export function useGameSet({
                 }
 
                 const json = await res.json();
-                const data = Array.isArray(json?.data?.words) ? json.data.words : [];
+
+                /*
+                 * ADAPTED, not passed through. The Dictionary's GamePack uses
+                 * `entry_id`/`header_word`/`english_lemma`; the game components
+                 * read `uuid`/`headword`/`translation_en`. Handing the raw pack
+                 * to a component renders a blank prompt and submits
+                 * `word_uuid: undefined`, which the engine cannot match to a
+                 * session word. The adapter renames and never backfills — see
+                 * src/api/gamePackAdapter.js.
+                 */
+                const data = adaptGamePackWords(json?.data?.words);
 
                 if (!cancelled) {
                     setWords(data);
