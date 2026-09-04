@@ -74,6 +74,14 @@ export default function ArrangeWord({
     const [tileState, setTileState] = useState({ pool: [], answer: [], initialPool: [] });
     const [shake, setShake] = useState(false);
     const reportedRef = useRef(new Set());
+    const shakeTimerRef = useRef(null);
+    /* Mirrors `tileState` for synchronous reads in the tap handler. */
+    const tileStateRef = useRef({ pool: [], answer: [], initialPool: [] });
+    /* The mode this word began under; see the setup effect. */
+    const modeRef = useRef(mode);
+    useEffect(() => {
+        modeRef.current = mode;
+    }, [mode]);
 
     const word = deck[index];
     const target = useMemo(
@@ -97,8 +105,21 @@ export default function ArrangeWord({
     useEffect(() => {
         if (!word) return;
         const pool = shuffle(target.map((unit, i) => ({ unit, id: `${unit}-${i}` })));
-        setTileState({ pool, answer: [], initialPool: pool });
-        setAttempt(startClock(beginWord({ mode })));
+        const fresh = { pool, answer: [], initialPool: pool };
+        tileStateRef.current = fresh;
+        setTileState(fresh);
+        /*
+         * `modeRef`, not `mode`. The level is changeable mid-round, and `mode`
+         * derives from it — so with `mode` in this effect's dependencies, a
+         * player switching level mid-word had their tiles, attempt counter and
+         * clock reset with no outcome recorded. That both discarded their work
+         * and let them refresh their retries by toggling the control.
+         *
+         * Per-word state now resets only when the WORD changes. A level change
+         * takes effect at the next question, which is also what the strip in
+         * GameShell says it does.
+         */
+        setAttempt(startClock(beginWord({ mode: modeRef.current })));
         setShake(false);
         onEvent?.({
             type: 'game_question_shown',
@@ -106,7 +127,7 @@ export default function ArrangeWord({
             word_uuid: word.uuid,
             units: target.length,
         });
-    }, [word, target, mode, onEvent]);
+    }, [word, target, onEvent]);
 
     /** Report exactly once per word, then hand the outcome up. */
     const report = useCallback(
@@ -119,29 +140,64 @@ export default function ArrangeWord({
         [word, onResult]
     );
 
-    /* Check the arrangement once the answer row is full. */
-    useEffect(() => {
-        if (!word || isResolved(attempt) || tileState.answer.length !== target.length) return;
+    /**
+     * Evaluate a completed arrangement. Called from the tap handler — ONCE per
+     * submission.
+     *
+     * ==================== WHY NOT AN EFFECT ====================
+     *
+     * This was a `useEffect` with `attempt` in its dependency array, and that
+     * was a bug bad enough to undo the point of this file. The wrong-answer
+     * path calls `setAttempt` and clears the tile row only after 600ms, so the
+     * effect re-ran against a row that was still full, called `recordAnswer`
+     * again, and re-ran again — burning all three attempts and resolving the
+     * word as `incorrect` from ONE wrong submission.
+     *
+     * A player who mis-ordered two tiles got no retry at all. That is the same
+     * class of defect as the trap this PR exists to remove, reintroduced by
+     * the fix for it, and the cross-game trap test did not catch it because it
+     * reaches for Skip and never submits a wrong answer.
+     *
+     * Deriving an ACTION from rendered state is the mistake. A submission is an
+     * event — one tap completing the row — so it is handled where that tap is.
+     */
+    const submitArrangement = useCallback(
+        (answerTiles) => {
+            if (!word || isResolved(attempt)) return;
 
-        const submitted = tileState.answer.map((t) => t.unit).join('');
-        const next = recordAnswer(attempt, submitted === target.join(''));
-        setAttempt(next);
+            const submitted = answerTiles.map((t) => t.unit).join('');
+            const next = recordAnswer(attempt, submitted === target.join(''));
+            setAttempt(next);
 
-        if (isResolved(next)) {
-            report(next);
-            return;
-        }
+            if (isResolved(next)) {
+                report(next);
+                return;
+            }
 
-        /* Another attempt. Shake, then return the tiles WITHOUT reshuffling, so
-         * the player keeps their mental map of what is available. */
-        onEvent?.({ type: 'game_retry_used', game: 'arrange_word', word_uuid: word.uuid });
-        setShake(true);
-        const timer = setTimeout(() => {
-            setShake(false);
-            setTileState((prev) => ({ ...prev, pool: prev.initialPool, answer: [] }));
-        }, 600);
-        return () => clearTimeout(timer);
-    }, [tileState.answer, target, word, attempt, report, onEvent]);
+            /* Another attempt. Shake, then return the tiles WITHOUT
+             * reshuffling, so the player keeps their mental map of the pool. */
+            onEvent?.({ type: 'game_retry_used', game: 'arrange_word', word_uuid: word.uuid });
+            setShake(true);
+            shakeTimerRef.current = setTimeout(() => {
+                setShake(false);
+                setTileState((prev) => {
+                    const reset = { ...prev, pool: prev.initialPool, answer: [] };
+                    tileStateRef.current = reset;
+                    return reset;
+                });
+            }, 600);
+        },
+        [word, attempt, target, report, onEvent]
+    );
+
+    /* Clear a pending shake timer on unmount or word change, so it cannot
+     * reset the NEXT word's tiles 600ms into it. */
+    useEffect(
+        () => () => {
+            if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
+        },
+        [word]
+    );
 
     const advance = useCallback(() => {
         if (index + 1 >= deck.length) onComplete();
@@ -164,23 +220,50 @@ export default function ArrangeWord({
         (tileId) => {
             /* Taps during the shake would be discarded when the row resets. */
             if (isResolved(attempt) || shake || !word) return;
-            setTileState((prev) => {
-                const idx = prev.pool.findIndex((t) => t.id === tileId);
-                if (idx === -1) return prev; /* guard: already picked */
-                return {
-                    ...prev,
-                    pool: prev.pool.filter((_, i) => i !== idx),
-                    answer: [...prev.answer, prev.pool[idx]],
-                };
-            });
+
+            /*
+             * Read and write through a REF, then mirror into state.
+             *
+             * Two things have to hold at once here and they pull in opposite
+             * directions. Rapid taps before a re-render must each see the
+             * latest tiles — which is what a functional `setTileState` updater
+             * gives you — but completing the row has to be detectable
+             * SYNCHRONOUSLY, in this handler, so the submission happens once
+             * for this tap.
+             *
+             * A first attempt at this set a local `completed` from inside the
+             * updater and read it on the next line. React had not run the
+             * updater yet, so it was always null and NOTHING WAS EVER
+             * SUBMITTED: the game could not be answered at all. The test below
+             * caught it only once it was made non-vacuous.
+             *
+             * A ref satisfies both: writes are synchronous, so consecutive taps
+             * compose correctly and the completed row is available immediately.
+             */
+            const prev = tileStateRef.current;
+            const idx = prev.pool.findIndex((t) => t.id === tileId);
+            if (idx === -1) return; /* guard: already picked */
+
+            const answer = [...prev.answer, prev.pool[idx]];
+            const next = {
+                ...prev,
+                pool: prev.pool.filter((_, i) => i !== idx),
+                answer,
+            };
+            tileStateRef.current = next;
+            setTileState(next);
+
+            if (answer.length === target.length) submitArrangement(answer);
         },
-        [attempt, shake, word]
+        [attempt, shake, word, target.length, submitArrangement]
     );
 
     const returnToPool = useCallback(
         (answerIdx) => {
             if (isResolved(attempt)) return;
             setTileState((prev) => {
+                /* Kept in step with the ref above; every writer must, or the
+                 * two disagree and taps start landing on stale tiles. */
                 const tile = prev.answer[answerIdx];
                 if (typeof tile === 'undefined') return prev;
                 /* Reinsert at its original pool position so the pool does not
@@ -193,11 +276,13 @@ export default function ArrangeWord({
                     insertAt === -1
                         ? [...prev.pool, tile]
                         : [...prev.pool.slice(0, insertAt), tile, ...prev.pool.slice(insertAt)];
-                return {
+                const next = {
                     ...prev,
                     pool,
                     answer: prev.answer.filter((_, i) => i !== answerIdx),
                 };
+                tileStateRef.current = next;
+                return next;
             });
         },
         [attempt]

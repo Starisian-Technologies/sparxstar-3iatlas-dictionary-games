@@ -306,6 +306,89 @@ describe.each(GAMES)('$name', ({ Component, spelling }) => {
     }
 });
 
+describe('ArrangeWord — one submission costs one attempt', () => {
+    /*
+     * The regression that got past this file's other tests.
+     *
+     * The answer check was a `useEffect` with `attempt` in its dependencies.
+     * The wrong-answer path calls `setAttempt` and clears the tile row only
+     * after 600ms, so the effect re-ran against a row that was still full,
+     * called `recordAnswer` again, and re-ran again — burning all three
+     * attempts and resolving the word as `incorrect` from ONE wrong
+     * submission. A player who mis-ordered two tiles got no retry at all.
+     *
+     * The tests above never caught it because they reach for Skip and never
+     * submit a wrong answer. So this one submits.
+     */
+    /*
+     * Tiles, answer row first and pool second in the DOM. Taking from the END
+     * always takes from the POOL: clicking the first match repeatedly just
+     * moved one tile into the answer row and straight back out again, so the
+     * row never filled and the test passed without submitting anything — which
+     * is exactly the vacuity these assertions are here to rule out.
+     */
+    const letterTiles = (host) =>
+        [...host.querySelectorAll('button')].filter((b) =>
+            /^[a-z]{1,2}$/.test((b.textContent ?? '').trim())
+        );
+    const clickPoolTile = (host) => {
+        const tiles = letterTiles(host);
+        if (tiles.length === 0) return false;
+        click(tiles[tiles.length - 1]);
+        return true;
+    };
+
+    it('does not resolve the word after a single wrong arrangement', () => {
+        const results = [];
+        const { host, unmount } = mount(ArrangeWord, {
+            words: [WORDS[2]] /* `kenta` — five single-unit tiles */,
+            onResult: (uuid, outcome, attempts) => results.push({ outcome, attempts }),
+        });
+
+        /* Fill the row in pool order. With a shuffled pool this is almost
+         * always wrong; if it happens to be right the word resolves as
+         * `correct`, which is equally not the bug and is asserted below. */
+        for (let i = 0; i < 12; i += 1) {
+            if (!clickPoolTile(host)) break;
+        }
+
+        /* Whatever happened, at most ONE result — never three attempts spent
+         * on one submission. */
+        expect(results.length).toBeLessThanOrEqual(1);
+        for (const r of results) {
+            /* If it resolved at all it was because the arrangement was RIGHT.
+             * A single wrong submission must not produce `incorrect`. */
+            expect(r.outcome).not.toBe(OUTCOME.INCORRECT);
+        }
+
+        /*
+         * And prove the assertion above is not vacuous. If the arrangement was
+         * wrong the round is still open with attempts REMAINING, and the
+         * counter says so; the old code consumed all three here, so no counter
+         * survived to be read. Either a submission was evaluated exactly once
+         * and left retries, or the arrangement was correct and resolved.
+         */
+        const text = host.textContent ?? '';
+        const resolved = results.length === 1;
+        expect(resolved || /[12] left/.test(text)).toBe(true);
+        if (!resolved) {
+            expect(text).not.toContain('0 left');
+        }
+        unmount();
+    });
+
+    it('still offers a way out after a wrong submission', () => {
+        const { host, unmount } = mount(ArrangeWord, { words: [WORDS[2]] });
+        for (let i = 0; i < 12; i += 1) {
+            if (!clickPoolTile(host)) break;
+        }
+        /* Skip, or a resolved panel's Continue — either way, not stuck. */
+        const labels = buttons(host).map((b) => (b.textContent ?? '').toLowerCase());
+        expect(labels.some((l) => /skip|continue|finish/.test(l))).toBe(true);
+        unmount();
+    });
+});
+
 describe('the set as a whole', () => {
     it('holds every game to the same contract', () => {
         /* A guard on the guard: if a game is added to the app and not to this

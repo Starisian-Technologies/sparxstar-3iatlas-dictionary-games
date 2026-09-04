@@ -16,14 +16,17 @@ import { OUTCOME, xpFor } from '../../pedagogy.js';
  *   onComplete {Function} () => void
  */
 /*
- * `languageCode` and `mode` are deliberately NOT taken.
+ * `languageCode`, `mode` and `onEvent` are deliberately NOT taken.
  *
  * `GameShell` passes them to every game, and this one has no use for either:
  * there is no headword to segment into orthographic units (the card shows the
  * word whole) and no attempts to make help escalate over. Destructuring them
  * to satisfy a signature would suggest they matter here. They do not.
+ *
+ * `onEvent` went with the self-rating hook: this game emits no telemetry while
+ * OQ-G4 is open (see `handleKnew`).
  */
-export default function DomainFlash({ words, language, onResult, onComplete, onEvent }) {
+export default function DomainFlash({ words, language, onResult, onComplete }) {
     const deck = useMemo(() => shuffle(words), [words]);
     const [index, setIndex] = useState(0);
     const [flipped, setFlipped] = useState(false);
@@ -57,6 +60,20 @@ export default function DomainFlash({ words, language, onResult, onComplete, onE
      * for either: it is `incorrect`, worth nothing, and it puts the word in the
      * review queue — which is the actual reward for admitting it.
      */
+    /*
+     * NO `game_self_rated` EVENT.
+     *
+     * An earlier revision emitted one here. `docs/dictionary-games-tech-spec.md`
+     * still lists **OQ-G4 — DomainFlash "I knew it" hook confirmation** as an
+     * OPEN question, and implementing behaviour that depends on an unresolved
+     * open question is exactly what this repository's rules forbid: it turns a
+     * decision nobody has taken into shipped behaviour, and the spec then
+     * describes something the code has already moved past.
+     *
+     * The scoring correction below is a different matter and stays — it fixes
+     * an outcome that paid +5 for a word the player said they did not know,
+     * which is a defect against the approved table rather than a new hook.
+     */
     const handleKnew = () => {
         if (answered) return;
         setAnswered(true);
@@ -67,12 +84,6 @@ export default function DomainFlash({ words, language, onResult, onComplete, onE
             xpFor(OUTCOME.CORRECT),
             Date.now() - wordStartRef.current
         );
-        onEvent?.({
-            type: 'game_self_rated',
-            game: 'domain_flash',
-            word_uuid: word.uuid,
-            knew: true,
-        });
         next();
     };
 
@@ -86,12 +97,6 @@ export default function DomainFlash({ words, language, onResult, onComplete, onE
             xpFor(OUTCOME.INCORRECT),
             Date.now() - wordStartRef.current
         );
-        onEvent?.({
-            type: 'game_self_rated',
-            game: 'domain_flash',
-            word_uuid: word.uuid,
-            knew: false,
-        });
         next();
     };
 

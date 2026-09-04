@@ -74,6 +74,9 @@ const GAME_TYPES = [
     },
 ];
 
+/** Where per-language, per-skill difficulty offsets live for a guest. */
+const OFFSETS_KEY = 'aiwa-dict-difficulty-offsets';
+
 const getLocalStorageItem = (key) => {
     try {
         return {
@@ -96,6 +99,29 @@ const setLocalStorageItem = (key, value) => {
         return false;
     }
 };
+
+/**
+ * Read stored difficulty offsets, tolerating anything unexpected.
+ *
+ * A corrupt or hand-edited value must not stop the games loading, and a
+ * non-numeric offset must not reach `applyAdjustment` — so every entry is
+ * validated rather than trusted, and anything odd is simply dropped.
+ */
+function readStoredOffsets() {
+    const { value } = getLocalStorageItem(OFFSETS_KEY);
+    if (!value) return {};
+    try {
+        const parsed = JSON.parse(value);
+        if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+        return Object.fromEntries(
+            Object.entries(parsed).filter(
+                ([key, offset]) => typeof key === 'string' && Number.isFinite(offset)
+            )
+        );
+    } catch {
+        return {};
+    }
+}
 
 /**
  * GameShell — top-level game orchestrator.
@@ -177,11 +203,20 @@ export default function GameShell({
      * Wolof. One general ability score would let strength in one skill raise
      * the difficulty of another.
      *
-     * Guest progress stays on the device. This is in-memory for the session
-     * plus localStorage below; nothing is sent anywhere, and no RLC change is
-     * needed for any of it.
+     * Guest progress stays on the device, in localStorage. Nothing is sent
+     * anywhere and no RLC change is needed for any of it.
+     *
+     * The previous version of this comment claimed localStorage and there was
+     * none — every learned offset was discarded on remount. A comment that
+     * promises a behaviour the code does not have is worse than the missing
+     * behaviour, because the next reader stops looking.
+     *
+     * Only the OFFSETS persist. The rolling performance window stays
+     * session-scoped on purpose: it is meant to reflect how the last few
+     * minutes went, and a window restored from last week would adapt on
+     * evidence the player has outgrown.
      */
-    const [offsets, setOffsets] = useState({});
+    const [offsets, setOffsets] = useState(() => readStoredOffsets());
     const performanceRef = useRef({});
     const [wordCount, setWordCount] = useState(20);
     const [domains, setDomains] = useState([]);
@@ -203,7 +238,19 @@ export default function GameShell({
         bffPath,
         language: sourceLanguage,
         domain: selectedDomain,
-        limit: wordCount,
+        /*
+         * A SURPLUS, not `wordCount`.
+         *
+         * `selectForLevel` was being handed exactly as many candidates as the
+         * round needed, so it returned all of them whatever the level or the
+         * adaptation offset — the level selector changed nothing about which
+         * words were played. Selection needs more candidates than it keeps.
+         *
+         * Three times the round, capped at the hook's own 50 ceiling. The
+         * Dictionary charges budget per returned entry, so this is deliberately
+         * a small multiple rather than "fetch everything".
+         */
+        limit: Math.min(50, wordCount * 3),
         /*
          * `listen_write` is the one game that cannot be played without audio,
          * so it asks the Dictionary for audio-verified entries only. The old
@@ -300,6 +347,15 @@ export default function GameShell({
                 setGameWords(remainingWords);
                 setSelectedGame(session.gameType);
                 /*
+                 * Restore the level the round BEGAN under, so a resume plays by
+                 * the rules the player chose rather than the default. A session
+                 * persisted before levels existed has no `level`, so it keeps
+                 * whatever is currently selected.
+                 */
+                if (session.level && LEVEL_PROFILE[session.level]) {
+                    setPlayerLevel(session.level);
+                }
+                /*
                  * Restored as a PAIR, tagged with the session's own language.
                  * `onSourceLanguage` is the parent's state, so it lands on a
                  * later render; tagging the resumed domain with whatever
@@ -358,6 +414,7 @@ export default function GameShell({
                     gameType: selectedGame,
                     langSource: sourceLanguage ?? '',
                     domain: selectedDomain,
+                    level: playerLevel,
                     words: sliced,
                 });
             } catch (error) {
@@ -399,6 +456,14 @@ export default function GameShell({
         initSession,
         addEvent,
     ]);
+
+    /* Persist the offsets whenever they change. Storage may be unavailable
+     * (private browsing, quota); `setLocalStorageItem` already swallows that,
+     * and losing an offset is a degraded nudge, never a lost reward. */
+    useEffect(() => {
+        if (Object.keys(offsets).length === 0) return;
+        setLocalStorageItem(OFFSETS_KEY, JSON.stringify(offsets));
+    }, [offsets]);
 
     /* ── Handle a single word result from any game component ── */
     const handleWordResult = useCallback(
@@ -595,6 +660,7 @@ export default function GameShell({
                 gameType: selectedGame,
                 langSource: sourceLanguage ?? '',
                 domain: selectedDomain,
+                level: playerLevel,
                 words: missed,
             });
         } catch (error) {
@@ -605,7 +671,7 @@ export default function GameShell({
 
         setGameWords(missed);
         setPhase('playing');
-    }, [session, initSession, selectedGame, sourceLanguage, selectedDomain]);
+    }, [session, initSession, selectedGame, sourceLanguage, selectedDomain, playerLevel]);
 
     /* ── Play again ── */
     const handlePlayAgain = useCallback(async () => {
@@ -630,10 +696,22 @@ export default function GameShell({
         return (
             <div className="flex-1 flex flex-col overflow-hidden bg-white dark:bg-gray-900">
                 {/*
-                 * Transparency strip. The current level is always visible, the
-                 * player can change it or freeze adaptation mid-round, and can
-                 * ask for an easier question without waiting to be offered
-                 * one. Nobody is silently locked into a tier.
+                 * Transparency strip. The current level is always visible and
+                 * the player can change it or freeze adaptation at any time.
+                 * Nobody is silently locked into a tier.
+                 *
+                 * A level change takes effect at the NEXT question, and the
+                 * control says so rather than leaving the player to infer it.
+                 * Two reasons, both found in review: the words for a round are
+                 * chosen when the round loads, so changing level mid-round
+                 * cannot re-deal a deck already in play; and changing the
+                 * assistance mid-WORD reset the tiles, attempt counter and
+                 * clock of the question in front of the player — discarding
+                 * their work, and letting retries be refreshed by toggling the
+                 * control.
+                 *
+                 * So: assistance from the next question, deck from the next
+                 * round. Play again is one tap from the summary.
                  */}
                 <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-gray-100 px-3 py-2 text-xs dark:border-gray-800">
                     <span className="text-gray-400">Level</span>
@@ -657,6 +735,9 @@ export default function GameShell({
                             {p.label}
                         </button>
                     ))}
+                    <span className="w-full text-[11px] text-gray-400">
+                        Applies from the next question
+                    </span>
                     <button
                         type="button"
                         onClick={() => setAdaptive((a) => !a)}
