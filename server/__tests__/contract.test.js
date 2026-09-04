@@ -81,8 +81,12 @@ function jsonResponse(payload, status = 200) {
 
 /** The BFF stack, with the Dictionary answered by the checked-in fixture. */
 function chain() {
-    const previous = { ...process.env };
-    Object.assign(process.env, {
+    /*
+     * Restored key by key, not by reassigning `process.env`. Replacing that
+     * object swaps Node's live environment view for a plain object, which then
+     * outlives this test in whichever Jest worker ran it.
+     */
+    const overrides = {
         NODE_ENV: 'production',
         GAMES_IDENTITY_TOKEN_URL: 'https://id.sparxstar.com/oauth2/token',
         GAMES_IDENTITY_CLIENT_ID: 'sparxstar-dictionary-games',
@@ -91,9 +95,24 @@ function chain() {
         GAMES_DICTIONARY_API_URL: 'https://dictionary-api.sparxstar.com',
         GAMES_DICTIONARY_AUDIENCE: 'dictionary',
         GAMES_DICTIONARY_LANGUAGES: 'mnk:Mandinka',
-    });
-    const config = loadConfig();
-    process.env = previous;
+    };
+    const previous = Object.fromEntries(
+        Object.keys(overrides).map((name) => [name, process.env[name]])
+    );
+
+    Object.assign(process.env, overrides);
+    let config;
+    try {
+        config = loadConfig();
+    } finally {
+        for (const [name, value] of Object.entries(previous)) {
+            if (value === undefined) {
+                delete process.env[name];
+            } else {
+                process.env[name] = value;
+            }
+        }
+    }
 
     const upstreamCalls = [];
     const identity = createIdentityClient({

@@ -265,8 +265,8 @@ function createDictionaryClient({ config, identity, fetch: fetchImpl = fetch, lo
      *
      * The consequence had the size fix shipped alone: every bounded pack would
      * have been rejected here as an unexpected envelope and returned to the
-     * browser as a 503. `tests/contract.test.js` now drives this path with the
-     * Dictionary's real compiled output.
+     * browser as a 503. `server/__tests__/contract.test.js` now drives this
+     * path with the Dictionary's real compiled output.
      *
      * Anything else is still treated as a failure rather than unwrapped
      * optimistically, so a changed envelope surfaces as an error instead of an
