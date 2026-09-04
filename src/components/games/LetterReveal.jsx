@@ -409,7 +409,16 @@ function LetterButton({ letter, state, onClick, disabled }) {
             type="button"
             onClick={onClick}
             disabled={disabled || state === 'correct' || state === 'wrong'}
-            className={`w-8 h-8 rounded font-semibold text-sm uppercase transition-colors ${extraClass}`}
+            /*
+             * No `uppercase`, and wide enough for a two-character unit.
+             *
+             * The uppercase transform rendered the long-vowel keys as `AA`/`OO`
+             * while the word being matched is lowercase, and it changes glyphs
+             * that may have no case pair at all in an orthography this platform
+             * has not measured yet. `w-8 h-8` (32px) was also well under a
+             * comfortable tap target on a phone.
+             */
+            className={`h-10 min-w-[36px] rounded px-1 text-sm font-semibold transition-colors ${extraClass}`}
             style={{ background: bg, color }}
             aria-label={letter}
         >

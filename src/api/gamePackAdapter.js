@@ -85,6 +85,57 @@ export function adaptGamePackWord(packWord) {
     carry('audio_url', 'audio_url');
 
     /*
+     * ============ FIELDS THE BFF FORWARDED AND THIS ADAPTER DROPPED ============
+     *
+     * The BFF's rights projection (`server/rights.js`) allows twenty word
+     * fields to the browser. This adapter carried ten. The rest arrived and
+     * were thrown away here, so no game could use them however much they would
+     * have helped. Measured fill rates over 488 real Mandinka entries are given
+     * for each, because "available" and "populated" are different claims.
+     *
+     * `difficulty` is the important one. The Dictionary ALREADY CODES EVERY
+     * WORD BY LEARNING LEVEL — CEFR values, 73.6% populated (A1 34.4%, A2
+     * 16.6%, B1 8.6%, B2 9.2%, C1 4.7%). It reached the browser and was
+     * discarded, which is why the games had no notion of difficulty at all.
+     * It is now the PRIMARY difficulty signal; see `src/difficulty.js`.
+     */
+    carry('difficulty', 'difficulty');
+
+    /*
+     * Definitions. The adapter mapped `definition` — which is 0% populated in
+     * the sampled corpus — and ignored `english_definition`, which is 62.3%.
+     * So every game showed no definition while a definition existed for nearly
+     * two words in three.
+     *
+     * All three are carried separately and NEVER merged. `definition` is
+     * AIWA-elicited and ships regardless of the source licence;
+     * `english_definition` and `french_definition` come back EMPTY for licensed
+     * third-party material whose redistribution is not permitted. An empty
+     * string is WITHHELD, not missing, and substituting one field for another
+     * would reconstruct exactly what the rights decision withheld.
+     */
+    carry('english_definition', 'english_definition');
+    carry('french_definition', 'french_definition');
+
+    /* Orthography. `normalized_headword` (100%) is the NFC form to compare
+     * against; `alternative_spelling` (0% here) and `ajami_form` (0% here) are
+     * real orthographic alternatives that a spelling game must accept if they
+     * are ever populated, rather than mark correct answers wrong. */
+    carry('normalized_headword', 'normalized_headword');
+    carry('alternative_spelling', 'alternative_spelling');
+    carry('ajami_form', 'ajami_form');
+
+    /* Morphology and relationships. `header_word_root` (0.2%) is the root a
+     * word is built from; `concept_id` (97.7%) is what makes two entries
+     * synonyms — 12 concepts in the sample carry more than one entry, which is
+     * a distractor-quality signal `MeaningMatch` could use. */
+    carry('header_word_root', 'header_word_root');
+    carry('concept_id', 'concept_id');
+
+    /* Alphabetical index (100%). Cheap, and the obvious first-letter hint. */
+    carry('letter', 'letter');
+
+    /*
      * Examples. A GamePack carries at most ONE example; the components expect
      * an array. A null example becomes an empty array rather than `[null]`,
      * which would render as a blank card rather than as "no example".

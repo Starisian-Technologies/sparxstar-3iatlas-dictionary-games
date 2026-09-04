@@ -4,6 +4,19 @@ import { useGameSet } from '../hooks/useGameSet.js';
 import { useGameSession } from '../hooks/useGameSession.js';
 import { useProgressSync } from '../hooks/useProgressSync.js';
 import { MODE, needsReview } from '../pedagogy.js';
+import {
+    ADJUST,
+    ADJUST_MESSAGE,
+    GAME_SKILL,
+    LEVEL,
+    LEVEL_PROFILE,
+    applyAdjustment,
+    decideAdjustment,
+    emptyPerformance,
+    progressKey,
+    recordOutcome,
+    selectForLevel,
+} from '../difficulty.js';
 import SessionComplete from './SessionComplete.jsx';
 import DomainFlash from './games/DomainFlash.jsx';
 import MeaningMatch from './games/MeaningMatch.jsx';
@@ -141,14 +154,35 @@ export default function GameShell({
     );
     const [selectedGame, setSelectedGame] = useState(GAME_TYPES[0].id);
     /*
-     * Learn/Practice or Challenge. Practice is the default because these games
-     * teach unfamiliar words; a player who wants less help chooses it.
+     * The player's chosen level, and whether the system may fine-tune within it.
      *
-     * The modes differ in how much help arrives and how soon — NOT in whether
-     * the player can get out. Skip, reveal and navigation are available in
-     * both, because "challenge" must never mean "trapped".
+     * Manual choice plus automatic fine-tuning, in that order of authority: the
+     * player picks the level and can change or freeze it at any time, and
+     * adaptation only reorders and reselects questions INSIDE that choice. It
+     * never moves anybody between levels.
+     *
+     * Practice is the default — the middle of the three, and the one that does
+     * not assume anything about a player nobody has met yet.
      */
-    const [practiceMode, setPracticeMode] = useState(MODE.PRACTICE);
+    const [playerLevel, setPlayerLevel] = useState(LEVEL.PRACTICE);
+    const [adaptive, setAdaptive] = useState(true);
+    /* What the last adjustment was, so the player can be told plainly. */
+    const [adjustNotice, setAdjustNotice] = useState(null);
+
+    /*
+     * Difficulty offsets, keyed `${languageCode}:${skill}`.
+     *
+     * Separate by BOTH, deliberately: a learner may read meanings readily and
+     * still be working out spelling, and Mandinka progress says nothing about
+     * Wolof. One general ability score would let strength in one skill raise
+     * the difficulty of another.
+     *
+     * Guest progress stays on the device. This is in-memory for the session
+     * plus localStorage below; nothing is sent anywhere, and no RLC change is
+     * needed for any of it.
+     */
+    const [offsets, setOffsets] = useState({});
+    const performanceRef = useRef({});
     const [wordCount, setWordCount] = useState(20);
     const [domains, setDomains] = useState([]);
     const [domainsLoading, setDomainsLoading] = useState(false);
@@ -299,7 +333,24 @@ export default function GameShell({
                 return;
             }
 
-            const sliced = fetchedWords.slice(0, wordCount);
+            /*
+             * Choose FOR THE LEVEL rather than taking the first N.
+             *
+             * `selectForLevel` orders by the Dictionary's own `difficulty`
+             * band first and only then by the other factors, and applies this
+             * skill's adaptation offset. It only orders and selects: the
+             * playability rules still run inside each game afterwards, which
+             * is what makes it impossible for any offset to deal an unplayable
+             * word.
+             */
+            const skill = GAME_SKILL[selectedGame];
+            const sliced = selectForLevel(fetchedWords, {
+                level: playerLevel,
+                languageCode: sourceLanguage ?? '',
+                gameId: selectedGame,
+                offset: offsets[progressKey(sourceLanguage ?? '', skill)] ?? 0,
+                count: wordCount,
+            });
             setSetupError(null);
 
             try {
@@ -331,6 +382,12 @@ export default function GameShell({
 
         load();
     }, [
+        /* `playerLevel` and `offsets` belong here: they choose WHICH words the
+         * round gets, so a stale pair would deal the previous level's deck.
+         * The effect is gated on `phase === 'loading'`, so listing them cannot
+         * refetch a round already in play. */
+        playerLevel,
+        offsets,
         phase,
         gameSetLoading,
         gameSetError,
@@ -373,6 +430,18 @@ export default function GameShell({
                      * than settled without idempotency. The run id comes from the
                      * session recordResult just wrote, so it is the same id for
                      * every result in this play-through. */
+                    /*
+                     * Fold the outcome into this language-and-skill's rolling
+                     * window. A window, not lifetime XP: a player who has
+                     * improved should not be held back by old answers, and a
+                     * bad ten minutes should recover within the session.
+                     */
+                    const skillKey = progressKey(sourceLanguage ?? '', GAME_SKILL[selectedGame]);
+                    performanceRef.current[skillKey] = recordOutcome(
+                        performanceRef.current[skillKey] ?? emptyPerformance(),
+                        { outcome, attempts, timeMs }
+                    );
+
                     await addEvent({
                         type: 'game_result',
                         run_id: updatedSession?.runId ?? '',
@@ -441,18 +510,57 @@ export default function GameShell({
                     console.error('Failed to record word result:', error);
                 });
         },
-        [recordResult, addEvent, selectedGame]
+        [recordResult, addEvent, selectedGame, sourceLanguage]
     );
 
     /* ── Handle game session complete ── */
     const handleComplete = useCallback(async () => {
         /* Await any in-flight result write before marking the session complete. */
         await pendingResultRef.current;
+
+        /*
+         * Adapt ONCE, at the end of a round — the conservative boundary this
+         * change deliberately stays inside.
+         *
+         * Adjusting mid-round would change the difficulty of a session a player
+         * is in the middle of, from a window that is still filling. At the end
+         * there is a whole round of evidence, the change applies to the NEXT
+         * round, and the player is told about it rather than discovering it.
+         *
+         * `decideAdjustment` holds below its evidence floor, so a short round
+         * moves nothing, and one mistake never moves anything.
+         */
+        const skillKey = progressKey(sourceLanguage ?? '', GAME_SKILL[selectedGame]);
+        const adjustment = decideAdjustment(performanceRef.current[skillKey], { adaptive });
+        if (adjustment !== ADJUST.HOLD) {
+            setOffsets((prev) => ({
+                ...prev,
+                [skillKey]: applyAdjustment(prev[skillKey] ?? 0, adjustment),
+            }));
+            setAdjustNotice(ADJUST_MESSAGE[adjustment]);
+            await addEvent({
+                type: 'game_difficulty_adjusted',
+                game: selectedGame,
+                skill: GAME_SKILL[selectedGame],
+                direction: adjustment,
+            });
+        } else {
+            setAdjustNotice(null);
+        }
+
         await completeSession();
         await addEvent({ type: 'aiwa_game_session_complete', domain: selectedDomain });
         await syncNow();
         setPhase('complete');
-    }, [completeSession, addEvent, syncNow, selectedDomain]);
+    }, [
+        completeSession,
+        addEvent,
+        syncNow,
+        selectedDomain,
+        selectedGame,
+        sourceLanguage,
+        adaptive,
+    ]);
 
     /* ── Start button ── */
     const handleStart = () => {
@@ -521,12 +629,61 @@ export default function GameShell({
     if (phase === 'playing') {
         return (
             <div className="flex-1 flex flex-col overflow-hidden bg-white dark:bg-gray-900">
+                {/*
+                 * Transparency strip. The current level is always visible, the
+                 * player can change it or freeze adaptation mid-round, and can
+                 * ask for an easier question without waiting to be offered
+                 * one. Nobody is silently locked into a tier.
+                 */}
+                <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-gray-100 px-3 py-2 text-xs dark:border-gray-800">
+                    <span className="text-gray-400">Level</span>
+                    {Object.entries(LEVEL_PROFILE).map(([id, p]) => (
+                        <button
+                            key={id}
+                            type="button"
+                            onClick={() => setPlayerLevel(id)}
+                            aria-pressed={playerLevel === id}
+                            className="min-h-[32px] rounded-lg border px-2 font-medium"
+                            style={
+                                playerLevel === id
+                                    ? {
+                                          background: '#7B3FA0',
+                                          borderColor: 'transparent',
+                                          color: 'white',
+                                      }
+                                    : { borderColor: '#e5e7eb', color: '#6b7280' }
+                            }
+                        >
+                            {p.label}
+                        </button>
+                    ))}
+                    <button
+                        type="button"
+                        onClick={() => setAdaptive((a) => !a)}
+                        aria-pressed={adaptive}
+                        className="ml-auto min-h-[32px] rounded-lg border border-gray-200 px-2 font-medium text-gray-500 dark:border-gray-700 dark:text-gray-400"
+                    >
+                        Adaptive: {adaptive ? 'on' : 'off'}
+                    </button>
+                </div>
+
+                {adjustNotice && (
+                    <p className="shrink-0 px-3 py-1.5 text-center text-xs text-gray-500 dark:text-gray-400">
+                        {adjustNotice}
+                    </p>
+                )}
+
                 {renderGame({
                     gameType: selectedGame,
                     words: gameWords,
                     language,
                     languageCode: sourceLanguage ?? '',
-                    mode: practiceMode,
+                    /* The learn-loop takes a MODE (how much help, how soon);
+                     * the player chooses a LEVEL. Learn and Practice both want
+                     * help early, so both map to the loop's practice mode;
+                     * Challenge holds it back. The level itself drives which
+                     * words are dealt, above. */
+                    mode: playerLevel === LEVEL.CHALLENGE ? MODE.CHALLENGE : MODE.PRACTICE,
                     onResult: handleWordResult,
                     onComplete: handleComplete,
                     onEvent: addEvent,
@@ -668,47 +825,44 @@ export default function GameShell({
                         </div>
                     </section>
 
-                    {/* Mode. Two identifiable modes, per the pedagogical brief:
-                     *  Practice expects help, Challenge offers less of it. What
-                     *  neither mode changes is that Skip, reveal and navigation
-                     *  stay available — a harder mode is not a trap. */}
+                    {/* Level. Three, chosen by the player and changeable at any
+                     *  time — including mid-round from the strip below the game.
+                     *  What no level changes is that Skip, reveal and navigation
+                     *  stay available: a harder level is not a trap. */}
                     <section>
                         <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">
-                            Mode
+                            Level
                         </h3>
                         <div className="flex gap-2">
-                            {[
-                                {
-                                    id: MODE.PRACTICE,
-                                    label: 'Learn',
-                                    hint: 'Hints, retries, answers shown',
-                                },
-                                {
-                                    id: MODE.CHALLENGE,
-                                    label: 'Challenge',
-                                    hint: 'Less help — you can still skip',
-                                },
-                            ].map((m) => (
-                                <button
-                                    key={m.id}
-                                    type="button"
-                                    onClick={() => setPracticeMode(m.id)}
-                                    aria-pressed={practiceMode === m.id}
-                                    className="flex-1 rounded-xl border-2 px-3 py-2.5 text-left transition-colors"
-                                    style={
-                                        practiceMode === m.id
-                                            ? {
-                                                  background: '#7B3FA0',
-                                                  borderColor: 'transparent',
-                                                  color: 'white',
-                                              }
-                                            : { borderColor: '#f3f4f6', color: '#374151' }
-                                    }
-                                >
-                                    <span className="block text-sm font-semibold">{m.label}</span>
-                                    <span className="block text-xs opacity-80">{m.hint}</span>
-                                </button>
-                            ))}
+                            {Object.entries(LEVEL_PROFILE)
+                                .map(([id, p]) => ({
+                                    id,
+                                    label: p.label,
+                                    hint: p.blurb,
+                                }))
+                                .map((m) => (
+                                    <button
+                                        key={m.id}
+                                        type="button"
+                                        onClick={() => setPlayerLevel(m.id)}
+                                        aria-pressed={playerLevel === m.id}
+                                        className="flex-1 rounded-xl border-2 px-3 py-2.5 text-left transition-colors"
+                                        style={
+                                            playerLevel === m.id
+                                                ? {
+                                                      background: '#7B3FA0',
+                                                      borderColor: 'transparent',
+                                                      color: 'white',
+                                                  }
+                                                : { borderColor: '#f3f4f6', color: '#374151' }
+                                        }
+                                    >
+                                        <span className="block text-sm font-semibold">
+                                            {m.label}
+                                        </span>
+                                        <span className="block text-xs opacity-80">{m.hint}</span>
+                                    </button>
+                                ))}
                         </div>
                     </section>
 

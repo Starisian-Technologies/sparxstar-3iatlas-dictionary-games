@@ -115,11 +115,49 @@ describe('adaptGamePackWord — rights are preserved', () => {
 
         const word = adaptGamePackWord(restricted);
 
+        /* Glosses come from the LEMMA fields, which are never rights-gated. */
         expect(word.translation_en).toBe('thing');
         expect(word.translation_fr).toBe('chose');
-        // And the withheld fields are not carried under any name at all.
-        expect(word.english_definition).toBeUndefined();
-        expect(word.french_definition).toBeUndefined();
+
+        /*
+         * The definition fields are now CARRIED, and this assertion changed
+         * deliberately — so it is worth saying why it does not weaken rights.
+         *
+         * The BFF's own projection (`server/rights.js`) already allows
+         * `english_definition` and `french_definition` to the browser, and the
+         * rights mechanism is the EMPTY STRING: content whose redistribution
+         * is not permitted is emptied upstream, by the Dictionary. Refusing to
+         * carry the field at all was a second, stricter rule layered on top —
+         * and its cost was that 62.3% of sampled entries have an
+         * `english_definition` that no game could ever show, because the
+         * adapter mapped only `definition`, which is 0% populated.
+         *
+         * So the invariant that matters is not "absent" but "not
+         * reconstructed": an empty value stays empty, is never backfilled from
+         * a neighbouring field, and renders as nothing. That is asserted here
+         * and in the test below, which is the load-bearing one.
+         */
+        expect(word.english_definition).toBe('');
+        expect(word.french_definition).toBe('');
+    });
+
+    it('carries a permitted definition, which no game could previously show', () => {
+        const word = adaptGamePackWord(
+            packWord({ english_definition: 'present participle of burn', definition: '' })
+        );
+        expect(word.english_definition).toBe('present participle of burn');
+        /* And the AIWA-elicited native field stays separate rather than merged. */
+        expect(word.definition).toBe('');
+    });
+
+    it('carries the difficulty the Dictionary already assigned', () => {
+        /*
+         * The Dictionary codes every word by learning level (CEFR). It reached
+         * the browser and this adapter discarded it, which is why the games had
+         * no notion of difficulty at all and why one must not be invented.
+         */
+        expect(adaptGamePackWord(packWord({ difficulty: 'A1' })).difficulty).toBe('A1');
+        expect(adaptGamePackWord(packWord({ difficulty: '' })).difficulty).toBe('');
     });
 
     it('never substitutes the native definition for a withheld gloss', () => {
