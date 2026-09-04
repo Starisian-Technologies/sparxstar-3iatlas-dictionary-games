@@ -35,8 +35,8 @@
  * consented recording, so the rights-restricted paths are exercised rather
  * than only the clean ones.
  *
- * REGENERATE IT when the Dictionary's gamepack projection changes:
- * see docs/dictionary-games-contract.md §"Regenerating the contract fixture".
+ * REGENERATE IT when the Dictionary's gamepack projection changes: see
+ * docs/dictionary-games-bff.md §9, "Regenerating the contract fixture".
  */
 
 const { readFileSync } = require('fs');

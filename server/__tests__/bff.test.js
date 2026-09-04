@@ -1107,6 +1107,33 @@ describe('bounded game packs — the size reaches the Dictionary', () => {
         expect(new URL(seen[0]).searchParams.get('size')).toBe('5');
     });
 
+    it('accepts numerically equal aliases written differently', async () => {
+        const { app, seen } = capturing();
+
+        /*
+         * Qodo's finding. `size=05&limit=5` is one request written two ways —
+         * the pattern accepts a leading zero and `Number()` normalizes it — but
+         * comparing the RAW STRINGS called it a disagreement and returned 400.
+         * A value either spelling accepts alone must not be refused when sent
+         * under both; that is the opposite of what "accepted when they agree"
+         * promises.
+         */
+        const response = await call(app, '/api/dictionary/game-set?language=mnk&size=05&limit=5');
+
+        expect(response.status).toBe(200);
+        expect(new URL(seen[0]).searchParams.get('size')).toBe('5');
+    });
+
+    it('names the malformed spelling instead of calling it a conflict', async () => {
+        const { app } = stack();
+
+        // `size=abc&limit=5` is a bad `size`, not two clients disagreeing —
+        // parsing each spelling before comparing them is what tells them apart.
+        const response = await call(app, '/api/dictionary/game-set?language=mnk&size=abc&limit=5');
+        expect(response.status).toBe(400);
+        expect(response.json.error).toBe('bad_request');
+    });
+
     it('accepts size and limit together when they agree, and refuses them when they do not', async () => {
         const { app, seen } = capturing();
 

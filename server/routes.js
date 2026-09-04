@@ -107,11 +107,30 @@ function readPackSize(params, maximum) {
     refuseRepeated(params, 'size');
     refuseRepeated(params, 'limit');
 
-    const rawSize = params.get('size');
-    const rawLimit = params.get('limit');
-    const present = [rawSize, rawLimit].filter((raw) => raw !== null && raw !== '');
+    /*
+     * Each spelling is parsed on its OWN before they are compared, and the
+     * comparison is between NUMBERS.
+     *
+     * Comparing the raw strings looked equivalent and was not: `?size=05&limit=5`
+     * is the same request written two ways — the pattern below accepts a
+     * leading zero and `Number()` normalizes it — but a string comparison
+     * called them a disagreement and returned 400. So a value that either
+     * spelling accepted alone was refused when sent under both, which is the
+     * opposite of what "accepted when they agree" promises.
+     *
+     * Parsing first also means a malformed value is named as malformed rather
+     * than being mistaken for a conflict: `?size=abc&limit=5` is a bad `size`,
+     * not two clients disagreeing.
+     */
+    const parsed = ['size', 'limit']
+        .map((name) => ({ name, raw: params.get(name) }))
+        .filter((entry) => entry.raw !== null && entry.raw !== '')
+        .map((entry) => ({
+            name: entry.name,
+            value: parsePackSize(entry.name, entry.raw, maximum),
+        }));
 
-    if (present.length === 0) {
+    if (parsed.length === 0) {
         /*
          * Omitted. Nothing is forwarded and the DICTIONARY applies the default,
          * which is deliberate: the default and the maximum are one fact and
@@ -121,25 +140,34 @@ function readPackSize(params, maximum) {
          */
         return undefined;
     }
-    if (present.length === 2 && rawSize !== rawLimit) {
+    if (parsed.length === 2 && parsed[0].value !== parsed[1].value) {
         throw new BadRequestError('size and limit disagree; send one of them');
     }
 
-    const raw = present[0];
-    // Bounded before Number(): rejects '', '+5', '5e2', '1.5', ' 5', '-1' and
+    return parsed[0].value;
+}
+
+/**
+ * Parse one spelling of the pack size.
+ *
+ * @param {string} name  Which spelling, so a refusal names the field the
+ *                       caller actually sent rather than always saying `size`.
+ */
+function parsePackSize(name, raw, maximum) {
+    // Bounded before Number(): rejects '+5', '5e2', '1.5', ' 5', '-1' and
     // anything long enough to be an attempt at something else.
     if (!/^\d{1,4}$/.test(raw)) {
-        throw new BadRequestError('size must be a positive integer');
+        throw new BadRequestError(`${name} must be a positive integer`);
     }
     const value = Number(raw);
-    if (value < 1) throw new BadRequestError('size must be at least 1');
+    if (value < 1) throw new BadRequestError(`${name} must be at least 1`);
     /*
      * Refused here rather than clamped. Clamping would silently serve 50 words
      * to a client that asked for 500 and believes it got them — and the
      * upstream's own answer to an over-cap request is a 400, so clamping would
      * also make this BFF more permissive than the service it fronts.
      */
-    if (value > maximum) throw new BadRequestError(`size must not exceed ${maximum}`);
+    if (value > maximum) throw new BadRequestError(`${name} must not exceed ${maximum}`);
     return value;
 }
 
