@@ -95,7 +95,29 @@ export default function LetterReveal({
     const maxWrong = MAX_WRONG_BY_MODE[mode] ?? MAX_WRONG_BY_MODE[MODE.PRACTICE];
 
     const word = deck[index];
-    if (!word) return null;
+
+    if (!word) {
+        /*
+         * Nothing this game can deal. Returning null rendered a BLANK SCREEN,
+         * which reads as a loading failure and leaves the player with nothing
+         * to press — the same dead end, arrived at differently. Say what
+         * happened and offer the way out.
+         */
+        return (
+            <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+                <p className="text-gray-700 dark:text-gray-200">
+                    None of these words can be played as a letter round.
+                </p>
+                <button
+                    type="button"
+                    onClick={onComplete}
+                    className="min-h-[44px] rounded-xl bg-gray-900 px-5 font-semibold text-white dark:bg-gray-100 dark:text-gray-900"
+                >
+                    Back
+                </button>
+            </div>
+        );
+    }
 
     /* Orthographic units, not code points: `oo` and `nj` are one tap each. */
     const letters = segmentHeadword(word.headword.toLowerCase(), languageCode);
