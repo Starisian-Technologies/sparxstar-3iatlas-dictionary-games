@@ -1,143 +1,240 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Volume2 } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Lightbulb, SkipForward } from 'lucide-react';
+import AnswerReveal from '../AnswerReveal.jsx';
+import {
+    MODE,
+    beginWord,
+    currentHintLevel,
+    isResolved,
+    recordAnswer,
+    resultFor,
+    skip,
+    startClock,
+    takeHint,
+} from '../../pedagogy.js';
+import { partitionSpellable, segmentHeadword } from '../../orthography.js';
 
 /**
- * ArrangeWord — Game 4.2
+ * Arrange the Word — tap the scrambled units into order.
  *
- * Scrambled letter tiles → player taps tiles to build the correct word.
- * Translation and domain hint are shown throughout.
+ * ===================== WHAT WAS WRONG HERE =====================
  *
- * Props:
- *   words      {Array}    Game-set words
- *   language   {string}   'en' | 'fr'
- *   onResult   {Function} (uuid, outcome, attempts, xp, timeMs) => void
- *   onComplete {Function} () => void
+ * This game had NO FAILURE PATH. A wrong arrangement shook, returned the tiles
+ * to the pool, and waited. There was no attempt counter, no hint, no Skip, no
+ * reveal, and no `onResult` call for anything but success — so a player who
+ * could not spell the word was stuck on it permanently, the word was never
+ * recorded, and it never entered the review queue. It was the clearest case of
+ * a game that tested knowledge instead of teaching it: if you already knew the
+ * word you passed, and if you did not, the game had nothing for you.
+ *
+ * It also reported `onResult(uuid, 'correct', 1, 5, …)` — a hardcoded attempt
+ * count of 1 no matter how many times the player had failed, and an XP value
+ * that matched neither the other games nor what the engine settles.
+ *
+ * And it built its tile pool with `headword.split('')`, which is the wrong
+ * reading of this orthography: `njemboo` became seven tiles, `n j e m b o o`,
+ * when the word is five units, `nj e m b oo`. Measured on the approved corpus,
+ * `oo` appears in 34.8% of headwords and `aa` in 29.6%
+ * (`scripts/analyze-orthography.mjs`).
+ *
+ * ===================== WHAT IT DOES NOW =====================
+ *
+ * Tiles are orthographic units. Three attempts, then the answer, with help
+ * getting stronger each time: first the first unit's position, then the first
+ * two, then the answer. Skip is always available. Nothing auto-advances — the
+ * player presses Continue when they have finished reading.
+ *
+ * Words that cannot be spelled are never dealt (`partitionSpellable`), which is
+ * how `0`, `00jo0` and `toolee. - 126-` stop reaching a spelling game.
  */
-export default function ArrangeWord({ words, language, onResult, onComplete }) {
-    const deck = useMemo(() => shuffle(words), [words]);
+export default function ArrangeWord({
+    words,
+    language,
+    languageCode,
+    mode = MODE.PRACTICE,
+    onResult,
+    onComplete,
+    onEvent,
+}) {
+    /*
+     * Only spellable words, decided before the round starts.
+     *
+     * The rejects are reported rather than silently dropped: a player who asked
+     * for ten words and gets eight deserves the count to be honest, and an
+     * operator deserves to know the corpus is feeding unplayable rows into a
+     * game. `onEvent` is optional so the component still works unwired.
+     */
+    const { deck, rejected } = useMemo(() => {
+        const partitioned = partitionSpellable(words ?? [], languageCode);
+        return { deck: shuffle(partitioned.spellable), rejected: partitioned.rejected };
+    }, [words, languageCode]);
+
     const [index, setIndex] = useState(0);
-    const wordStartRef = useRef(Date.now());
-    /* pool, answer, and initialPool are kept in one object so pickFromPool can
-     * update both atomically via a single functional setter, preventing stale
-     * state when the player taps tiles quickly before React re-renders. */
-    const [tileState, setTileState] = useState(() => {
-        const ip = buildPool(deck[0]?.headword ?? '');
-        return { pool: ip, answer: [], initialPool: ip };
-    });
-    const { pool, answer } = tileState;
+    const [attempt, setAttempt] = useState(() => startClock(beginWord({ mode })));
+    const [tileState, setTileState] = useState({ pool: [], answer: [], initialPool: [] });
     const [shake, setShake] = useState(false);
-    const [correct, setCorrect] = useState(false);
+    const reportedRef = useRef(new Set());
 
     const word = deck[index];
-    const target = word ? word.headword.toLowerCase() : '';
+    const target = useMemo(
+        () => (word ? segmentHeadword(word.headword.toLowerCase(), languageCode) : []),
+        [word, languageCode]
+    );
 
-    /* Reset the per-word timer whenever a new word is presented. */
+    /* Tell the host once about anything the corpus could not offer. */
     useEffect(() => {
-        wordStartRef.current = Date.now();
-    }, [index]);
+        if (rejected.length > 0) {
+            onEvent?.({
+                type: 'game_words_unplayable',
+                game: 'arrange_word',
+                count: rejected.length,
+                reasons: [...new Set(rejected.map((r) => r.reason))],
+            });
+        }
+    }, [rejected, onEvent]);
 
-    /* Advance to next word or complete session. */
+    /* Build the pool for whichever word is in play, and reset the attempt. */
+    useEffect(() => {
+        if (!word) return;
+        const pool = shuffle(target.map((unit, i) => ({ unit, id: `${unit}-${i}` })));
+        setTileState({ pool, answer: [], initialPool: pool });
+        setAttempt(startClock(beginWord({ mode })));
+        setShake(false);
+        onEvent?.({
+            type: 'game_question_shown',
+            game: 'arrange_word',
+            word_uuid: word.uuid,
+            units: target.length,
+        });
+    }, [word, target, mode, onEvent]);
+
+    /** Report exactly once per word, then hand the outcome up. */
+    const report = useCallback(
+        (resolved) => {
+            if (!word || reportedRef.current.has(word.uuid)) return;
+            reportedRef.current.add(word.uuid);
+            const { outcome, attempts, xp, timeMs } = resultFor(resolved);
+            onResult(word.uuid, outcome, attempts, xp, timeMs);
+        },
+        [word, onResult]
+    );
+
+    /* Check the arrangement once the answer row is full. */
+    useEffect(() => {
+        if (!word || isResolved(attempt) || tileState.answer.length !== target.length) return;
+
+        const submitted = tileState.answer.map((t) => t.unit).join('');
+        const next = recordAnswer(attempt, submitted === target.join(''));
+        setAttempt(next);
+
+        if (isResolved(next)) {
+            report(next);
+            return;
+        }
+
+        /* Another attempt. Shake, then return the tiles WITHOUT reshuffling, so
+         * the player keeps their mental map of what is available. */
+        onEvent?.({ type: 'game_retry_used', game: 'arrange_word', word_uuid: word.uuid });
+        setShake(true);
+        const timer = setTimeout(() => {
+            setShake(false);
+            setTileState((prev) => ({ ...prev, pool: prev.initialPool, answer: [] }));
+        }, 600);
+        return () => clearTimeout(timer);
+    }, [tileState.answer, target, word, attempt, report, onEvent]);
+
     const advance = useCallback(() => {
-        if (index + 1 >= deck.length) {
-            onComplete();
-        } else {
-            const nextIndex = index + 1;
-            const nextPool = buildPool(deck[nextIndex].headword);
-            setIndex(nextIndex);
-            setTileState({ pool: nextPool, answer: [], initialPool: nextPool });
-            setCorrect(false);
-        }
-    }, [index, deck, onComplete]);
+        if (index + 1 >= deck.length) onComplete();
+        else setIndex((i) => i + 1);
+    }, [index, deck.length, onComplete]);
 
-    /* Check the answer whenever the answer row changes length. */
-    useEffect(() => {
-        if (!word || correct || answer.length !== target.length) return;
-        const attempt = answer
-            .map((t) => t.char)
-            .join('')
-            .toLowerCase();
-        if (attempt === target) {
-            setCorrect(true);
-            if (word.audio_url) new Audio(word.audio_url).play().catch(() => {});
-            onResult(word.uuid, 'correct', 1, 5, Date.now() - wordStartRef.current);
-            setTimeout(advance, 1200);
-        } else {
-            /* Shake animation, then return placed tiles to pool without
-             * reshuffling. Player keeps their mental map of which tiles
-             * are available — only the answer row is cleared. */
-            setShake(true);
-            setTimeout(() => {
-                setShake(false);
-                setTileState((prev) => ({ ...prev, pool: prev.initialPool, answer: [] }));
-            }, 600);
-        }
-    }, [answer, correct, target, word, onResult, advance]);
+    const handleHint = useCallback(() => {
+        setAttempt((a) => takeHint(a));
+        onEvent?.({ type: 'game_hint_used', game: 'arrange_word', word_uuid: word?.uuid });
+    }, [word, onEvent]);
 
-    /* Tap a tile in the pool → append to answer.
-     * Uses a single functional setter so rapid taps before re-render are
-     * applied consistently: each updater receives the latest state, tiles are
-     * matched by their stable ID (not a stale render-time index), and the
-     * guard `idx === -1` prevents the same tile being picked twice. */
+    const handleSkip = useCallback(() => {
+        const next = skip(attempt);
+        setAttempt(next);
+        report(next);
+        onEvent?.({ type: 'game_skip_used', game: 'arrange_word', word_uuid: word?.uuid });
+    }, [attempt, report, word, onEvent]);
+
     const pickFromPool = useCallback(
         (tileId) => {
-            /* Ignore taps during the shake animation — the answer row is reset
-             * when the shake timeout completes, which would silently discard them. */
-            if (correct || shake || !word) return;
+            /* Taps during the shake would be discarded when the row resets. */
+            if (isResolved(attempt) || shake || !word) return;
             setTileState((prev) => {
                 const idx = prev.pool.findIndex((t) => t.id === tileId);
                 if (idx === -1) return prev; /* guard: already picked */
-                const tile = prev.pool[idx];
                 return {
                     ...prev,
                     pool: prev.pool.filter((_, i) => i !== idx),
-                    answer: [...prev.answer, tile],
+                    answer: [...prev.answer, prev.pool[idx]],
                 };
             });
         },
-        [correct, shake, word]
+        [attempt, shake, word]
     );
 
-    /* Return a placed tile back to the pool. */
     const returnToPool = useCallback(
         (answerIdx) => {
-            if (correct) return;
+            if (isResolved(attempt)) return;
             setTileState((prev) => {
                 const tile = prev.answer[answerIdx];
                 if (typeof tile === 'undefined') return prev;
-
-                const tileInitialIdx = prev.initialPool.indexOf(tile);
-                let newPool;
-                if (tileInitialIdx === -1) {
-                    newPool = [...prev.pool, tile];
-                } else {
-                    const insertAt = prev.pool.findIndex(
-                        (poolTile) => prev.initialPool.indexOf(poolTile) > tileInitialIdx
-                    );
-                    newPool =
-                        insertAt === -1
-                            ? [...prev.pool, tile]
-                            : [...prev.pool.slice(0, insertAt), tile, ...prev.pool.slice(insertAt)];
-                }
-
+                /* Reinsert at its original pool position so the pool does not
+                 * reorder under the player's fingers. */
+                const originalIdx = prev.initialPool.indexOf(tile);
+                const insertAt = prev.pool.findIndex(
+                    (poolTile) => prev.initialPool.indexOf(poolTile) > originalIdx
+                );
+                const pool =
+                    insertAt === -1
+                        ? [...prev.pool, tile]
+                        : [...prev.pool.slice(0, insertAt), tile, ...prev.pool.slice(insertAt)];
                 return {
                     ...prev,
-                    pool: newPool,
+                    pool,
                     answer: prev.answer.filter((_, i) => i !== answerIdx),
                 };
             });
         },
-        [correct]
+        [attempt]
     );
 
-    if (!word) return null;
+    if (!word) {
+        /*
+         * Nothing spellable in the whole set. An empty screen would read as a
+         * loading failure, so say what happened and let the player leave.
+         */
+        return (
+            <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+                <p className="text-gray-700 dark:text-gray-200">
+                    None of these words can be arranged as a spelling round.
+                </p>
+                <button
+                    type="button"
+                    onClick={onComplete}
+                    className="min-h-[44px] rounded-xl bg-gray-900 px-5 font-semibold text-white dark:bg-gray-100 dark:text-gray-900"
+                >
+                    Back
+                </button>
+            </div>
+        );
+    }
 
     const meaning =
         language === 'fr' && word.translation_fr ? word.translation_fr : word.translation_en;
+    const hintLevel = currentHintLevel(attempt);
+    /* Progressive help: how many leading units are shown in place. Capped one
+     * short of the word so a hint never simply answers it. */
+    const unitsGiven = Math.min(hintLevel, Math.max(0, target.length - 1));
+    const resolved = isResolved(attempt);
 
     return (
-        <div className="flex flex-col h-full p-4 gap-4">
-            {/* Header */}
-            <div className="flex items-center justify-between text-sm text-gray-500 dark:text-gray-400 shrink-0">
+        <div className="flex h-full flex-col gap-4 p-4">
+            <div className="flex shrink-0 items-center justify-between text-sm text-gray-500 dark:text-gray-400">
                 <span className="font-semibold" style={{ color: '#E91E8C' }}>
                     Arrange the Word
                 </span>
@@ -148,12 +245,11 @@ export default function ArrangeWord({ words, language, onResult, onComplete }) {
 
             <ProgressBar current={index} total={deck.length} />
 
-            {/* Hints */}
-            <div className="shrink-0 text-center py-2">
+            <div className="shrink-0 py-2 text-center">
                 <p className="text-lg font-semibold text-gray-800 dark:text-gray-200">{meaning}</p>
                 {word.domain && (
                     <span
-                        className="inline-block mt-1 text-xs font-bold uppercase tracking-wider px-3 py-0.5 rounded-full text-white"
+                        className="mt-1 inline-block rounded-full px-3 py-0.5 text-xs font-bold uppercase tracking-wider text-white"
                         style={{ background: '#7B3FA0' }}
                     >
                         {word.domain}
@@ -161,72 +257,105 @@ export default function ArrangeWord({ words, language, onResult, onComplete }) {
                 )}
             </div>
 
-            {/* Answer row */}
-            <div className="flex flex-wrap gap-2 justify-center min-h-[52px] px-2 shrink-0">
-                {answer.map((tile, i) => (
-                    <Tile
-                        key={tile.id}
-                        char={tile.char}
-                        onClick={() => returnToPool(i)}
-                        variant="answer"
-                        shake={shake}
-                        correct={correct}
+            {resolved ? (
+                <div className="flex-1 overflow-y-auto">
+                    <AnswerReveal
+                        word={word}
+                        outcome={attempt.outcome}
+                        languageCode={languageCode}
+                        language={language}
+                        onContinue={advance}
+                        isLast={index + 1 >= deck.length}
                     />
-                ))}
-                {Array.from({ length: target.length - answer.length }).map((_, i) => (
-                    <div
-                        key={`empty-${i}`}
-                        className="w-10 h-10 rounded-lg border-2 border-dashed border-gray-200 dark:border-gray-700"
-                    />
-                ))}
-            </div>
-
-            {correct && <p className="text-center text-green-600 font-bold shrink-0">+5 XP ✓</p>}
-
-            {/* Tile pool */}
-            <div className="flex-1 flex flex-wrap gap-2 content-center justify-center px-2">
-                {pool.map((tile) => (
-                    <Tile
-                        key={tile.id}
-                        char={tile.char}
-                        onClick={() => pickFromPool(tile.id)}
-                        variant="pool"
-                        shake={false}
-                        correct={false}
-                    />
-                ))}
-            </div>
-
-            {correct && word.audio_url && (
-                <div className="shrink-0 flex justify-center pb-2">
-                    <button
-                        type="button"
-                        onClick={() => new Audio(word.audio_url).play().catch(() => {})}
-                        className="p-3 rounded-full"
-                        style={{ background: '#FCE4F3', color: '#E91E8C' }}
-                        aria-label="Play pronunciation"
-                    >
-                        <Volume2 size={20} aria-hidden="true" />
-                    </button>
                 </div>
+            ) : (
+                <>
+                    {/* Answer row. Empty slots show any units the hint has given. */}
+                    <div className="flex min-h-[52px] shrink-0 flex-wrap justify-center gap-2 px-2">
+                        {tileState.answer.map((tile, i) => (
+                            <Tile
+                                key={tile.id}
+                                unit={tile.unit}
+                                onClick={() => returnToPool(i)}
+                                variant="answer"
+                                shake={shake}
+                            />
+                        ))}
+                        {Array.from({ length: target.length - tileState.answer.length }).map(
+                            (_, i) => {
+                                const slot = tileState.answer.length + i;
+                                const given = slot < unitsGiven ? target[slot] : null;
+                                return (
+                                    <div
+                                        key={`empty-${i}`}
+                                        className="flex h-11 min-w-[44px] items-center justify-center rounded-lg border-2 border-dashed border-gray-200 px-1 font-mono text-gray-400 dark:border-gray-700"
+                                    >
+                                        {given}
+                                    </div>
+                                );
+                            }
+                        )}
+                    </div>
+
+                    <div className="flex flex-1 flex-wrap content-center justify-center gap-2 px-2">
+                        {tileState.pool.map((tile) => (
+                            <Tile
+                                key={tile.id}
+                                unit={tile.unit}
+                                onClick={() => pickFromPool(tile.id)}
+                                variant="pool"
+                                shake={false}
+                            />
+                        ))}
+                    </div>
+
+                    {/* Escape and help. Both always present, in both modes. */}
+                    <div className="flex shrink-0 items-center justify-between gap-2">
+                        <button
+                            type="button"
+                            onClick={handleHint}
+                            className="flex min-h-[44px] items-center gap-2 rounded-xl border border-gray-300 px-4 text-sm font-medium text-gray-700 dark:border-gray-600 dark:text-gray-200"
+                        >
+                            <Lightbulb size={16} aria-hidden="true" />
+                            Hint
+                        </button>
+                        <span className="text-xs text-gray-400">
+                            {attempt.maxAttempts - attempt.attemptsUsed} left
+                        </span>
+                        <button
+                            type="button"
+                            onClick={handleSkip}
+                            className="flex min-h-[44px] items-center gap-2 rounded-xl border border-gray-300 px-4 text-sm font-medium text-gray-700 dark:border-gray-600 dark:text-gray-200"
+                        >
+                            Skip
+                            <SkipForward size={16} aria-hidden="true" />
+                        </button>
+                    </div>
+                </>
             )}
         </div>
     );
 }
 
-function Tile({ char, onClick, variant, shake, correct }) {
-    let bg = variant === 'answer' ? '#E91E8C' : '#7B3FA0';
-    if (correct && variant === 'answer') bg = '#4CAF50';
-
+/**
+ * One tile.
+ *
+ * `min-w-[44px] h-11` rather than the previous `w-10 h-10`: 40px is below the
+ * minimum comfortable tap target, and a tile now holds a UNIT, so `oo` and `nj`
+ * need more width than one letter. No `uppercase` — it changes the glyph the
+ * player is being asked to match, and not every orthography has a case pair.
+ */
+function Tile({ unit, onClick, variant, shake }) {
+    const bg = variant === 'answer' ? '#E91E8C' : '#7B3FA0';
     return (
         <button
             type="button"
             onClick={onClick}
-            className={`w-10 h-10 rounded-lg font-bold text-lg text-white uppercase transition-all select-none${shake ? ' animate-shake' : ''}`}
+            className={`h-11 min-w-[44px] select-none rounded-lg px-2 text-lg font-bold text-white transition-all${shake ? ' animate-shake' : ''}`}
             style={{ background: bg }}
-            aria-label={char}
+            aria-label={unit}
         >
-            {char}
+            {unit}
         </button>
     );
 }
@@ -234,17 +363,13 @@ function Tile({ char, onClick, variant, shake, correct }) {
 function ProgressBar({ current, total }) {
     const pct = total > 0 ? (current / total) * 100 : 0;
     return (
-        <div className="h-1.5 w-full bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden shrink-0">
+        <div className="h-1.5 w-full shrink-0 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
             <div
                 className="h-full rounded-full transition-all"
                 style={{ width: `${pct}%`, background: '#E91E8C' }}
             />
         </div>
     );
-}
-
-function buildPool(headword) {
-    return shuffle(headword.split('').map((char, i) => ({ char, id: `${char}-${i}` })));
 }
 
 function shuffle(arr) {

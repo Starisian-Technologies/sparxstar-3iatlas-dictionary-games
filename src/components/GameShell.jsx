@@ -3,6 +3,7 @@ import { Loader2, ChevronDown } from 'lucide-react';
 import { useGameSet } from '../hooks/useGameSet.js';
 import { useGameSession } from '../hooks/useGameSession.js';
 import { useProgressSync } from '../hooks/useProgressSync.js';
+import { MODE, needsReview } from '../pedagogy.js';
 import SessionComplete from './SessionComplete.jsx';
 import DomainFlash from './games/DomainFlash.jsx';
 import MeaningMatch from './games/MeaningMatch.jsx';
@@ -139,6 +140,15 @@ export default function GameShell({
         [sourceLanguage]
     );
     const [selectedGame, setSelectedGame] = useState(GAME_TYPES[0].id);
+    /*
+     * Learn/Practice or Challenge. Practice is the default because these games
+     * teach unfamiliar words; a player who wants less help chooses it.
+     *
+     * The modes differ in how much help arrives and how soon — NOT in whether
+     * the player can get out. Skip, reveal and navigation are available in
+     * both, because "challenge" must never mean "trapped".
+     */
+    const [practiceMode, setPracticeMode] = useState(MODE.PRACTICE);
     const [wordCount, setWordCount] = useState(20);
     const [domains, setDomains] = useState([]);
     const [domainsLoading, setDomainsLoading] = useState(false);
@@ -454,8 +464,17 @@ export default function GameShell({
     /* ── Practice missed words ── */
     const handlePracticeMissed = useCallback(async () => {
         if (!session) return;
+        /*
+         * Every word the player did not get first time, not just `learning`.
+         *
+         * This filtered `outcome === 'learning'` only, so a word answered
+         * outright wrong — or skipped — never came back. Those are precisely
+         * the words that need reinforcing, and they were the ones being
+         * dropped. `needsReview` is the single definition of "missed", shared
+         * with the games so the queue and the scoring cannot drift apart.
+         */
         const missed = session.results
-            .filter((r) => r.outcome === 'learning')
+            .filter((r) => needsReview(r.outcome))
             .map((r) => session.words.find((w) => w.uuid === r.wordUuid))
             .filter(Boolean);
 
@@ -502,7 +521,16 @@ export default function GameShell({
     if (phase === 'playing') {
         return (
             <div className="flex-1 flex flex-col overflow-hidden bg-white dark:bg-gray-900">
-                {renderGame(selectedGame, gameWords, language, handleWordResult, handleComplete)}
+                {renderGame({
+                    gameType: selectedGame,
+                    words: gameWords,
+                    language,
+                    languageCode: sourceLanguage ?? '',
+                    mode: practiceMode,
+                    onResult: handleWordResult,
+                    onComplete: handleComplete,
+                    onEvent: addEvent,
+                })}
             </div>
         );
     }
@@ -640,6 +668,50 @@ export default function GameShell({
                         </div>
                     </section>
 
+                    {/* Mode. Two identifiable modes, per the pedagogical brief:
+                     *  Practice expects help, Challenge offers less of it. What
+                     *  neither mode changes is that Skip, reveal and navigation
+                     *  stay available — a harder mode is not a trap. */}
+                    <section>
+                        <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                            Mode
+                        </h3>
+                        <div className="flex gap-2">
+                            {[
+                                {
+                                    id: MODE.PRACTICE,
+                                    label: 'Learn',
+                                    hint: 'Hints, retries, answers shown',
+                                },
+                                {
+                                    id: MODE.CHALLENGE,
+                                    label: 'Challenge',
+                                    hint: 'Less help — you can still skip',
+                                },
+                            ].map((m) => (
+                                <button
+                                    key={m.id}
+                                    type="button"
+                                    onClick={() => setPracticeMode(m.id)}
+                                    aria-pressed={practiceMode === m.id}
+                                    className="flex-1 rounded-xl border-2 px-3 py-2.5 text-left transition-colors"
+                                    style={
+                                        practiceMode === m.id
+                                            ? {
+                                                  background: '#7B3FA0',
+                                                  borderColor: 'transparent',
+                                                  color: 'white',
+                                              }
+                                            : { borderColor: '#f3f4f6', color: '#374151' }
+                                    }
+                                >
+                                    <span className="block text-sm font-semibold">{m.label}</span>
+                                    <span className="block text-xs opacity-80">{m.hint}</span>
+                                </button>
+                            ))}
+                        </div>
+                    </section>
+
                     {/* Word count */}
                     <section>
                         <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">
@@ -683,9 +755,29 @@ export default function GameShell({
     );
 }
 
-/** Route to the correct game component based on game type. */
-function renderGame(gameType, words, language, onResult, onComplete) {
-    const props = { words, language, onResult, onComplete };
+/**
+ * Route to the correct game component based on game type.
+ *
+ * `languageCode` is the language being LEARNED and is distinct from `language`,
+ * which is the interface language. The games need the first to segment a
+ * headword into orthographic units; passing the second would segment Mandinka
+ * with an English profile, which is the class of bug `src/orthography.js`
+ * exists to remove.
+ *
+ * `mode` and `onEvent` are threaded through the same way so every game gets the
+ * same learn-loop and the same telemetry, rather than six variations.
+ */
+function renderGame({
+    gameType,
+    words,
+    language,
+    languageCode,
+    mode,
+    onResult,
+    onComplete,
+    onEvent,
+}) {
+    const props = { words, language, languageCode, mode, onResult, onComplete, onEvent };
 
     switch (gameType) {
         case 'listen_write':

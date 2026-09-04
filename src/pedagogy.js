@@ -203,7 +203,7 @@ export function recordAnswer(attempt, wasCorrect) {
 }
 
 /** Take a hint. Costs no attempt, but forfeits first-attempt credit. */
-export function useHint(attempt) {
+export function takeHint(attempt) {
     if (attempt.outcome !== null) return attempt;
     return { ...attempt, hintsUsed: attempt.hintsUsed + 1 };
 }

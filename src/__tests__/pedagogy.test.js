@@ -22,7 +22,7 @@ import {
     revealAnswer,
     skip,
     startClock,
-    useHint,
+    takeHint,
     xpFor,
 } from '../pedagogy.js';
 
@@ -43,7 +43,7 @@ describe('the approved scoring table', () => {
 
     it('pays 5 for a correct answer that needed a hint, even on the first try', () => {
         let a = beginWord();
-        a = useHint(a);
+        a = takeHint(a);
         a = recordAnswer(a, true);
         expect(a.outcome).toBe(OUTCOME.LEARNING);
         expect(resultFor(a).xp).toBe(5);
@@ -164,7 +164,7 @@ describe('a resolved word is immutable', () => {
         expect(recordAnswer(done, false)).toBe(done);
         expect(recordAnswer(done, true)).toBe(done);
         expect(skip(done)).toBe(done);
-        expect(useHint(done)).toBe(done);
+        expect(takeHint(done)).toBe(done);
         expect(revealAnswer(done)).toBe(done);
     });
 });
@@ -183,7 +183,7 @@ describe('progressive help', () => {
     });
 
     it('gets stronger when the player asks, not only when they fail', () => {
-        const asked = useHint(beginWord());
+        const asked = takeHint(beginWord());
         expect(currentHintLevel(asked)).toBeGreaterThan(currentHintLevel(beginWord()));
     });
 
