@@ -89,11 +89,68 @@ unknown query parameter is dropped rather than forwarded.
 | `GET /api/dictionary/domains`   | _none_                 | Empty list — see §7.                   |
 | `GET /healthz`                  | _none_                 | Touches no credential and no upstream. |
 
-`game-set` accepts `language` (required, ISO 639-3), `domain`, `level`, `size`,
-`swadesh`, `audio_verified`, `seed`. Each is validated against a bounded
-pattern. An over-cap `size` is **refused, not clamped** — clamping would serve
-50 words to a client that asked for 500 and believes it got them, and would make
-the BFF more permissive than the service it fronts.
+`game-set` accepts `language` (required, ISO 639-3), `domain`, `level`, `size`
+(alias `limit`), `swadesh`, `audio_verified`, `seed`. Each is validated against
+a bounded pattern, and a **repeated** parameter is refused rather than silently
+resolved to the first value.
+
+### 4a. Pack size — `size`, with `limit` accepted
+
+The canonical contract is the Dictionary's, in that repository's
+`docs/dictionary-openapi.yaml` under `/v1/m2m/gamepack` → `size`. It owns the
+numbers because it owns the byte ceiling they are derived from. This table is a
+pointer, not a second source:
+
+| Fact                | Value                                   | Owner             |
+| :------------------ | :-------------------------------------- | :---------------- |
+| Parameter name      | `size` (canonical), `limit` (alias)     | alias is BFF-only |
+| Default when absent | **20**                                  | Dictionary        |
+| Maximum             | **100**                                 | Dictionary        |
+| Invalid input       | 400, never a clamp                      | both              |
+| Continuation        | **none** — no pagination, no offset     | Dictionary        |
+| Budget charged      | entries actually returned               | Dictionary        |
+| Response ceiling    | 102,400 bytes, enforced at its boundary | Dictionary        |
+
+**Why there is an alias.** `size` is the only name that ever leaves this
+process — it is what the upstream accepts, so there is exactly one upstream
+contract. `limit` is accepted at the browser edge because it was already the
+name of this concept here: `useGameSet({ limit })` is the package's own public
+option. The allowlist DROPS anything it does not recognise, and that
+combination is what broke production — a caller sent `limit=5`, the parameter
+was dropped without a word, no bound reached the Dictionary, and the
+Dictionary's default for an absent size was its maximum. If both spellings
+arrive they must agree; disagreeing is a 400, because picking one would be
+choosing which half of a contradictory request to honour.
+
+**Where the default lives.** Not here. When the client omits the size this BFF
+forwards nothing and the Dictionary applies its documented default, so the
+default and the maximum stay one fact next to the ceiling they come from. A
+second default in this repo would be a second number to drift.
+
+`GAMES_MAX_PACK_SIZE` (default 100) is an early refusal so an over-cap request
+does not spend a round trip; it must never exceed the upstream maximum. It is
+not the games' session size — `useGameSet` clamps a play session to 50 words,
+which is a product choice about round length rather than a contract bound.
+
+An over-cap `size` is **refused, not clamped** — clamping would serve 50 words
+to a client that asked for 500 and believes it got them, and would make the BFF
+more permissive than the service it fronts.
+
+### 4b. The envelope
+
+The Dictionary's success envelope is `{ success: true, data: … }`. This client
+read `envelope.ok` until 2026-09-04 — `ok()` is the FUNCTION name in that
+repo's `src/http/envelope.ts`, `success` is the field it writes. Nothing caught
+it because this repo's upstream fixture was hand-written to say `ok: true`, so
+the BFF was validated against a shape the Dictionary never emits; and no
+successful pack ever reached that line in production, because every request
+failed earlier on the response ceiling. Had the size fix shipped alone, every
+bounded pack would have been rejected here as an unexpected envelope and
+returned to the browser as a 503.
+
+`server/__tests__/contract.test.js` now drives the whole chain with the
+Dictionary's real compiled output, so this class of drift fails a test rather
+than a deploy.
 
 ## 5. Rights
 
@@ -193,3 +250,36 @@ Overlapping keys, so there is no cutover instant:
 Revoking the client stops **new** tokens immediately. It cannot un-mint an
 issued one — nothing can, for five minutes — so an emergency response also
 revokes the Dictionary caller row, which is immediate and independent.
+
+---
+
+## 9. Regenerating the contract fixture
+
+`server/__tests__/fixtures/dictionary-gamepack-size5.json` is not
+hand-written. It is the output of `compileGamePack()` in
+`sparxstar-3iatlas-dictionary-node` for `language=mnk`, `size=5`,
+`seed=contract-fixture`, against a simulated 9,134-entry corpus — the
+production corpus size that triggered the outage. Entry index 2 is
+`licensed_third_party` and index 1 has no consented recording, so the
+rights-restricted paths are exercised rather than only the clean ones.
+
+Regenerate it when the Dictionary's gamepack projection changes: run
+`compileGamePack` in that repo with those arguments and write
+`JSON.stringify(ok(pack), null, 2)` to that path. A hand-edited fixture defeats
+the point — the previous one asserted an envelope field the Dictionary does not
+emit, and that is precisely the drift this file exists to catch.
+
+## 10. Expected M2M headers
+
+This BFF sends `Authorization: Bearer <identity token>`, `Accept`, and
+`X-Request-Id`. It sends **no `Origin` and no `Referer`**, which is the valid
+server-to-server shape: the Dictionary treats either of those on a credentialed
+M2M request as a PRIORITY_1 `browser_origin_on_m2m` event, because a credential
+that reached a browser has already left the server it was meant to stay on.
+
+Node's `fetch` also adds `sec-fetch-mode: cors`, `accept-language: *` and
+`user-agent: node` on its own. That is normal and expected; the Dictionary
+stopped treating `Sec-Fetch-Mode` as browser evidence on 2026-09-04, because a
+header its own client library sets unconditionally cannot distinguish a browser
+from a server — it had been raising that PRIORITY_1 event on every legitimate
+gamepack call.

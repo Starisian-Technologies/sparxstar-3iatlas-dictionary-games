@@ -66,19 +66,108 @@ function readBoolean(params, name) {
     throw new BadRequestError(`${name} must be true or false`);
 }
 
-function readSize(params, maximum) {
-    const raw = params.get('size');
-    if (raw === null || raw === '') return undefined;
-    if (!/^\d{1,4}$/.test(raw)) throw new BadRequestError('size must be a positive integer');
+/**
+ * Refuse a repeated query parameter.
+ *
+ * `URLSearchParams.get` returns the FIRST value, so `?size=5&size=500` would
+ * have been read as 5 while a reader of the raw request — or an upstream that
+ * parsed it differently — saw 500. Two readings of one request is not a value,
+ * so it is a refusal. The same reasoning the Identity Node applies to a
+ * repeated form field.
+ */
+function refuseRepeated(params, name) {
+    if (params.getAll(name).length > 1) {
+        throw new BadRequestError(`${name} must not be repeated`);
+    }
+}
+
+/**
+ * The pack size, from `size` or its accepted alias `limit`.
+ *
+ * ===================== WHY THERE IS AN ALIAS AT ALL =====================
+ *
+ * `size` is the CANONICAL name and the only one that ever leaves this process:
+ * it is what the Dictionary's `/v1/m2m/gamepack` accepts, so there is exactly
+ * one upstream contract and this function is where the two spellings converge.
+ *
+ * `limit` is accepted because it was already the name of this concept on the
+ * browser side — `useGameSet({ limit })` is the package's own public option —
+ * and because the allowlist above DROPS anything it does not recognise. That
+ * combination is what broke production: a caller sent `limit=5`, the parameter
+ * was dropped without a word, no size reached the Dictionary, and the
+ * Dictionary's own default for an absent size was its MAXIMUM. A 200-word pack
+ * on a 9,134-entry corpus is ~140 KB against a 102,400-byte ceiling, so every
+ * such request came back `response_too_large`.
+ *
+ * Silently dropping a parameter a client plainly meant is the failure mode
+ * here, not the alias. If both spellings arrive they must AGREE — picking one
+ * would be choosing which half of a contradictory request to honour.
+ */
+function readPackSize(params, maximum) {
+    refuseRepeated(params, 'size');
+    refuseRepeated(params, 'limit');
+
+    /*
+     * Each spelling is parsed on its OWN before they are compared, and the
+     * comparison is between NUMBERS.
+     *
+     * Comparing the raw strings looked equivalent and was not: `?size=05&limit=5`
+     * is the same request written two ways — the pattern below accepts a
+     * leading zero and `Number()` normalizes it — but a string comparison
+     * called them a disagreement and returned 400. So a value that either
+     * spelling accepted alone was refused when sent under both, which is the
+     * opposite of what "accepted when they agree" promises.
+     *
+     * Parsing first also means a malformed value is named as malformed rather
+     * than being mistaken for a conflict: `?size=abc&limit=5` is a bad `size`,
+     * not two clients disagreeing.
+     */
+    const parsed = ['size', 'limit']
+        .map((name) => ({ name, raw: params.get(name) }))
+        .filter((entry) => entry.raw !== null && entry.raw !== '')
+        .map((entry) => ({
+            name: entry.name,
+            value: parsePackSize(entry.name, entry.raw, maximum),
+        }));
+
+    if (parsed.length === 0) {
+        /*
+         * Omitted. Nothing is forwarded and the DICTIONARY applies the default,
+         * which is deliberate: the default and the maximum are one fact and
+         * they live upstream, where the byte ceiling they are derived from is
+         * also enforced. A second default here would be a second number to
+         * drift.
+         */
+        return undefined;
+    }
+    if (parsed.length === 2 && parsed[0].value !== parsed[1].value) {
+        throw new BadRequestError('size and limit disagree; send one of them');
+    }
+
+    return parsed[0].value;
+}
+
+/**
+ * Parse one spelling of the pack size.
+ *
+ * @param {string} name  Which spelling, so a refusal names the field the
+ *                       caller actually sent rather than always saying `size`.
+ */
+function parsePackSize(name, raw, maximum) {
+    // Bounded before Number(): rejects '+5', '5e2', '1.5', ' 5', '-1' and
+    // anything long enough to be an attempt at something else.
+    if (!/^\d{1,4}$/.test(raw)) {
+        throw new BadRequestError(`${name} must be a positive integer`);
+    }
     const value = Number(raw);
-    if (value < 1) throw new BadRequestError('size must be at least 1');
+    if (value < 1) throw new BadRequestError(`${name} must be at least 1`);
     /*
      * Refused here rather than clamped. Clamping would silently serve 50 words
      * to a client that asked for 500 and believes it got them — and the
      * upstream's own answer to an over-cap request is a 400, so clamping would
      * also make this BFF more permissive than the service it fronts.
      */
-    if (value > maximum) throw new BadRequestError(`size must not exceed ${maximum}`);
+    if (value > maximum) throw new BadRequestError(`${name} must not exceed ${maximum}`);
     return value;
 }
 
@@ -101,11 +190,18 @@ function createRoutes({ config, dictionary }) {
     async function gameSet(url, correlationId) {
         const params = url.searchParams;
 
+        // Every accepted parameter is scalar. A repeated one is two readings of
+        // one request, so it is refused rather than silently resolved to the
+        // first. `size`/`limit` are checked inside readPackSize.
+        for (const name of ['language', 'domain', 'level', 'swadesh', 'audio_verified', 'seed']) {
+            refuseRepeated(params, name);
+        }
+
         const query = {
             language: readString(params, 'language', LANGUAGE_PATTERN, { required: true }),
             domain: readString(params, 'domain', CODE_PATTERN),
             level: readString(params, 'level', CODE_PATTERN),
-            size: readSize(params, config.dictionary.maxPackSize),
+            size: readPackSize(params, config.dictionary.maxPackSize),
             swadesh: readBoolean(params, 'swadesh'),
             audioVerified: readBoolean(params, 'audio_verified'),
             seed: readString(params, 'seed', SEED_PATTERN),

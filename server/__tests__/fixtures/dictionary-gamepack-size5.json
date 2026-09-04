@@ -1,0 +1,141 @@
+{
+    "success": true,
+    "data": {
+        "pack_id": "f63dc9ca-4252-4c71-943c-472df671906f",
+        "language": "mnk",
+        "domain_code": null,
+        "level": null,
+        "corpus_version": "2026.09.1",
+        "release_id": "rel-2026-09-04",
+        "generated_at": "2026-09-04T17:59:42.164Z",
+        "words": [
+            {
+                "entry_id": "3f8c1e2a-0000-4b7d-8e9f-1a2b3c4d5e6f",
+                "concept_id": "9a1b2c3d-0000-4e5f-8a9b-0c1d2e3f4a5b",
+                "letter": "B",
+                "header_word": "baadaa",
+                "header_word_root": "baada",
+                "normalized_headword": "baadaa",
+                "alternative_spelling": "badaa",
+                "ajami_form": "باداا",
+                "part_of_speech": "n",
+                "definition": "Jiyo baa meŋ ka bori duniyaa kono, a ka taa fo baa kono.",
+                "ipa_pronunciation": "baː.daː",
+                "phonetic_pronunciation": "bah-dah",
+                "audio_url": "https://media.sparxstar.com/audio/mnk/baadaa-0.mp3?sig=0123456789abcdef0123456789abcdef&exp=1788534333",
+                "example": {
+                    "sentence": "Baa be jan.",
+                    "translation_en": "The river is far."
+                },
+                "english_lemma": "river",
+                "english_definition": "",
+                "french_lemma": "rivière",
+                "french_definition": "",
+                "domain_code": "1.3.1",
+                "difficulty": "A1"
+            },
+            {
+                "entry_id": "3f8c1e2a-0001-4b7d-8e9f-1a2b3c4d5e6f",
+                "concept_id": "9a1b2c3d-0001-4e5f-8a9b-0c1d2e3f4a5b",
+                "letter": "B",
+                "header_word": "baadaa",
+                "header_word_root": "baada",
+                "normalized_headword": "baadaa",
+                "alternative_spelling": "badaa",
+                "ajami_form": "باداا",
+                "part_of_speech": "n",
+                "definition": "Jiyo baa meŋ ka bori duniyaa kono, a ka taa fo baa kono.",
+                "ipa_pronunciation": "baː.daː",
+                "phonetic_pronunciation": "bah-dah",
+                "audio_url": null,
+                "example": {
+                    "sentence": "Baa be jan.",
+                    "translation_en": "The river is far."
+                },
+                "english_lemma": "river",
+                "english_definition": "",
+                "french_lemma": "rivière",
+                "french_definition": "",
+                "domain_code": "1.3.1",
+                "difficulty": "A1"
+            },
+            {
+                "entry_id": "3f8c1e2a-0002-4b7d-8e9f-1a2b3c4d5e6f",
+                "concept_id": "9a1b2c3d-0002-4e5f-8a9b-0c1d2e3f4a5b",
+                "letter": "B",
+                "header_word": "baadaa",
+                "header_word_root": "baada",
+                "normalized_headword": "baadaa",
+                "alternative_spelling": "badaa",
+                "ajami_form": "باداا",
+                "part_of_speech": "n",
+                "definition": "Jiyo baa meŋ ka bori duniyaa kono, a ka taa fo baa kono.",
+                "ipa_pronunciation": "baː.daː",
+                "phonetic_pronunciation": "bah-dah",
+                "audio_url": "https://media.sparxstar.com/audio/mnk/baadaa-2.mp3?sig=0123456789abcdef0123456789abcdef&exp=1788534333",
+                "example": {
+                    "sentence": "Baa be jan.",
+                    "translation_en": "The river is far."
+                },
+                "english_lemma": "river",
+                "english_definition": "",
+                "french_lemma": "rivière",
+                "french_definition": "",
+                "domain_code": "1.3.1",
+                "difficulty": "A1"
+            },
+            {
+                "entry_id": "3f8c1e2a-0003-4b7d-8e9f-1a2b3c4d5e6f",
+                "concept_id": "9a1b2c3d-0003-4e5f-8a9b-0c1d2e3f4a5b",
+                "letter": "B",
+                "header_word": "baadaa",
+                "header_word_root": "baada",
+                "normalized_headword": "baadaa",
+                "alternative_spelling": "badaa",
+                "ajami_form": "باداا",
+                "part_of_speech": "n",
+                "definition": "Jiyo baa meŋ ka bori duniyaa kono, a ka taa fo baa kono.",
+                "ipa_pronunciation": "baː.daː",
+                "phonetic_pronunciation": "bah-dah",
+                "audio_url": "https://media.sparxstar.com/audio/mnk/baadaa-3.mp3?sig=0123456789abcdef0123456789abcdef&exp=1788534333",
+                "example": {
+                    "sentence": "Baa be jan.",
+                    "translation_en": "The river is far."
+                },
+                "english_lemma": "river",
+                "english_definition": "",
+                "french_lemma": "rivière",
+                "french_definition": "",
+                "domain_code": "1.3.1",
+                "difficulty": "A1"
+            },
+            {
+                "entry_id": "3f8c1e2a-0004-4b7d-8e9f-1a2b3c4d5e6f",
+                "concept_id": "9a1b2c3d-0004-4e5f-8a9b-0c1d2e3f4a5b",
+                "letter": "B",
+                "header_word": "baadaa",
+                "header_word_root": "baada",
+                "normalized_headword": "baadaa",
+                "alternative_spelling": "badaa",
+                "ajami_form": "باداا",
+                "part_of_speech": "n",
+                "definition": "Jiyo baa meŋ ka bori duniyaa kono, a ka taa fo baa kono.",
+                "ipa_pronunciation": "baː.daː",
+                "phonetic_pronunciation": "bah-dah",
+                "audio_url": "https://media.sparxstar.com/audio/mnk/baadaa-4.mp3?sig=0123456789abcdef0123456789abcdef&exp=1788534333",
+                "example": {
+                    "sentence": "Baa be jan.",
+                    "translation_en": "The river is far."
+                },
+                "english_lemma": "river",
+                "english_definition": "",
+                "french_lemma": "rivière",
+                "french_definition": "",
+                "domain_code": "1.3.1",
+                "difficulty": "A1"
+            }
+        ],
+        "edges": [],
+        "signature": "9e725bed863aacb0a668000e6668ba9ff73a2fd12259595072f015d505f75539"
+    }
+}
