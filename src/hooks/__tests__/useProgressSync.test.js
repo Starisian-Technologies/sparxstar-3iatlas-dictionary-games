@@ -507,3 +507,43 @@ describe('useProgressSync — events the engine can never settle', () => {
         expect(body.events[0].payload.time_ms).toBe(0);
     });
 });
+
+describe('local-only event retention', () => {
+    /*
+     * Local-only events are never sent, so nothing removed them and the outbox
+     * grew for the life of the install. Harmless while they were occasional;
+     * not once per-question analytics exist, because a full IndexedDB quota
+     * stops `game_result` events being queued too — and those are rewards.
+     */
+    const { trimLocalEvents } = require('../useProgressSync.js');
+
+    const local = (i) => ({ event_id: `l${i}`, type: 'aiwa_game_word_correct' });
+    const settling = (i) => ({ event_id: `s${i}`, type: 'game_result' });
+
+    it('keeps everything below the bound', () => {
+        const events = [local(1), settling(1), local(2)];
+        expect(trimLocalEvents(events, 10)).toEqual(events);
+    });
+
+    it('drops the oldest local-only events above the bound', () => {
+        const events = [local(1), local(2), local(3), local(4)];
+        expect(trimLocalEvents(events, 2).map((e) => e.event_id)).toEqual(['l3', 'l4']);
+    });
+
+    it('never drops a settling event, however old', () => {
+        /* The invariant that matters: analytics are expendable, rewards are not. */
+        const events = [settling(1), local(1), local(2), local(3), settling(2)];
+        const kept = trimLocalEvents(events, 1);
+        expect(kept.filter((e) => e.type === 'game_result').map((e) => e.event_id)).toEqual([
+            's1',
+            's2',
+        ]);
+        expect(kept.filter((e) => e.type !== 'game_result')).toHaveLength(1);
+    });
+
+    it('preserves chronological order', () => {
+        const events = [local(1), settling(1), local(2), local(3)];
+        const kept = trimLocalEvents(events, 2);
+        expect(kept.map((e) => e.event_id)).toEqual(['s1', 'l2', 'l3']);
+    });
+});
