@@ -75,11 +75,23 @@ function config(overrides = {}) {
     return loadConfig(env(overrides));
 }
 
-/** A GamePack as the Dictionary actually returns it: one open entry, one whose
- *  sourced fields the §2b rights filter withheld. */
+/**
+ * A GamePack as the Dictionary actually returns it: one open entry, one whose
+ * sourced fields the §2b rights filter withheld.
+ *
+ * `success`, not `ok`. This fixture said `ok: true` for as long as it existed,
+ * which is a shape the Dictionary never emits — its envelope is
+ * `{ success: true, data }` (`ok()` in that repo's `src/http/envelope.ts` is
+ * the function name, not the field). A hand-written fixture asserting the wrong
+ * contract is worse than no fixture: it made the BFF's envelope check look
+ * tested while it was reading a field that is always undefined.
+ *
+ * `server/__tests__/contract.test.js` now drives the same path with the
+ * Dictionary's real compiled output, so this cannot drift again unnoticed.
+ */
 function upstreamPack() {
     return {
-        ok: true,
+        success: true,
         data: {
             pack_id: 'pack-1',
             language: 'mnk',
@@ -149,12 +161,17 @@ function jsonResponse(payload, status = 200) {
     const text = JSON.stringify(payload);
     const stream = (async function* stream() {
         yield Buffer.from(text, 'utf8');
+        // Reaching here means the reader drained the body, which releases the
+        // connection just as `cancel()` does. A test asserting "not left
+        // unread" must accept either.
+        stream.consumed = true;
     })();
     // `cancel` is what a real WHATWG body exposes and what the client calls to
     // release a connection whose body it is discarding. Recorded so a test can
     // assert the discard actually happened.
     stream.cancel = async () => {
         stream.cancelled = true;
+        stream.consumed = true;
     };
     return {
         ok: status >= 200 && status < 300,
@@ -1020,5 +1037,261 @@ describe('resource handling', () => {
         expect(consume('198.51.100.7')).toBe(true);
         expect(consume('198.51.100.7')).toBe(true);
         expect(consume('198.51.100.7')).toBe(false);
+    });
+});
+
+/**
+ * The bounded-pack contract.
+ *
+ * Every test in this file passed while production returned HTTP 502 for
+ * `GET /api/dictionary/game-set?language=mnk&limit=5`. The parameter was named
+ * `limit`, the allowlist only knew `size`, and an unknown parameter is DROPPED
+ * by design — so no bound reached the Dictionary, whose own default for an
+ * absent size was its maximum. A 200-word pack on a 9,134-entry corpus is
+ * ~140 KB against a 102,400-byte ceiling, so the upstream answered
+ * `response_too_large` and the BFF turned that into a 502.
+ *
+ * Two lessons are encoded below: a dropped parameter the client plainly meant
+ * is a defect, and a test that never inspects the OUTBOUND request cannot catch
+ * one.
+ */
+describe('bounded game packs — the size reaches the Dictionary', () => {
+    /** Capture the exact upstream URL the BFF dials. */
+    function capturing(words = 5) {
+        const seen = [];
+        const { app } = stack({
+            dictionaryFetch: async (url) => {
+                seen.push(url);
+                const pack = upstreamPack();
+                // Serve as many words as were asked for, like the real upstream.
+                const requested = Number(new URL(url).searchParams.get('size') ?? words);
+                const source = pack.data.words;
+                pack.data.words = Array.from({ length: requested }, (_, i) => ({
+                    ...source[i % source.length],
+                    entry_id: `entry-${i}`,
+                }));
+                return jsonResponse(pack);
+            },
+        });
+        return { app, seen };
+    }
+
+    it('forwards limit=5 to the Dictionary as size=5 — the production request', async () => {
+        const { app, seen } = capturing();
+        const response = await call(app, '/api/dictionary/game-set?language=mnk&limit=5');
+
+        expect(response.status).toBe(200);
+        expect(seen).toHaveLength(1);
+
+        const query = new URL(seen[0]).searchParams;
+        // The canonical upstream name is `size`; `limit` never leaves this process.
+        expect(query.get('size')).toBe('5');
+        expect(query.has('limit')).toBe(false);
+        expect(query.get('language')).toBe('mnk');
+    });
+
+    it('returns no more than five adapted records for limit=5', async () => {
+        const { app } = capturing();
+        const response = await call(app, '/api/dictionary/game-set?language=mnk&limit=5');
+
+        expect(response.status).toBe(200);
+        expect(response.json.data.words).toHaveLength(5);
+        expect(response.json.data.words.length).toBeLessThanOrEqual(5);
+    });
+
+    it('accepts the canonical size=5 identically', async () => {
+        const { app, seen } = capturing();
+        const response = await call(app, '/api/dictionary/game-set?language=mnk&size=5');
+
+        expect(response.status).toBe(200);
+        expect(new URL(seen[0]).searchParams.get('size')).toBe('5');
+    });
+
+    it('accepts size and limit together when they agree, and refuses them when they do not', async () => {
+        const { app, seen } = capturing();
+
+        const agreeing = await call(app, '/api/dictionary/game-set?language=mnk&size=5&limit=5');
+        expect(agreeing.status).toBe(200);
+        expect(new URL(seen[0]).searchParams.get('size')).toBe('5');
+
+        // Picking one would be choosing which half of a contradictory request
+        // to honour, and the caller would never learn which.
+        const disagreeing = await call(
+            app,
+            '/api/dictionary/game-set?language=mnk&size=5&limit=50'
+        );
+        expect(disagreeing.status).toBe(400);
+        expect(disagreeing.json.error).toBe('bad_request');
+    });
+
+    it('forwards no size when the client omits one, leaving the default upstream', async () => {
+        const { app, seen } = capturing();
+        const response = await call(app, '/api/dictionary/game-set?language=mnk');
+
+        expect(response.status).toBe(200);
+        // The default and the maximum are one fact and it lives in the
+        // Dictionary, next to the byte ceiling they are derived from. A second
+        // default here would be a second number to drift.
+        expect(new URL(seen[0]).searchParams.has('size')).toBe(false);
+    });
+
+    it('refuses malformed, zero, negative and fractional sizes under either name', async () => {
+        const { app } = stack();
+        const bad = ['0', '-1', '1.5', 'five', '', '+5', '5e2', ' 5', '99999'];
+        for (const value of bad) {
+            for (const name of ['size', 'limit']) {
+                const response = await call(
+                    app,
+                    `/api/dictionary/game-set?language=mnk&${name}=${encodeURIComponent(value)}`
+                );
+                // An empty value is "absent", which is legal and defaults upstream.
+                const expected = value === '' ? 200 : 400;
+                expect(response.status).toBe(expected);
+            }
+        }
+    });
+
+    it('refuses an over-cap size under either name rather than clamping', async () => {
+        const { app, seen } = stack({
+            dictionaryFetch: async (url) => {
+                seen?.push(url);
+                return jsonResponse(upstreamPack());
+            },
+        });
+        for (const name of ['size', 'limit']) {
+            const response = await call(app, `/api/dictionary/game-set?language=mnk&${name}=500`);
+            expect(response.status).toBe(400);
+            expect(response.json.error).toBe('bad_request');
+        }
+    });
+
+    it('accepts a size exactly at the cap', async () => {
+        const { app } = capturing();
+        // The cap equals the Dictionary's own gamepack maximum, so the boundary
+        // value must be servable rather than a 400 on both sides.
+        const response = await call(app, '/api/dictionary/game-set?language=mnk&limit=100');
+        expect(response.status).toBe(200);
+    });
+
+    it('refuses a repeated size or limit instead of silently taking the first', async () => {
+        const { app } = stack();
+        for (const url of [
+            '/api/dictionary/game-set?language=mnk&size=5&size=500',
+            '/api/dictionary/game-set?language=mnk&limit=5&limit=500',
+            '/api/dictionary/game-set?language=mnk&language=wol',
+        ]) {
+            const response = await call(app, url);
+            expect(response.status).toBe(400);
+        }
+    });
+
+    it('still maps Dictionary fields onto the Games UI model', async () => {
+        const { app } = capturing();
+        const response = await call(app, '/api/dictionary/game-set?language=mnk&limit=5');
+        const [word] = response.json.data.words;
+
+        // The BFF emits the Dictionary's GamePack names; src/api/gamePackAdapter
+        // renames them for the components. Both halves have to keep holding.
+        for (const field of GAME_WORD_FIELDS) {
+            expect(Object.prototype.hasOwnProperty.call(word, field)).toBe(true);
+        }
+        expect(word.entry_id).toBe('entry-0');
+        expect(word.header_word).toBe('baa');
+    });
+});
+
+describe('bounded game packs — an over-ceiling upstream stays bounded here', () => {
+    it('turns response_too_large into the bounded BFF error, not a partial pack', async () => {
+        const { app } = stack({
+            dictionaryFetch: async () =>
+                jsonResponse(
+                    {
+                        code: 'response_too_large',
+                        message: 'Response exceeded the maximum size for a query endpoint.',
+                        data: { status: 500 },
+                    },
+                    500
+                ),
+        });
+
+        const response = await call(app, '/api/dictionary/game-set?language=mnk&limit=5');
+
+        // The production symptom, and it must stay a bounded client-safe error
+        // rather than a half-emitted payload.
+        expect(response.status).toBe(502);
+        expect(response.json.error).toBe('dictionary_rejected_request');
+        // The upstream's own body is not relayed.
+        expect(response.body).not.toContain('response_too_large');
+        expect(response.body).not.toContain('maximum size');
+    });
+
+    it('cancels the rejected upstream body rather than leaving it unread', async () => {
+        let served;
+        const { app } = stack({
+            dictionaryFetch: async () => {
+                served = jsonResponse({ code: 'response_too_large', data: { status: 500 } }, 500);
+                return served;
+            },
+        });
+
+        await call(app, '/api/dictionary/game-set?language=mnk&limit=5');
+
+        // undici does not release a connection whose body was never read or
+        // cancelled; under a repeated upstream failure that stalls every
+        // outbound request, which is worse than the failure itself.
+        expect(served.body.consumed === true || served.body.cancelled === true).toBe(true);
+    });
+
+    it('cancels the body on a 403 too, which used to throw without reading it', async () => {
+        let served;
+        const { app } = stack({
+            dictionaryFetch: async () => {
+                served = jsonResponse({ code: 'forbidden' }, 403);
+                return served;
+            },
+        });
+
+        const response = await call(app, '/api/dictionary/game-set?language=mnk&limit=5');
+
+        // Our own credential failing is never the player's fault, so it is a
+        // 503 rather than a 401/403 passed through.
+        expect(response.status).toBe(503);
+        expect(served.body.consumed === true || served.body.cancelled === true).toBe(true);
+    });
+
+    it('leaks no service token or assertion into logs or the client response', async () => {
+        const lines = [];
+        const logger = {
+            info: (line) => lines.push(String(line)),
+            warn: (line) => lines.push(String(line)),
+            error: (line) => lines.push(String(line)),
+        };
+        const cfg = config();
+        const identity = createIdentityClient({
+            config: cfg,
+            fetch: async () => tokenResponse('super-secret-service-token'),
+            logger,
+        });
+        const dictionary = createDictionaryClient({
+            config: cfg,
+            identity,
+            fetch: async () =>
+                jsonResponse({ code: 'response_too_large', data: { status: 500 } }, 500),
+            logger,
+        });
+        const app = createApp({
+            config: cfg,
+            routes: createRoutes({ config: cfg, dictionary }),
+            logger,
+            rateLimiter: createRateLimiter({ capacity: 1000, refillPerSec: 1000 }),
+        });
+
+        const response = await call(app, '/api/dictionary/game-set?language=mnk&limit=5');
+
+        const everything = `${lines.join('\n')}\n${response.body}`;
+        expect(everything).not.toContain('super-secret-service-token');
+        expect(everything).not.toContain('Bearer ');
+        expect(everything).not.toContain('client_assertion');
+        expect(everything).not.toContain(keys.privateKey.slice(40, 120));
     });
 });

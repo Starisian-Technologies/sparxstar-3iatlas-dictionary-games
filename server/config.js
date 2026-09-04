@@ -194,10 +194,27 @@ function loadConfig(env = process.env) {
                     1024,
                     4 * 1024 * 1024
                 ),
-                /** Words per pack the browser may ask for. The Dictionary's own
-                 *  M2M cap is 200 (M2M_MAX_RESULTS); asking for more is a 400
-                 *  there, so it is refused here rather than forwarded. */
-                maxPackSize: integer('GAMES_MAX_PACK_SIZE', 50, 1, 200),
+                /*
+                 * Words per pack the browser may ask for.
+                 *
+                 * THE DICTIONARY IS AUTHORITATIVE. Its gamepack cap is 100
+                 * (GAMEPACK_MAX_SIZE), derived from the 102,400-byte query
+                 * ceiling and ~750 bytes per gamepack word; asking for more is
+                 * a 400 there, so it is refused here rather than forwarded.
+                 * This value must never EXCEED the upstream cap — a BFF more
+                 * permissive than the service it fronts turns a clean 400 into
+                 * a spent request and a confusing upstream error.
+                 *
+                 * It was 50 while the upstream cap was believed to be 200. The
+                 * upstream number was the wrong one: 200 gamepack words is
+                 * ~140 KB and could never be served. Both are now the same
+                 * measured 100.
+                 *
+                 * Note this is not the games' SESSION size — `useGameSet`
+                 * clamps a play session to 50 words, which is a product choice
+                 * about how long a round should be, not a contract bound.
+                 */
+                maxPackSize: integer('GAMES_MAX_PACK_SIZE', 100, 1, 100),
             },
 
             /**

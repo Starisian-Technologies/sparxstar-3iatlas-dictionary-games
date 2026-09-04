@@ -351,6 +351,15 @@ docker compose -f deploy/docker-compose.yml exec games-bff \
 curl -s -o /dev/null -w '%{http_code}\n' \
     'https://games.sparxstar.com/api/dictionary/game-set?language=mnk&size=5'   # 200
 
+# The alias the browser package exposes as `useGameSet({ limit })`. Same result,
+# and the BFF forwards it upstream as `size` — verify both after a deploy.
+curl -s -o /dev/null -w '%{http_code} %{size_download}\n' \
+    'https://games.sparxstar.com/api/dictionary/game-set?language=mnk&limit=5'  # 200, ~4 KB
+
+# And the two disagreeing is a 400, not a silent choice between them.
+curl -s -o /dev/null -w '%{http_code}\n' \
+    'https://games.sparxstar.com/api/dictionary/game-set?language=mnk&size=5&limit=50'  # 400
+
 # 5. An anonymous DIRECT call to the Dictionary must fail. This is the
 #    invariant the whole design exists for.
 curl -s -o /dev/null -w '%{http_code}\n' \
@@ -409,6 +418,33 @@ Dictionary is refusing the caller. Its logs will say `subject_unknown` (no
 caller row for `service:dictionary-games` — the subjects must match **exactly**
 between the two registries), `revoked_credential_presented`, or a scope failure
 (the caller row needs `m2m`, not `display`).
+
+**`/api/dictionary/game-set` returns 502 `dictionary_rejected_request`, and the
+BFF log says `response_too_large`.** The pack the Dictionary built exceeded its
+own 102,400-byte query ceiling. **Do not raise the ceiling.** Check the size
+instead:
+
+- Send one. `size=5` (or its accepted alias `limit=5`) is a bounded request;
+  omitting it leaves the Dictionary's default of 20, which is also bounded.
+  Both are fine — what is not fine is a Dictionary older than 2026-09-04,
+  where an omitted size resolved to the MAXIMUM of 200 and 200 gamepack words
+  is ~140 KB. That was the original outage, and the fix is on the Dictionary
+  side (`GAMEPACK_DEFAULT_SIZE`, `GAMEPACK_MAX_SIZE`).
+- If a small pack still exceeds the ceiling, individual records are unusually
+  large. The bounded error is the correct answer — a partial payload would
+  parse and be wrong — so reduce the size for that language and open an issue
+  against the corpus rather than widening the cap.
+
+Canonical numbers: the Dictionary's `docs/dictionary-openapi.yaml`,
+`/v1/m2m/gamepack` → `size`.
+
+**A PRIORITY_1 `browser_origin_on_m2m` event for every gamepack request.**
+Expected on a Dictionary older than 2026-09-04 and **not** a compromised
+credential. Node's `fetch` sets `sec-fetch-mode: cors` on every server-side
+request, and that header used to count as browser evidence. A correct caller
+sends no `Origin` and no `Referer`; if the event shows `origin: ""` and
+`hasReferer: false`, nothing is wrong with the caller. Deploy the Dictionary
+fix rather than rotating the key.
 
 **`/api/dictionary/game-set` returns 429 `dictionary_budget_exceeded`.** Not a
 rate limit — the Dictionary's rolling **unique-entry** budget for this

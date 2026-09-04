@@ -833,6 +833,16 @@ same, and port it there if not.
   payload. The dictionary repository's decision to close.
 - `DICTIONARY_BFF_PATH` lives in the neutral `src/constants.js`, re-exported by
   `src/site/config.js`, so `src/hooks/` never imports from `src/site/`.
+- **Pack size is `size`, with `limit` accepted at the browser edge.** The
+  canonical contract — default 20, maximum 100, invalid input a 400, no
+  continuation, budget charged for entries returned, 102,400-byte response
+  ceiling — is the Dictionary's, in that repo's `docs/dictionary-openapi.yaml`
+  under `/v1/m2m/gamepack` → `size`. This repo restates none of those numbers;
+  see `docs/dictionary-games-bff.md` §4a for the pointer and §4b for the
+  envelope correction. Production returned 502 for
+  `game-set?language=mnk&limit=5` because `limit` was not an accepted name and
+  the allowlist drops what it does not recognise, so no bound reached the
+  Dictionary — whose own default for an absent size was its maximum.
 - **The domain filter is scoped to its language.** Domain codes are per
   language, so `GameShell` stores the selection as `{ language, code }` and
   DERIVES the effective filter (`domainChoice.language === sourceLanguage`).

@@ -195,6 +195,10 @@ function createDictionaryClient({ config, identity, fetch: fetchImpl = fetch, lo
         }
 
         if (response.status === 403) {
+            // Drained for the same reason as the 401 above: this path threw
+            // without touching the body at all, so every scope refusal held a
+            // connection open until GC got round to it.
+            await discard(response);
             throw new DictionaryAuthError('dictionary refused the caller scope (403)');
         }
 
@@ -207,6 +211,20 @@ function createDictionaryClient({ config, identity, fetch: fetchImpl = fetch, lo
              * budget change on the caller row, not a retry.
              */
             const text = await readBounded(response, 2048).catch(() => '');
+            /*
+             * Explicit, even though `readBounded` normally leaves the stream
+             * consumed: when it ABORTS at the byte cap it exits the `for await`
+             * abruptly, and whether that cancels the underlying stream is a
+             * property of the iterator protocol rather than of this code. A
+             * cancel that is already a no-op costs nothing; a connection leaked
+             * on every oversized error body costs the whole outbound pool.
+             *
+             * This is the live path for `response_too_large`, which is what the
+             * Dictionary returns when a pack exceeds its query ceiling — so it
+             * is the one that would leak under exactly the failure that brought
+             * gamepack down.
+             */
+            await discard(response);
             throw new DictionaryRequestError(
                 `dictionary returned ${response.status}${text ? `: ${text.slice(0, 200)}` : ''}`,
                 response.status
@@ -231,10 +249,28 @@ function createDictionaryClient({ config, identity, fetch: fetchImpl = fetch, lo
     /**
      * Fetch a GamePack.
      *
-     * The Dictionary's envelope is `{ ok: true, data: ... }`; anything else is
-     * treated as a failure rather than unwrapped optimistically, so a changed
-     * envelope surfaces as an error instead of an empty word list that reads
-     * like an empty corpus.
+     * ===================== THE ENVELOPE IS `success` =====================
+     *
+     * The Dictionary's success envelope is `{ success: true, data: ... }` — see
+     * `ok()` in that repo's `src/http/envelope.ts`, where `ok` is the FUNCTION
+     * name and `success` is the field it writes. This client checked
+     * `envelope.ok` instead, and the comment here asserted `{ ok: true }` as
+     * though it had been verified.
+     *
+     * Nothing caught it because nothing tested the pair: this repo's own
+     * upstream fixture was hand-written to say `ok: true`, so the BFF was
+     * validated against a shape the Dictionary never emits. Production never
+     * caught it either — every gamepack request failed earlier, on the response
+     * ceiling, so no successful pack ever reached this line.
+     *
+     * The consequence had the size fix shipped alone: every bounded pack would
+     * have been rejected here as an unexpected envelope and returned to the
+     * browser as a 503. `tests/contract.test.js` now drives this path with the
+     * Dictionary's real compiled output.
+     *
+     * Anything else is still treated as a failure rather than unwrapped
+     * optimistically, so a changed envelope surfaces as an error instead of an
+     * empty word list that reads like an empty corpus.
      *
      * @param {{ language: string, domain?: string, level?: string, size?: number,
      *           swadesh?: boolean, audioVerified?: boolean, seed?: string }} query
@@ -255,7 +291,7 @@ function createDictionaryClient({ config, identity, fetch: fetchImpl = fetch, lo
         const envelope = await get('/v1/m2m/gamepack', params, correlationId);
 
         const pack = envelope?.data;
-        if (envelope?.ok !== true || pack === null || typeof pack !== 'object') {
+        if (envelope?.success !== true || pack === null || typeof pack !== 'object') {
             throw new DictionaryUnavailableError(
                 'dictionary returned an unexpected envelope for /v1/m2m/gamepack'
             );
