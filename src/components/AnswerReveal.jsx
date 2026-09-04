@@ -141,7 +141,34 @@ export default function AnswerReveal({
 
     if (!word) return null;
 
-    const translation = language === 'fr' ? word.translation_fr : word.translation_en;
+    /*
+     * The French lemma when there is one, the English otherwise.
+     *
+     * NOT a plain ternary: `french_lemma` is 64.5% populated against
+     * `english_lemma`'s 97.7%, so picking the French field unconditionally made
+     * the "Means" row vanish for about a third of words on a French UI — a
+     * panel whose whole job is to teach the word, showing no meaning. The
+     * per-game code this panel replaced had this fallback and it was lost in
+     * the move.
+     *
+     * This is a UI-LANGUAGE fallback between two fields that are never
+     * rights-gated (the Dictionary ships both lemmas unconditionally). It is
+     * not the forbidden kind of fallback — substituting a different field for a
+     * WITHHELD one, which is what would reconstruct a rights decision.
+     */
+    const translation =
+        language === 'fr' && word.translation_fr ? word.translation_fr : word.translation_en;
+    /*
+     * The source-derived definition in the UI language, with the same
+     * fallback logic and the same limit: these two fields ARE rights-gated, so
+     * an empty French definition may fall back to English only because both
+     * are the same KIND of field — a withheld one is empty in both and nothing
+     * is reconstructed either way.
+     */
+    const definitionInUiLanguage =
+        language === 'fr' && word.french_definition
+            ? word.french_definition
+            : word.english_definition;
     const example = word.example_sentences?.[0];
     const audioLabel =
         audioState === 'playing'
@@ -212,13 +239,40 @@ export default function AnswerReveal({
                         <dd className="text-gray-800 dark:text-gray-100">{translation}</dd>
                     </div>
                 )}
-                {/* Empty is WITHHELD, not missing. No fallback, no reconstruction. */}
+                {/*
+                 * Both definitions, SEPARATELY, and never one standing in for
+                 * the other.
+                 *
+                 * The field audit found `definition` is 0% populated and
+                 * `english_definition` 62.3%, which is why the adapter now
+                 * carries the second — but this panel still rendered only the
+                 * first, so the fix reached the browser and stopped there and
+                 * nearly two words in three still showed no definition.
+                 *
+                 * They are different things and are labelled as such:
+                 * `definition` is AIWA-elicited and ships regardless of the
+                 * source licence; `english_definition` is source-derived and
+                 * comes back EMPTY when redistribution is not permitted. An
+                 * empty value renders nothing. Neither is ever used as a
+                 * fallback for the other — that would put back exactly what a
+                 * rights decision withheld.
+                 */}
                 {word.definition && (
                     <div>
                         <dt className="text-xs uppercase tracking-wide text-gray-400">
                             Definition
                         </dt>
                         <dd className="text-gray-800 dark:text-gray-100">{word.definition}</dd>
+                    </div>
+                )}
+                {definitionInUiLanguage && (
+                    <div>
+                        <dt className="text-xs uppercase tracking-wide text-gray-400">
+                            {language === 'fr' ? 'Définition' : 'English definition'}
+                        </dt>
+                        <dd className="text-gray-800 dark:text-gray-100">
+                            {definitionInUiLanguage}
+                        </dd>
                     </div>
                 )}
                 {word.ipa && (

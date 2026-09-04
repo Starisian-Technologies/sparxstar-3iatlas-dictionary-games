@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { SkipForward } from 'lucide-react';
 import AnswerReveal from '../AnswerReveal.jsx';
 import {
@@ -43,7 +43,6 @@ export default function MeaningMatch({
      */
     const [eliminated, setEliminated] = useState([]);
     const [attempt, setAttempt] = useState(() => startClock(beginWord({ mode })));
-    const wordStartRef = useRef(Date.now());
 
     const word = deck[index];
 
@@ -52,10 +51,13 @@ export default function MeaningMatch({
         [word, index, deck, language]
     );
 
-    /* Reset the per-word timer whenever a new word is presented. */
-    useEffect(() => {
-        wordStartRef.current = Date.now();
-    }, [index]);
+    /*
+     * There is no per-word timer here any more. The ref that held one, and
+     * the effect that reset it, were left behind when this game moved to
+     * the shared learn-loop: timing now comes from the attempt's own clock
+     * via `resultFor()`, so it was dead state — a second source of truth
+     * for the same fact, waiting to disagree with the first.
+     */
 
     if (!word) return null;
 
