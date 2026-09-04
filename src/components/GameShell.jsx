@@ -3,7 +3,6 @@ import { Loader2, ChevronDown } from 'lucide-react';
 import { useGameSet } from '../hooks/useGameSet.js';
 import { useGameSession } from '../hooks/useGameSession.js';
 import { useProgressSync } from '../hooks/useProgressSync.js';
-import { fetchWithPageToken } from '../api/pageToken.js';
 import SessionComplete from './SessionComplete.jsx';
 import DomainFlash from './games/DomainFlash.jsx';
 import MeaningMatch from './games/MeaningMatch.jsx';
@@ -91,10 +90,14 @@ const setLocalStorageItem = (key, value) => {
  * post-session summary. Integrates with useGameSession and useProgressSync.
  *
  * Props:
- *   restUrl        {string}   Base REST URL (dictionary's own REST API)
+ *   bffPath        {string}   Base path of the games BFF (`/api/dictionary`).
+ *     SAME-ORIGIN, and the only dictionary address this component knows. The
+ *     Dictionary API is private: the browser never addresses it, the BFF holds
+ *     the credential. Replaces the former `restUrl`, which was the dictionary's
+ *     own origin.
  *   language       {string}   'en' | 'fr'
- *   sourceLanguage {string|null}  Currently selected language slug
- *   languages      {Array}    Available languages from /languages
+ *   sourceLanguage {string|null}  Currently selected ISO 639-3 language code
+ *   languages      {Array}    Available languages from the BFF
  *   onSourceLanguage {Function}  (slug) => void — change source language
  *   onBrowse         {Function}  () => void — switch to Browse tab
  *   engineUrl        {string}   [optional] RLC node-engine base URL, for
@@ -103,7 +106,7 @@ const setLocalStorageItem = (key, value) => {
  *     Bearer token for the engine's batch endpoint. Omit to stay local-only.
  */
 export default function GameShell({
-    restUrl,
+    bffPath,
     language,
     sourceLanguage,
     languages,
@@ -132,17 +135,25 @@ export default function GameShell({
         loading: gameSetLoading,
         error: gameSetError,
     } = useGameSet({
-        restUrl,
-        langSource: sourceLanguage,
+        bffPath,
+        language: sourceLanguage,
         domain: selectedDomain,
         limit: wordCount,
-        includeAudio: selectedGame === 'listen_write',
+        /*
+         * `listen_write` is the one game that cannot be played without audio,
+         * so it asks the Dictionary for audio-verified entries only. The old
+         * `includeAudio` flag asked for audio URLs to be ADDED to any entry;
+         * this asks for entries that HAVE consented, verified audio, which is
+         * the question the game actually has. An entry with no consented
+         * recording is not a `listen_write` prompt.
+         */
+        audioVerifiedOnly: selectedGame === 'listen_write',
     });
 
     const { session, learnedCount, initSession, recordResult, completeSession, clearSession } =
         useGameSession();
 
-    const { addEvent, syncNow } = useProgressSync({ restUrl, engineUrl, getSuiteToken });
+    const { addEvent, syncNow } = useProgressSync({ engineUrl, getSuiteToken });
 
     /*
      * Promise chain for result writes.  Game components call onResult() synchronously
@@ -165,19 +176,24 @@ export default function GameShell({
         }
         setDomainsLoading(true);
         /*
-         * /domains is page-token authenticated like every other same-origin
-         * read here. Without the header a token-enforcing server answers 401
-         * and the selector silently falls back to "All domains", which reads
-         * as "this language has no domains" rather than as an auth failure.
+         * Same-origin, through the BFF. No credential and no page token: the
+         * Dictionary API is private and the browser does not address it.
+         *
+         * KNOWN GAP: the Dictionary Node publishes no `/domains` route (the
+         * WordPress original had one; the Node port did not carry it over), so
+         * the BFF answers an empty list. The selector already treats "no
+         * domains" as "All domains", so the filter degrades quietly rather
+         * than blocking play — which is why this stays a soft failure and not
+         * an error banner.
          */
-        fetchWithPageToken(
-            `${restUrl}/domains?lang_source=${encodeURIComponent(sourceLanguage)}`,
-            restUrl,
-            { signal: controller.signal }
-        )
+        fetch(`${bffPath}/domains?language=${encodeURIComponent(sourceLanguage)}`, {
+            credentials: 'omit',
+            headers: { Accept: 'application/json' },
+            signal: controller.signal,
+        })
             .then((r) => (r.ok ? r.json() : null))
             .then((json) => {
-                if (!cancelled && json?.success && Array.isArray(json.data?.domains)) {
+                if (!cancelled && Array.isArray(json?.data?.domains)) {
                     setDomains(json.data.domains);
                 }
             })
@@ -196,7 +212,7 @@ export default function GameShell({
             cancelled = true;
             controller.abort();
         };
-    }, [sourceLanguage, restUrl]);
+    }, [sourceLanguage, bffPath]);
 
     /* ── Resume an in-progress session when the Play tab is opened ── */
     useEffect(() => {

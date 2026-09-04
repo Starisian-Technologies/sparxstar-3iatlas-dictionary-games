@@ -28,9 +28,22 @@ submitted to the spec registry under `specs/IAtlas/`.
 ### What this repo is
 
 The RLC Games layer — the game shell, all six game components, session and
-progress hooks, IndexedDB utilities, and the dictionary API client. Extracted
-from `sparxstar-3iatlas-dictionary`. It contains no WordPress code, no PHP, and
-no server-side logic. See `ROLE.md` for the full boundary.
+progress hooks, IndexedDB utilities, and the **server-side BFF** that reads
+dictionary content. Extracted from `sparxstar-3iatlas-dictionary`. It contains
+no WordPress code and no PHP. See `ROLE.md` for the full boundary.
+
+> **This repo is no longer browser-only (2026-09-04).** It owns exactly one
+> server-side component, the Dictionary Games BFF (`server/`), added under the
+> locked cross-repository specification _Dictionary Service Authentication and
+> Games Integration_. Earlier revisions of this file said the repo contained
+> "no server-side logic"; that is corrected here rather than left to be
+> discovered. The reason is not convenience — **the Dictionary API is private**,
+> so a server-side credential holder is the only way the games can read words.
+>
+> The BFF is the only server-side code permitted here. It serves the games
+> origin, holds one credential, and must not grow into a general application
+> server. Read `docs/dictionary-games-bff.md` before touching anything under
+> `server/`.
 
 It builds **two artifacts from one source tree** (spec §4, §12.1): the reusable
 UMD package (`pnpm run build` → `dist/`, React external) and the deployable
@@ -45,10 +58,12 @@ one-way, or the package boundary stops being real.
 specification for this repo and is kept current against the source code. See:
 
 - §4 (Architecture) for the runtime layering / file-by-file repo structure.
-- §6a (Consumed REST endpoints) for the dictionary API constraints
-  (`lang_source`-only strict-mode consumer, `/wordlist` API-key-only, etc).
-- §9 (Security and privacy) for the full authentication model (Webster page
-  token vs consumer API key).
+- `docs/dictionary-games-bff.md` for the dictionary path: the BFF, the
+  Identity subject, the route allowlist, rights preservation, and the known
+  `/languages` + `/domains` gap. This SUPERSEDES the tech spec's §6a and the
+  page-token half of §9 — the page-token flow and the consumer-API-key flow are
+  both retired, and the Dictionary Node has no `/page-token` route.
+- §9 (Security and privacy) for the suite-token model, which is unchanged.
 - §5 (Data model) for the `aiwa-games-db` IndexedDB stores and the
   production-vs-recognition game split (`PRODUCTION_GAMES`).
 
@@ -57,6 +72,34 @@ one place to keep in sync with the code.
 
 ### Security rules (hard requirements)
 
+- **The browser MUST NOT call the Dictionary API.** It is private: no browser,
+  anonymous user, or unregistered application may call it, and the Dictionary
+  Node records a browser-shaped header on a credentialed request as a
+  PRIORITY_1 security event. Browser code calls this site's own
+  `/api/dictionary/*` and nothing else. Three things enforce it — the bundle
+  holds no dictionary origin, the CSP `connect-src` does not permit one, and
+  the browser dictionary client has been deleted. Do not reintroduce any of
+  the three.
+- **No dictionary credential may exist in the browser.** Not an API key, not a
+  page token, not a service token. The BFF's Identity Node signing key is read
+  from a read-only mounted FILE and never from an environment variable, and
+  neither it nor the access token ever appears in a response, a header, or a
+  log line. Tests in `server/__tests__/bff.test.js` assert this; do not weaken
+  them.
+- **Never widen what the Dictionary returned, and never backfill a withheld
+  field.** An empty `english_definition` or a null `audio_url` is a rights
+  decision, not a gap: substituting another field for it would ship withheld
+  material under a different key. `server/rights.js` is an allowlist for this
+  reason — both sides narrow, neither widens.
+- **Do not persistently cache dictionary content.** Words carry rights and
+  consent restrictions and can be WITHDRAWN; a cached copy is a place a
+  withdrawn word outlives its withdrawal on a device nobody can reach. The
+  former three-day IndexedDB cache in `useGameSet` was removed for this reason.
+  A TTL is not a withdrawal mechanism. Caching returns only when withdrawal
+  behaviour is defined and honoured.
+- **A failure of the BFF's own credential is a 503, never a 401 or 403.** A 401
+  tells the player to sign in again; that is a lie when the truth is that the
+  service could not authenticate itself.
 - `useProgressSync.syncNow()` MUST NOT post to the network without a real
   bearer token. It POSTs to the node-engine's `/events/batch`
   (`GAME-SERVICE-INTAKE-SPEC-v1.0`), and the network branch runs only when a
@@ -92,11 +135,11 @@ one place to keep in sync with the code.
 - Never emit `Access-Control-Allow-Credentials`. Both the Identity Service and
   the engine set `credentials: false`, and the website sends
   `credentials: 'omit'`.
-- The website bundle must never contain the dictionary consumer API key.
+- The website bundle must never contain a dictionary credential of any kind.
 - WordPress authentication is prohibited for all game endpoints.
 - **No PHP in this repo.** `backend/*.php` was removed 2026-08-25 as historical
   drafts superseded by the dictionary repo's own implementation (spec §12.8).
-  Server-side code belongs in the repo that owns the namespace.
+  The BFF is Node and is the only server-side code here; PHP remains excluded.
 
 ### Open questions tracked by this repo
 

@@ -55,7 +55,6 @@ function setOutbox(events) {
 /** A hook wired to the engine with a valid token — the signed-in adult case. */
 function mountAuthenticated() {
     return renderHook(useProgressSync, {
-        restUrl: 'https://dictionary.sparxstar.com/wp-json/sparxstar/v1/dictionary',
         engineUrl: ENGINE_URL,
         getSuiteToken: () => SUITE_TOKEN,
     });

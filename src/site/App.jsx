@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import GameShell from '../components/GameShell.jsx';
-import { fetchWithPageToken } from '../api/pageToken.js';
-import { DICTIONARY_REST_URL, ENGINE_URL, IDENTITY_URL, UI_LANGUAGE } from './config.js';
+import { DICTIONARY_BFF_PATH, ENGINE_URL, IDENTITY_URL, UI_LANGUAGE } from './config.js';
 import { useIdentityAuth } from './auth/useIdentityAuth.js';
 import { getSuiteToken } from './auth/suiteToken.js';
 import SignInPanel from './components/SignInPanel.jsx';
@@ -35,13 +34,21 @@ export default function App() {
         if (auth.signedIn) setShowSignIn(false);
     }, [auth.signedIn]);
 
-    /* Load the language list. Page-token authenticated like every other
-     * same-origin dictionary read, with the shared refresh-and-retry helper. */
+    /*
+     * Load the language list from the games BFF, same-origin.
+     *
+     * No page token and no credential: the Dictionary API is private and the
+     * browser does not address it. The BFF answers this one from its own
+     * configuration, because the Dictionary Node publishes no `/languages`
+     * route — see the note in its response and `docs/dictionary-games-bff.md`.
+     */
     useEffect(() => {
         let cancelled = false;
         const controller = new AbortController();
 
-        fetchWithPageToken(`${DICTIONARY_REST_URL}/languages`, DICTIONARY_REST_URL, {
+        fetch(`${DICTIONARY_BFF_PATH}/languages`, {
+            credentials: 'omit',
+            headers: { Accept: 'application/json' },
             signal: controller.signal,
         })
             .then((res) => (res.ok ? res.json() : null))
@@ -111,7 +118,7 @@ export default function App() {
                             </p>
                         )}
                         <GameShell
-                            restUrl={DICTIONARY_REST_URL}
+                            bffPath={DICTIONARY_BFF_PATH}
                             language={UI_LANGUAGE}
                             sourceLanguage={sourceLanguage}
                             languages={languages}

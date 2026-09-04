@@ -70,13 +70,45 @@ before "fixing" it.
 `src/site/`.
 
 ```bash
-GAMES_DICTIONARY_URL=https://dictionary.example/wp-json/sparxstar/v1/dictionary \
-  pnpm run build:site
+GAMES_ENGINE_URL=https://staging-rlc.example/api/v1 pnpm run build:site
 ```
 
 Endpoints default to production and are overridable per build with
-`GAMES_ENGINE_URL`, `GAMES_IDENTITY_URL`, `GAMES_SITE_URL` and
-`GAMES_DICTIONARY_URL`. None is a secret; no credential is ever compiled in.
+`GAMES_ENGINE_URL`, `GAMES_IDENTITY_URL` and `GAMES_SITE_URL`. None is a secret;
+no credential is ever compiled in.
+
+There is deliberately **no dictionary endpoint** among them. See below.
+
+### The BFF — how dictionary content is read
+
+The Dictionary API is private: no browser, anonymous user, or unregistered
+application may call it. So the browser calls this site's own
+`/api/dictionary/*`, Nginx proxies that to a small server-side BFF (`server/`),
+and the BFF authenticates itself to the Identity Node as
+`service:dictionary-games` and calls the Dictionary with a five-minute service
+token.
+
+```bash
+pnpm run start:bff   # needs the env in docs/dictionary-games-bff.md §8
+```
+
+The BFF has **zero runtime dependencies** — `node:http` and `node:crypto` only.
+It holds the deployment's one private key, and every package it carried would be
+a package that could reach that key.
+
+Consequences worth knowing before you change browser code:
+
+- The dictionary origin is not in the bundle **and** is not permitted by the
+  CSP's `connect-src`. A direct call from the page is blocked by policy, not
+  merely absent from the code.
+- `createDictionaryApiClient` and the page-token helpers are **deleted**. The
+  Dictionary Node has no `/page-token` route, and a browser client for a private
+  API is the capability this design removes.
+- `useGameSet` no longer caches to IndexedDB. Words carry rights and consent
+  restrictions and can be withdrawn; a TTL is not a withdrawal mechanism.
+
+Full design, the Identity subject, the route allowlist, rights handling and the
+known `/languages` gap: [`docs/dictionary-games-bff.md`](./docs/dictionary-games-bff.md).
 
 ## Usage
 
@@ -86,34 +118,39 @@ Endpoints default to production and are overridable per build with
 import { GameShell } from 'sparxstar-rlc-games';
 
 <GameShell
-    restUrl="https://example.com/wp-json/sparxstar/v1/dictionary"
+    /* Same-origin base path of a BFF that holds a dictionary credential.
+       Never the Dictionary API's own address — it is private. */
+    bffPath="/api/dictionary"
     language="en"
-    sourceLanguage="mandinka"
-    languages={[{ slug: 'mandinka', name: 'Mandinka' }]}
+    sourceLanguage="mnk"
+    languages={[{ slug: 'mnk', code: 'mnk', name: 'Mandinka' }]}
     onSourceLanguage={(slug) => setSourceLanguage(slug)}
     onBrowse={() => setTab('browse')}
 />;
 ```
 
-### Call the dictionary API directly
+### Reading dictionary content from another host
 
-```js
-import { createDictionaryApiClient } from 'sparxstar-rlc-games';
+There is no longer a browser client to import, and that is the point: the
+Dictionary API is private, so a client a browser can hold is a credential a
+browser can hold.
 
-// Consumer API key (server-side, WordPad, S2S):
-const dict = createDictionaryApiClient({
-    baseUrl: 'https://example.com/wp-json/sparxstar/v1/dictionary',
-    apiKey: 'sk_...',
-});
-const wordlist = await dict.wordlist({ lang_source: 'mandinka' });
+A host that wants dictionary content runs its own server-side holder and points
+`<GameShell />` at it:
 
-// Same-origin browser app (page-token flow):
-const browser = createDictionaryApiClient({ baseUrl: restUrl });
-browser.setPageToken((await browser.getPageToken()).data.token);
-const result = await browser.lookup({ slug: 'my-word' });
+```jsx
+<GameShell bffPath="/api/dictionary" /* ...your BFF, on your origin... */ />
 ```
 
-`/wordlist` requires a consumer API key; sending an ephemeral page token returns 403. See `src/api/dictionary-api.d.ts` for the full type contract.
+This repo ships a reference implementation in `server/` — 300 lines, zero
+runtime dependencies, and documented in
+[`docs/dictionary-games-bff.md`](./docs/dictionary-games-bff.md). It needs an
+Identity Node service client (`private_key_jwt`) and a matching caller row in
+the Dictionary Node's registry; both are provisioned by CLI, and DEPLOY.md has
+the ordered runbook.
+
+`src/api/dictionary-api.d.ts` remains the type contract for the content shapes.
+The Dictionary Node is the source of truth for them.
 
 ## Governance
 

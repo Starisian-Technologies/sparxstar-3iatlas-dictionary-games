@@ -49,9 +49,7 @@ afterEach(() => {
 
 describe('useProgressSync — guest/local-only path', () => {
     it('does not call fetch when neither engineUrl nor getSuiteToken is supplied', async () => {
-        const { result } = renderHook(useProgressSync, {
-            restUrl: 'https://dict.example/wp-json/sparxstar/v1/dictionary',
-        });
+        const { result } = renderHook(useProgressSync, {});
 
         await result.current.addEvent({
             type: 'game_result',
@@ -72,7 +70,6 @@ describe('useProgressSync — guest/local-only path', () => {
     it('does not call fetch when getSuiteToken resolves to null (no token minted yet)', async () => {
         const getSuiteToken = jest.fn().mockResolvedValue(null);
         const { result } = renderHook(useProgressSync, {
-            restUrl: 'https://dict.example/wp-json/sparxstar/v1/dictionary',
             engineUrl: 'https://engine.example/api/v1',
             getSuiteToken,
         });
@@ -96,7 +93,6 @@ describe('useProgressSync — guest/local-only path', () => {
     it('does not throw and leaves the outbox untouched if getSuiteToken() itself throws', async () => {
         const getSuiteToken = jest.fn().mockRejectedValue(new Error('token store unavailable'));
         const { result } = renderHook(useProgressSync, {
-            restUrl: 'https://dict.example/wp-json/sparxstar/v1/dictionary',
             engineUrl: 'https://engine.example/api/v1',
             getSuiteToken,
         });
@@ -126,7 +122,6 @@ describe('useProgressSync — authenticated sync path (suite token injected)', (
         const getSuiteToken = jest.fn().mockResolvedValue('fake-participant-token');
 
         const { result } = renderHook(useProgressSync, {
-            restUrl: 'https://dict.example/wp-json/sparxstar/v1/dictionary',
             engineUrl: 'https://engine.example/api/v1',
             getSuiteToken,
         });
@@ -201,7 +196,6 @@ describe('useProgressSync — authenticated sync path (suite token injected)', (
     it('keeps failed events queued for retry and drains only accepted ones', async () => {
         const getSuiteToken = jest.fn().mockResolvedValue('fake-participant-token');
         const { result } = renderHook(useProgressSync, {
-            restUrl: 'https://dict.example/wp-json/sparxstar/v1/dictionary',
             engineUrl: 'https://engine.example/api/v1',
             getSuiteToken,
         });
@@ -245,7 +239,6 @@ describe('useProgressSync — authenticated sync path (suite token injected)', (
     it('leaves the outbox untouched on a non-OK response, so a full retry happens next time', async () => {
         const getSuiteToken = jest.fn().mockResolvedValue('fake-participant-token');
         const { result } = renderHook(useProgressSync, {
-            restUrl: 'https://dict.example/wp-json/sparxstar/v1/dictionary',
             engineUrl: 'https://engine.example/api/v1',
             getSuiteToken,
         });
@@ -269,7 +262,6 @@ describe('useProgressSync — authenticated sync path (suite token injected)', (
     it('is a no-op when the outbox has no game_result events (only bonus signals queued)', async () => {
         const getSuiteToken = jest.fn().mockResolvedValue('fake-participant-token');
         const { result } = renderHook(useProgressSync, {
-            restUrl: 'https://dict.example/wp-json/sparxstar/v1/dictionary',
             engineUrl: 'https://engine.example/api/v1',
             getSuiteToken,
         });
@@ -320,7 +312,6 @@ describe('useProgressSync — authenticated sync path (suite token injected)', (
         });
 
         const { result } = renderHook(useProgressSync, {
-            restUrl: 'https://dict.example/wp-json/sparxstar/v1/dictionary',
             engineUrl: 'https://engine.example/api/v1',
             getSuiteToken,
         });
@@ -352,7 +343,6 @@ describe('useProgressSync — authenticated sync path (suite token injected)', (
  */
 describe('useProgressSync — events the engine can never settle', () => {
     const engineProps = {
-        restUrl: 'https://dict.example/wp-json/sparxstar/v1/dictionary',
         engineUrl: 'https://engine.example/api/v1',
         getSuiteToken: () => 'fake-suite-token',
     };

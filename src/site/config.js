@@ -9,18 +9,17 @@
  * runtime configuration and therefore has nowhere to hold a secret.
  *
  * NONE OF THESE IS A SECRET. They are public endpoint addresses that appear in
- * the browser's network tab the moment the page loads. The dictionary consumer
- * API key in particular is NOT here and must never be: it would be readable by
- * anyone who opens the bundle. The site uses the ephemeral page-token flow
- * instead (tech spec §9), and any endpoint that genuinely needs the consumer
- * key has to be proxied server-side by whoever holds it.
+ * the browser's network tab the moment the page loads. No dictionary
+ * credential appears here or anywhere else in the bundle, and none can: as of
+ * the BFF, the browser does not address the Dictionary API at all. It calls
+ * this site's own `/api/dictionary/*` routes, which Nginx proxies to the
+ * server-side BFF (`server/`), and the BFF holds the credential.
  *
  * Overriding at build time (all optional; the defaults are production):
  *
  *   GAMES_ENGINE_URL=…      pnpm run build:site
  *   GAMES_IDENTITY_URL=…
  *   GAMES_SITE_URL=…
- *   GAMES_DICTIONARY_URL=…
  */
 
 /**
@@ -47,12 +46,25 @@ export const IDENTITY_URL = process.env.GAMES_IDENTITY_URL;
 export const SITE_URL = process.env.GAMES_SITE_URL;
 
 /**
- * Webster dictionary REST namespace — the full base including the WordPress
- * `/wp-json` prefix and the `sparxstar/v1/dictionary` namespace, no trailing
- * slash. This is the base every path in `src/api/dictionary-api.d.ts` hangs
- * off (`/game-set`, `/domains`, `/page-token`, …).
+ * The games BFF, SAME-ORIGIN and therefore not configurable.
+ *
+ * A relative path, deliberately — not an origin, and not a build-time
+ * override. Three things follow from that, all of them the point:
+ *
+ *   1. The browser never learns the Dictionary API's address, so it cannot be
+ *      pointed at it by a bug, a copied snippet, or a console.
+ *   2. There is no cross-origin request, so no CORS negotiation and no
+ *      preflight — and the site's CSP `connect-src` no longer needs to permit
+ *      the dictionary origin at all.
+ *   3. A `GAMES_DICTIONARY_URL` build arg cannot make the bundle address the
+ *      Dictionary directly. The variable is gone rather than repointed, so an
+ *      old override in a CI job fails the build instead of quietly restoring
+ *      the direct path.
+ *
+ * The Dictionary API is private. Only the BFF holds a credential for it, and
+ * the BFF runs on this origin behind Nginx — see `docs/dictionary-games-bff.md`.
  */
-export const DICTIONARY_REST_URL = process.env.GAMES_DICTIONARY_URL;
+export const DICTIONARY_BFF_PATH = '/api/dictionary';
 
 /**
  * The interface language of the site chrome. The *source* language (the

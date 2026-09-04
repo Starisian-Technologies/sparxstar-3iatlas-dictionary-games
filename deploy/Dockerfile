@@ -9,20 +9,26 @@
 #   docker build -f deploy/Dockerfile -t sparxstar/dictionary-games:<tag> .
 #   docker run --rm -p 8080:80 sparxstar/dictionary-games:<tag>
 #
-# The four endpoints are compiled in at build time. The defaults are
+# The three endpoints are compiled in at build time. The defaults are
 # production, so a plain build needs no arguments; override for a staging
 # host:
 #
 #   docker build -f deploy/Dockerfile \
-#     --build-arg GAMES_DICTIONARY_URL=https://staging.example/wp-json/sparxstar/v1/dictionary \
+#     --build-arg GAMES_ENGINE_URL=https://staging-rlc.example/api/v1 \
 #     -t sparxstar/dictionary-games:staging .
+#
+# THERE IS NO DICTIONARY ENDPOINT HERE ANY MORE. The browser does not address
+# the Dictionary API: the page calls this host's own `/api/dictionary/*`, which
+# Nginx proxies to the BFF container (deploy/Dockerfile.bff), and the BFF holds
+# the credential. `GAMES_DICTIONARY_URL` was removed rather than repointed, so
+# a CI job still passing it fails the build instead of quietly restoring a
+# direct browser path to a private API.
 #
 # NOTHING SECRET MAY BE PASSED HERE. A --build-arg is visible in `docker
 # history` for anyone who can pull the image, so it is the correct channel for
-# a public URL and the wrong one for a credential. This app needs no
-# credential: the dictionary consumer API key is deliberately not used by the
-# browser (page tokens instead), and the suite token is minted per-player at
-# sign-in and held only in memory.
+# a public URL and the wrong one for a credential. This image needs no
+# credential at all: the dictionary key lives only in the BFF container, and
+# the suite token is minted per-player at sign-in and held only in memory.
 
 # ---------------------------------------------------------------------------
 # Stage 1 — build
@@ -50,11 +56,9 @@ COPY src ./src
 ARG GAMES_ENGINE_URL
 ARG GAMES_IDENTITY_URL
 ARG GAMES_SITE_URL
-ARG GAMES_DICTIONARY_URL
 ENV GAMES_ENGINE_URL=${GAMES_ENGINE_URL} \
     GAMES_IDENTITY_URL=${GAMES_IDENTITY_URL} \
-    GAMES_SITE_URL=${GAMES_SITE_URL} \
-    GAMES_DICTIONARY_URL=${GAMES_DICTIONARY_URL}
+    GAMES_SITE_URL=${GAMES_SITE_URL}
 
 RUN pnpm run build:site
 
@@ -108,7 +112,18 @@ RUN chown -R root:root /usr/share/nginx/html && \
 # Fail the BUILD on a bad config rather than discovering it when the container
 # crash-loops. This catches the include path, which is the part most likely to
 # be wrong after a file is moved.
-RUN nginx -t
+# `nginx -t` resolves `upstream games_bff { server games-bff:8081; }`, and that
+# name does not exist at build time. Buildkit has no compose network, so DNS
+# fails and the config test would fail with it — which would be a build broken
+# by correct config. The include path (the part most likely to be wrong after a
+# file move) is still validated, by pointing the upstream at a literal address
+# for the duration of the check only.
+RUN sed 's/server games-bff:8081;/server 127.0.0.1:8081;/' \
+        /etc/nginx/conf.d/games-site.conf > /tmp/games-site.check.conf && \
+    mv /etc/nginx/conf.d/games-site.conf /tmp/games-site.real.conf && \
+    mv /tmp/games-site.check.conf /etc/nginx/conf.d/games-site.conf && \
+    nginx -t && \
+    mv /tmp/games-site.real.conf /etc/nginx/conf.d/games-site.conf
 
 EXPOSE 80
 

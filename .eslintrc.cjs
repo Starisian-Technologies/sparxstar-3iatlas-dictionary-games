@@ -30,6 +30,18 @@ module.exports = {
             files: ['src/site/config.js'],
             globals: { process: 'readonly' },
         },
+        {
+            /*
+             * The BFF (`server/`) is Node, not browser: CommonJS, `process`,
+             * `Buffer`, `require`, and Node 22's global `fetch`/`URL`/
+             * `AbortSignal`. It is linted rather than ignored on purpose —
+             * this is the one process in the deployment that holds a private
+             * key, so it is the last place to turn a linter off.
+             */
+            files: ['server/**/*.js'],
+            env: { node: true, browser: false, es2022: true, jest: true },
+            parserOptions: { ecmaVersion: 2022, sourceType: 'script' },
+        },
     ],
     rules: {
         /* React 18 with the classic runtime — React is imported explicitly. */

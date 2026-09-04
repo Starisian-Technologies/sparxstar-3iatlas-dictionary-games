@@ -109,8 +109,6 @@ function measurement(value) {
 
 /**
  * @param {object} opts
- * @param {string} opts.restUrl        Dictionary's own base REST URL. Reserved
- *   for future use — the sync path below talks to the engine, not the dictionary.
  * @param {string} [opts.engineUrl]    Node-engine base URL (e.g. the origin
  *   `/events/batch` is mounted under). No default — omitted means sync stays
  *   local-only, same as today.
@@ -119,7 +117,14 @@ function measurement(value) {
  *   is available yet. Omitted means sync stays local-only, same as today.
  * @returns {{ addEvent: Function, syncNow: Function, syncing: boolean }}
  */
-export function useProgressSync({ restUrl: _restUrl, engineUrl, getSuiteToken }) {
+/*
+ * `restUrl` is gone from the parameter list. It was accepted and ignored,
+ * reserved for a dictionary call this hook never made — and now could not
+ * make, since the Dictionary API is private and the browser does not address
+ * it. An ignored parameter that names a private API is an invitation; the
+ * signature says what it means instead.
+ */
+export function useProgressSync({ engineUrl, getSuiteToken }) {
     /* Per-instance write queue — kept in a ref (not module scope) so two
      * mounted hook instances never interleave each other's outbox writes. */
     const addEventQueueRef = useRef(Promise.resolve());
