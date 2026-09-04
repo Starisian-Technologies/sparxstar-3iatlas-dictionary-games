@@ -109,13 +109,29 @@ describe('the letter keys a game offers', () => {
     it('excludes the six characters that were hardcoded but never occur', () => {
         /*
          * The regression this repository actually had. `MANDINKA_CHARS` was
-         * `['ŋ','ɓ','ɗ','ñ','ɲ','ʔ']` and not one of them appears in 488
-         * sampled entries. If they come back as unconditional keys, this fails.
+         * `['ŋ','ɓ','ɗ','ñ','ɲ','ʔ']` and not one of them appears in the
+         * spellings of 488 sampled entries, so as an unconditional key row
+         * they were six keys that could never be pressed correctly.
+         *
+         * Not a claim that the letters are fake — `ŋ` and `ñ` are Peace Corps
+         * orthography. The claim is only that they are absent from the data
+         * the games check answers against. The next test is the other half.
          */
         const keys = keysFor('kenta', 'mnk');
-        for (const invented of ['ŋ', 'ɓ', 'ɗ', 'ñ', 'ɲ', 'ʔ']) {
-            expect(keys).not.toContain(invented);
+        for (const absent of ['ŋ', 'ɓ', 'ɗ', 'ñ', 'ɲ', 'ʔ']) {
+            expect(keys).not.toContain(absent);
         }
+    });
+
+    it('gives a headword its own letters even when the base row lacks them', () => {
+        /*
+         * What makes the above safe if the approved data is later supplied in
+         * Peace Corps spelling: keys follow the headword. No equivalence rule,
+         * no rewriting — the word is spelled however the Dictionary spells it,
+         * and the keyboard is built from that.
+         */
+        expect(keysFor('taŋkata', 'mnk')).toContain('ŋ');
+        expect(keysFor('kalantañaa', 'mnk')).toContain('ñ');
     });
 
     it('offers the long vowels as their own keys', () => {

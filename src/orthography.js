@@ -14,9 +14,17 @@
  *
  * WHAT THE DATA SAID
  *
- *   - The six hardcoded characters `ŋ ɓ ɗ ñ ɲ ʔ` occur **zero** times. The
- *     special-character row they populate could never be a correct answer, so
- *     it was six buttons of noise on a phone-sized screen.
+ *   - The six hardcoded characters `ŋ ɓ ɗ ñ ɲ ʔ` occur **zero** times in this
+ *     corpus's spellings, so the special-character row they populate could
+ *     never be a correct answer here — six buttons of noise on a phone-sized
+ *     screen. That is a fact about THIS DATA, not about Mandinka: `ŋ` and `ñ`
+ *     are real letters of the Peace Corps (Gambian) orthography, and the
+ *     corpus records those sounds in its IPA field while spelling them with
+ *     Latin digraphs. They are left out of the unconditional key row because
+ *     they are absent from the spellings the games are checked against — and
+ *     `keysFor()` still adds any unit a headword actually needs, so if the
+ *     approved data is later supplied in Peace Corps spelling those letters
+ *     get keys automatically, with no change here. Do not remove that append.
  *   - Long vowels dominate: `oo` appears in **34.8%** of headwords and `aa` in
  *     **29.6%**. `ee`, `uu`, `ii` follow. These are the orthography's units,
  *     and splitting `njemboo` into seven characters teaches the wrong thing
