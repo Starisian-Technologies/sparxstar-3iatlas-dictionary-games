@@ -1,4 +1,4 @@
-# Platform Decisions — Auto-synced from registry@5d14280
+# Platform Decisions — Auto-synced from registry@ea7486a
 # DO NOT EDIT — this file is overwritten on every registry change
 
 - ADR-001: Relational canonical record; graph is derived projection only
@@ -32,3 +32,4 @@
 - ADR-029: Reward authority is platform-level — the engine settles, clients render, myCred mirrors
 - ADR-030: Assign the `sky` Product Spec to a Single Proposing Repository
 - ADR-031: Require a Terminal Validation Outcome Before an Audit Event Is Delivered
+- ADR-032: No repository ships a `key-vault` grant surface until its wire contract is recorded where every side can read it

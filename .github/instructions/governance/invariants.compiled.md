@@ -1,4 +1,4 @@
-# Invariants — Auto-synced from registry@5d14280
+# Invariants — Auto-synced from registry@ea7486a
 # DO NOT EDIT
 
 # Platform Invariants
@@ -241,3 +241,52 @@ about it.
 
 *Source: ADR-029 (chief-architect draft, 2026-09-05), raised during the
 Dictionary Games UX and progression review.*
+
+## INV-017 — A Key Vault operation proceeds only against a grant issued for that exact operation
+
+**Applies to:** the Key Vault as sole verifier, the Identity Node as sole
+issuer, and every client that reaches the Key Vault.
+
+Every Key Vault request **fails closed** unless it carries an Identity-issued
+token satisfying all of:
+
+- **Scalar `aud` of `key-vault`.** Not an array, not absent, not another class.
+- **Exact subject and path match.** The grant names what it acts on; a grant for
+  one subject or path is refused for any other.
+- **Exact operation match.** The grant names one operation. A grant is never a
+  general capability, and an operation not named in it is refused.
+- **Valid `iat`, `nbf` and `exp`.**
+
+**No other credential substitutes.** Session, offline, provisioning, machine and
+array-audience tokens are each refused, whatever else about them is valid. This
+is INV-015's cross-class rule applied at the Vault's door, stated separately
+because the Vault is where substitution would be most costly.
+
+Every **destructive** operation additionally requires:
+
+- **The expected manifest version**, bound in the grant, so a captured grant
+  cannot be replayed against a manifest that has moved.
+- **A transaction ID**, bound in the grant.
+- **A grant lifetime of at most five minutes.**
+- **A single-use `jti`, consumed atomically before any mutation.** Consumed
+  before, not after: a consume-after ordering makes the mutation the thing that
+  races.
+
+**On any failure — replay, mismatch, expiry, or a missing claim — stored key
+material is unchanged.** No partial mutation, no best-effort completion. A
+refused request must be indistinguishable from one that never arrived, as far
+as stored key material is concerned.
+
+**Enforced by one shared contract test suite**, run against **both** Identity's
+grant issuance and the Key Vault's verification. Two suites that agree today are
+the failure mode this replaces: the contract is only real where a single set of
+cases binds issuer and verifier to the same answers. A repository that
+implements either side without running that suite has not satisfied this
+invariant.
+
+*Source: Owner ruling, 2026-09-05, following the removal of an invented
+`key-vault` grant before it shipped. Wire contract:
+`sparxstar-contracts-registry`,
+`Contracts/sparxstar-3iatlas-identity-node/`. Shared conformance vectors:
+`Contracts/sparxstar-3iatlas-identity-node/conformance/vectors.json` in that
+registry — the same path the assertion rationale cites.*
