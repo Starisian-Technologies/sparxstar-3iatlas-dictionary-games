@@ -5,6 +5,7 @@ import { useGameSession } from '../hooks/useGameSession.js';
 import { useProgressSync } from '../hooks/useProgressSync.js';
 import { MODE, needsReview } from '../pedagogy.js';
 import GameNav from './GameNav.jsx';
+import LeaveGameDialog from './LeaveGameDialog.jsx';
 import {
     ADJUST,
     ADJUST_MESSAGE,
@@ -840,41 +841,7 @@ export default function GameShell({
 
     /* Asked only when there is unfinished work; see `handleHome`. */
     const leaveDialog = confirmLeave && (
-        <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="leave-game-title"
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-        >
-            <div className="w-full max-w-sm rounded-2xl bg-white p-5 dark:bg-gray-800">
-                <h2
-                    id="leave-game-title"
-                    className="mb-2 text-lg font-semibold text-gray-900 dark:text-gray-100"
-                >
-                    Leave this game?
-                </h2>
-                <p className="mb-5 text-sm text-gray-600 dark:text-gray-300">
-                    You have not finished this round. Your progress so far in it will not be saved.
-                </p>
-                <div className="flex flex-col gap-2">
-                    <button
-                        type="button"
-                        onClick={() => setConfirmLeave(null)}
-                        className="min-h-[44px] w-full rounded-xl px-4 font-semibold text-white"
-                        style={{ background: '#E91E8C' }}
-                    >
-                        Keep Playing
-                    </button>
-                    <button
-                        type="button"
-                        onClick={leaveToHome}
-                        className="min-h-[44px] w-full rounded-xl border border-gray-300 px-4 font-semibold text-gray-700 dark:border-gray-600 dark:text-gray-200"
-                    >
-                        Leave Game
-                    </button>
-                </div>
-            </div>
-        </div>
+        <LeaveGameDialog onKeepPlaying={() => setConfirmLeave(null)} onLeave={leaveToHome} />
     );
 
     /* ── Render ── */

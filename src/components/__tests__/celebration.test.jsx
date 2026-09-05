@@ -28,7 +28,16 @@ function mount(element) {
     document.body.appendChild(container);
     const root = createRoot(container);
     act(() => root.render(element));
-    return { container, unmount: () => act(() => root.unmount()) };
+    return {
+        container,
+        unmount: () => {
+            act(() => root.unmount());
+            /* Remove the container too: `unmount()` tears down React but leaves
+             * the node attached, so successive tests accumulate detached DOM and
+             * a document-wide query can match a previous test's markup. */
+            container.remove();
+        },
+    };
 }
 
 describe('Celebration', () => {

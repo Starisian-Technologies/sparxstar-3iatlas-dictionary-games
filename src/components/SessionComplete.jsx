@@ -75,7 +75,15 @@ export default function SessionComplete({
                 words
             </p>
 
-            {/* Stats row. Every outcome, so the categories add up to `answered`. */}
+            {/*
+             * Stats row.
+             *
+             * The four OUTCOME tiles — knew, still learning, not yet, skipped —
+             * are mutually exclusive and sum to `answered`. "To review" is not
+             * one of them: it is the union of the three non-correct outcomes,
+             * shown because it is what `Practice these words` will replay. It
+             * deliberately overlaps, so do not add it into a total.
+             */}
             <div className="mb-3 grid w-full max-w-xs grid-cols-3 gap-3">
                 <StatCard label="You knew" value={correct} color="#E91E8C" />
                 <StatCard label="Still learning" value={missed} color="#7B3FA0" />

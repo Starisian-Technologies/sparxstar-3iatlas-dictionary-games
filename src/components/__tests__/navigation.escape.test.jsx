@@ -18,6 +18,7 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import GameNav from '../GameNav.jsx';
+import LeaveGameDialog from '../LeaveGameDialog.jsx';
 import SessionComplete from '../SessionComplete.jsx';
 
 function mount(element) {
@@ -27,7 +28,13 @@ function mount(element) {
     act(() => root.render(element));
     return {
         container,
-        unmount: () => act(() => root.unmount()),
+        unmount: () => {
+            act(() => root.unmount());
+            /* Remove the container too: `unmount()` tears down React but leaves
+             * the node attached, so successive tests accumulate detached DOM and
+             * a document-wide query can match a previous test's markup. */
+            container.remove();
+        },
     };
 }
 
@@ -237,5 +244,59 @@ describe('SessionComplete — never a dead end', () => {
         const { container, unmount } = render({ adjustNotice: 'Moving you up a level.' });
         expect(container.textContent).toContain('Moving you up a level.');
         unmount();
+    });
+});
+
+describe('LeaveGameDialog — reachable and dismissible without a pointer', () => {
+    /*
+     * It declares `aria-modal="true"`, and it stands between a player and the
+     * way out of a game. A keyboard or switch user who could open it but not
+     * dismiss it would be trapped by the control added to stop them being
+     * trapped, so these are not cosmetic.
+     */
+    it('puts focus on the safe option when it opens', () => {
+        const { container, unmount } = mount(
+            <LeaveGameDialog onKeepPlaying={jest.fn()} onLeave={jest.fn()} />
+        );
+        const keep = Array.from(container.querySelectorAll('button')).find((b) =>
+            b.textContent.includes('Keep Playing')
+        );
+        /* Keep Playing, not Leave: a stray Enter must not discard the round. */
+        expect(document.activeElement).toBe(keep);
+        unmount();
+    });
+
+    it('closes on Escape', () => {
+        const onKeepPlaying = jest.fn();
+        const { unmount } = mount(
+            <LeaveGameDialog onKeepPlaying={onKeepPlaying} onLeave={jest.fn()} />
+        );
+        act(() => {
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        });
+        expect(onKeepPlaying).toHaveBeenCalledTimes(1);
+        unmount();
+    });
+
+    it('does not leave the game on Escape', () => {
+        const onLeave = jest.fn();
+        const { unmount } = mount(<LeaveGameDialog onKeepPlaying={jest.fn()} onLeave={onLeave} />);
+        act(() => {
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        });
+        expect(onLeave).not.toHaveBeenCalled();
+        unmount();
+    });
+
+    it('stops listening once closed', () => {
+        const onKeepPlaying = jest.fn();
+        const { unmount } = mount(
+            <LeaveGameDialog onKeepPlaying={onKeepPlaying} onLeave={jest.fn()} />
+        );
+        unmount();
+        act(() => {
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        });
+        expect(onKeepPlaying).not.toHaveBeenCalled();
     });
 });
