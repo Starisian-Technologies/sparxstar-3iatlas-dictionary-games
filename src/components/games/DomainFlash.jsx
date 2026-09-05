@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { Volume2 } from 'lucide-react';
+import { Volume2, SkipForward } from 'lucide-react';
 import { OUTCOME, xpFor } from '../../pedagogy.js';
 
 /**
@@ -100,6 +100,31 @@ export default function DomainFlash({ words, language, onResult, onComplete }) {
         next();
     };
 
+    /*
+     * Skip. This game was the only one of the six with no way to pass a card.
+     *
+     * A player who neither knew the word nor wanted to mark it "still learning"
+     * — because they had never met it at all — had to answer one of the two,
+     * both of which record a judgement they did not make. Skipping records
+     * `skipped`: worth nothing, no judgement, and the word still goes to the
+     * review queue, which is what `needsReview` already promises for it.
+     */
+    const handleSkip = () => {
+        if (answered) return;
+        setAnswered(true);
+        onResult(
+            word.uuid,
+            OUTCOME.SKIPPED,
+            1,
+            xpFor(OUTCOME.SKIPPED),
+            Date.now() - wordStartRef.current
+        );
+        /* No telemetry emit here: this game takes no `onEvent` prop, by the
+         * decision recorded above while OQ-G4 is open. `onEvent?.()` would be a
+         * ReferenceError, not a safe no-op — the name is not in scope at all. */
+        next();
+    };
+
     const next = () => {
         if (index + 1 >= deck.length) {
             onComplete();
@@ -190,6 +215,15 @@ export default function DomainFlash({ words, language, onResult, onComplete }) {
                                 className="flex-1 py-3 rounded-xl font-semibold text-sm bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 transition-colors"
                             >
                                 Still learning
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleSkip}
+                                disabled={answered}
+                                className="flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl border border-gray-300 px-3 text-sm font-medium text-gray-600 transition-colors dark:border-gray-600 dark:text-gray-300"
+                            >
+                                Skip
+                                <SkipForward size={16} aria-hidden="true" />
                             </button>
                             <button
                                 type="button"

@@ -4,6 +4,7 @@ import { useGameSet } from '../hooks/useGameSet.js';
 import { useGameSession } from '../hooks/useGameSession.js';
 import { useProgressSync } from '../hooks/useProgressSync.js';
 import { MODE, needsReview } from '../pedagogy.js';
+import GameNav from './GameNav.jsx';
 import {
     ADJUST,
     ADJUST_MESSAGE,
@@ -225,6 +226,12 @@ export default function GameShell({
 
     /* ── Session phase: 'setup' | 'loading' | 'playing' | 'complete' ── */
     const [phase, setPhase] = useState('setup');
+    /*
+     * Set when leaving would discard unfinished work, so the player is asked
+     * rather than losing a half-finished round to a mis-tap. Null means no
+     * question is pending.
+     */
+    const [confirmLeave, setConfirmLeave] = useState(null);
 
     /* ── Active game words (sliced + filtered for the chosen game) ── */
     const [gameWords, setGameWords] = useState([]);
@@ -680,14 +687,122 @@ export default function GameShell({
         setPhase('loading');
     }, [clearSession]);
 
+    /* ── Leaving a game ── */
+
+    /*
+     * `Games Home` from anywhere.
+     *
+     * The defect: there was no way out of a round at all, and the one control
+     * that looked like an exit — "Browse dictionary" on the summary — called a
+     * host callback wired to an empty function.
+     *
+     * Unfinished work is confirmed, finished work is not: once the round is
+     * over there is nothing left to lose, so asking would be noise.
+     */
+    const leaveToHome = useCallback(async () => {
+        setConfirmLeave(null);
+        await clearSession();
+        setGameWords([]);
+        setAdjustNotice(null);
+        setPhase('setup');
+    }, [clearSession]);
+
+    const handleHome = useCallback(() => {
+        const started = phase === 'playing' && (session?.results?.length ?? 0) > 0;
+        if (started) {
+            setConfirmLeave('home');
+            return;
+        }
+        leaveToHome();
+    }, [phase, session, leaveToHome]);
+
+    /* Restart deals a fresh round of the same game rather than resuming. */
+    const handleRestart = useCallback(async () => {
+        setConfirmLeave(null);
+        await clearSession();
+        setGameWords([]);
+        setAdjustNotice(null);
+        setPhase('loading');
+    }, [clearSession]);
+
+    /*
+     * `Choose another game` — home, but the intent is explicit. It is the same
+     * transition as `Games Home` because the setup screen IS the game chooser;
+     * naming it separately on the summary is what the brief asks for and costs
+     * nothing to honour.
+     */
+    const handleChooseAnother = handleHome;
+
+    /*
+     * One nav, rendered by every branch below.
+     *
+     * Built here rather than inside each branch on purpose: a branch that
+     * forgets it is the trap this fixes, and a shared constant cannot be
+     * forgotten by one of them.
+     */
+    const gameLabel = GAME_TYPES.find((g) => g.id === selectedGame)?.label ?? null;
+    const nav = (
+        <GameNav
+            gameName={phase === 'setup' ? null : gameLabel}
+            questionAt={phase === 'playing' ? (session?.currentIndex ?? 0) + 1 : null}
+            questionOf={phase === 'playing' ? gameWords.length : null}
+            points={session?.xpEarned ?? 0}
+            onHome={handleHome}
+            onRestart={phase === 'playing' || phase === 'complete' ? handleRestart : null}
+        />
+    );
+
+    /* Asked only when there is unfinished work; see `handleHome`. */
+    const leaveDialog = confirmLeave && (
+        <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="leave-game-title"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+        >
+            <div className="w-full max-w-sm rounded-2xl bg-white p-5 dark:bg-gray-800">
+                <h2
+                    id="leave-game-title"
+                    className="mb-2 text-lg font-semibold text-gray-900 dark:text-gray-100"
+                >
+                    Leave this game?
+                </h2>
+                <p className="mb-5 text-sm text-gray-600 dark:text-gray-300">
+                    You have not finished this round. Your progress so far in it will not be saved.
+                </p>
+                <div className="flex flex-col gap-2">
+                    <button
+                        type="button"
+                        onClick={() => setConfirmLeave(null)}
+                        className="min-h-[44px] w-full rounded-xl px-4 font-semibold text-white"
+                        style={{ background: '#E91E8C' }}
+                    >
+                        Keep Playing
+                    </button>
+                    <button
+                        type="button"
+                        onClick={leaveToHome}
+                        className="min-h-[44px] w-full rounded-xl border border-gray-300 px-4 font-semibold text-gray-700 dark:border-gray-600 dark:text-gray-200"
+                    >
+                        Leave Game
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+
     /* ── Render ── */
 
     if (phase === 'loading') {
         return (
-            <div className="flex-1 flex flex-col items-center justify-center gap-4">
-                <Loader2 className="animate-spin" style={{ color: '#E91E8C' }} size={40} />
-                <p className="text-gray-400 text-sm">Loading game set&hellip;</p>
-                {gameSetError && <p className="text-red-500 text-sm">{gameSetError}</p>}
+            <div className="flex-1 flex flex-col overflow-hidden bg-white dark:bg-gray-900">
+                {nav}
+                <div className="flex flex-1 flex-col items-center justify-center gap-4">
+                    <Loader2 className="animate-spin" style={{ color: '#E91E8C' }} size={40} />
+                    <p className="text-gray-400 text-sm">Loading game set&hellip;</p>
+                    {gameSetError && <p className="text-red-500 text-sm">{gameSetError}</p>}
+                </div>
+                {leaveDialog}
             </div>
         );
     }
@@ -695,6 +810,7 @@ export default function GameShell({
     if (phase === 'playing') {
         return (
             <div className="flex-1 flex flex-col overflow-hidden bg-white dark:bg-gray-900">
+                {nav}
                 {/*
                  * Transparency strip. The current level is always visible and
                  * the player can change it or freeze adaptation at any time.
@@ -769,6 +885,7 @@ export default function GameShell({
                     onComplete: handleComplete,
                     onEvent: addEvent,
                 })}
+                {leaveDialog}
             </div>
         );
     }
@@ -776,216 +893,232 @@ export default function GameShell({
     if (phase === 'complete') {
         return (
             <div className="flex-1 flex flex-col overflow-y-auto bg-white dark:bg-gray-900">
+                {nav}
                 <SessionComplete
                     session={session}
                     learnedCount={learnedCount}
                     onPracticeMissed={handlePracticeMissed}
-                    onBrowse={onBrowse}
                     onPlayAgain={handlePlayAgain}
+                    onChooseAnother={handleChooseAnother}
+                    onHome={handleHome}
+                    adjustNotice={adjustNotice}
+                    /* Forwarded, not defaulted: a host that implements a
+                     * Browse tab gets the control, and a host that does not
+                     * gets no dead button. */
+                    onBrowse={onBrowse}
                 />
+                {leaveDialog}
             </div>
         );
     }
 
     /* ── Setup screen ── */
     return (
-        <div className="flex-1 flex flex-col overflow-y-auto p-4 gap-5 bg-white dark:bg-gray-900">
-            <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 shrink-0">Play</h2>
+        <div className="flex-1 flex flex-col overflow-y-auto bg-white dark:bg-gray-900">
+            {nav}
+            <div className="flex flex-1 flex-col gap-5 p-4">
+                <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 shrink-0">
+                    Play
+                </h2>
 
-            {setupError && (
-                <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
-                    {setupError}
-                </div>
-            )}
-
-            {/* Language check */}
-            {!sourceLanguage && (
-                <div className="rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700 p-6 text-center">
-                    <p className="text-gray-500 dark:text-gray-400 text-sm mb-3">
-                        Choose a source language to start playing
-                    </p>
-                    <div className="flex flex-wrap gap-2 justify-center">
-                        {languages.map((lang) => (
-                            <button
-                                key={lang.slug}
-                                type="button"
-                                onClick={() => onSourceLanguage(lang.slug)}
-                                className="px-4 py-2 rounded-full text-sm font-medium text-white transition-colors"
-                                style={{ background: '#E91E8C' }}
-                            >
-                                {lang.name}
-                            </button>
-                        ))}
+                {setupError && (
+                    <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
+                        {setupError}
                     </div>
-                </div>
-            )}
+                )}
 
-            {sourceLanguage && (
-                <>
-                    {/* Domain selector */}
-                    <section>
-                        <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">
-                            Domain (optional)
-                        </h3>
-                        {domainsLoading ? (
-                            <p className="text-sm text-gray-400">Loading domains&hellip;</p>
-                        ) : (
-                            <div className="relative">
-                                <select
-                                    value={selectedDomain}
-                                    onChange={(e) => setSelectedDomain(e.target.value)}
-                                    className="w-full appearance-none px-4 py-3 pr-10 rounded-xl bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:outline-none"
-                                >
-                                    <option value="">All domains</option>
-                                    {domains.map((d) => (
-                                        <option key={d.slug} value={d.slug}>
-                                            {d.name}
-                                            {d.count > 0 ? ` (${d.count})` : ''}
-                                        </option>
-                                    ))}
-                                </select>
-                                <ChevronDown
-                                    size={16}
-                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
-                                    aria-hidden="true"
-                                />
-                            </div>
-                        )}
-                    </section>
-
-                    {/* Game type */}
-                    <section>
-                        <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">
-                            Game
-                        </h3>
-                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                            {GAME_TYPES.map((g) => (
+                {/* Language check */}
+                {!sourceLanguage && (
+                    <div className="rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700 p-6 text-center">
+                        <p className="text-gray-500 dark:text-gray-400 text-sm mb-3">
+                            Choose a source language to start playing
+                        </p>
+                        <div className="flex flex-wrap gap-2 justify-center">
+                            {languages.map((lang) => (
                                 <button
-                                    key={g.id}
+                                    key={lang.slug}
                                     type="button"
-                                    onClick={() => setSelectedGame(g.id)}
-                                    className="p-3 rounded-xl text-left border-2 transition-all"
-                                    style={
-                                        selectedGame === g.id
-                                            ? {
-                                                  background:
-                                                      'linear-gradient(135deg,#E91E8C,#7B3FA0)',
-                                                  borderColor: 'transparent',
-                                                  color: 'white',
-                                              }
-                                            : {
-                                                  borderColor: '#f3f4f6',
-                                                  background: 'white',
-                                              }
-                                    }
+                                    onClick={() => onSourceLanguage(lang.slug)}
+                                    className="px-4 py-2 rounded-full text-sm font-medium text-white transition-colors"
+                                    style={{ background: '#E91E8C' }}
                                 >
-                                    <span className="block text-xl mb-1" aria-hidden="true">
-                                        {g.emoji}
-                                    </span>
-                                    <span
-                                        className="block text-xs font-bold"
-                                        style={{
-                                            color: selectedGame === g.id ? 'white' : '#1f2937',
-                                        }}
-                                    >
-                                        {g.label}
-                                    </span>
-                                    <span
-                                        className="block text-xs mt-0.5 leading-snug"
-                                        style={{
-                                            color:
-                                                selectedGame === g.id
-                                                    ? 'rgba(255,255,255,0.8)'
-                                                    : '#9ca3af',
-                                        }}
-                                    >
-                                        {g.description}
-                                    </span>
+                                    {lang.name}
                                 </button>
                             ))}
                         </div>
-                    </section>
+                    </div>
+                )}
 
-                    {/* Level. Three, chosen by the player and changeable at any
-                     *  time — including mid-round from the strip below the game.
-                     *  What no level changes is that Skip, reveal and navigation
-                     *  stay available: a harder level is not a trap. */}
-                    <section>
-                        <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">
-                            Level
-                        </h3>
-                        <div className="flex gap-2">
-                            {Object.entries(LEVEL_PROFILE)
-                                .map(([id, p]) => ({
-                                    id,
-                                    label: p.label,
-                                    hint: p.blurb,
-                                }))
-                                .map((m) => (
+                {sourceLanguage && (
+                    <>
+                        {/* Domain selector */}
+                        <section>
+                            <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">
+                                Domain (optional)
+                            </h3>
+                            {domainsLoading ? (
+                                <p className="text-sm text-gray-400">Loading domains&hellip;</p>
+                            ) : (
+                                <div className="relative">
+                                    <select
+                                        value={selectedDomain}
+                                        onChange={(e) => setSelectedDomain(e.target.value)}
+                                        className="w-full appearance-none px-4 py-3 pr-10 rounded-xl bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:outline-none"
+                                    >
+                                        <option value="">All domains</option>
+                                        {domains.map((d) => (
+                                            <option key={d.slug} value={d.slug}>
+                                                {d.name}
+                                                {d.count > 0 ? ` (${d.count})` : ''}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <ChevronDown
+                                        size={16}
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
+                                        aria-hidden="true"
+                                    />
+                                </div>
+                            )}
+                        </section>
+
+                        {/* Game type */}
+                        <section>
+                            <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">
+                                Game
+                            </h3>
+                            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                                {GAME_TYPES.map((g) => (
                                     <button
-                                        key={m.id}
+                                        key={g.id}
                                         type="button"
-                                        onClick={() => setPlayerLevel(m.id)}
-                                        aria-pressed={playerLevel === m.id}
-                                        className="flex-1 rounded-xl border-2 px-3 py-2.5 text-left transition-colors"
+                                        onClick={() => setSelectedGame(g.id)}
+                                        className="p-3 rounded-xl text-left border-2 transition-all"
                                         style={
-                                            playerLevel === m.id
+                                            selectedGame === g.id
                                                 ? {
-                                                      background: '#7B3FA0',
+                                                      background:
+                                                          'linear-gradient(135deg,#E91E8C,#7B3FA0)',
+                                                      borderColor: 'transparent',
+                                                      color: 'white',
+                                                  }
+                                                : {
+                                                      borderColor: '#f3f4f6',
+                                                      background: 'white',
+                                                  }
+                                        }
+                                    >
+                                        <span className="block text-xl mb-1" aria-hidden="true">
+                                            {g.emoji}
+                                        </span>
+                                        <span
+                                            className="block text-xs font-bold"
+                                            style={{
+                                                color: selectedGame === g.id ? 'white' : '#1f2937',
+                                            }}
+                                        >
+                                            {g.label}
+                                        </span>
+                                        <span
+                                            className="block text-xs mt-0.5 leading-snug"
+                                            style={{
+                                                color:
+                                                    selectedGame === g.id
+                                                        ? 'rgba(255,255,255,0.8)'
+                                                        : '#9ca3af',
+                                            }}
+                                        >
+                                            {g.description}
+                                        </span>
+                                    </button>
+                                ))}
+                            </div>
+                        </section>
+
+                        {/* Level. Three, chosen by the player and changeable at any
+                         *  time — including mid-round from the strip below the game.
+                         *  What no level changes is that Skip, reveal and navigation
+                         *  stay available: a harder level is not a trap. */}
+                        <section>
+                            <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                                Level
+                            </h3>
+                            <div className="flex gap-2">
+                                {Object.entries(LEVEL_PROFILE)
+                                    .map(([id, p]) => ({
+                                        id,
+                                        label: p.label,
+                                        hint: p.blurb,
+                                    }))
+                                    .map((m) => (
+                                        <button
+                                            key={m.id}
+                                            type="button"
+                                            onClick={() => setPlayerLevel(m.id)}
+                                            aria-pressed={playerLevel === m.id}
+                                            className="flex-1 rounded-xl border-2 px-3 py-2.5 text-left transition-colors"
+                                            style={
+                                                playerLevel === m.id
+                                                    ? {
+                                                          background: '#7B3FA0',
+                                                          borderColor: 'transparent',
+                                                          color: 'white',
+                                                      }
+                                                    : { borderColor: '#f3f4f6', color: '#374151' }
+                                            }
+                                        >
+                                            <span className="block text-sm font-semibold">
+                                                {m.label}
+                                            </span>
+                                            <span className="block text-xs opacity-80">
+                                                {m.hint}
+                                            </span>
+                                        </button>
+                                    ))}
+                            </div>
+                        </section>
+
+                        {/* Word count */}
+                        <section>
+                            <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">
+                                Words per session
+                            </h3>
+                            <div className="flex gap-2">
+                                {WORD_COUNTS.map((n) => (
+                                    <button
+                                        key={n}
+                                        type="button"
+                                        onClick={() => setWordCount(n)}
+                                        className="flex-1 py-2.5 rounded-xl font-semibold text-sm transition-colors border-2"
+                                        style={
+                                            wordCount === n
+                                                ? {
+                                                      background: '#E91E8C',
                                                       borderColor: 'transparent',
                                                       color: 'white',
                                                   }
                                                 : { borderColor: '#f3f4f6', color: '#374151' }
                                         }
                                     >
-                                        <span className="block text-sm font-semibold">
-                                            {m.label}
-                                        </span>
-                                        <span className="block text-xs opacity-80">{m.hint}</span>
+                                        {n}
                                     </button>
                                 ))}
-                        </div>
-                    </section>
+                            </div>
+                        </section>
 
-                    {/* Word count */}
-                    <section>
-                        <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">
-                            Words per session
-                        </h3>
-                        <div className="flex gap-2">
-                            {WORD_COUNTS.map((n) => (
-                                <button
-                                    key={n}
-                                    type="button"
-                                    onClick={() => setWordCount(n)}
-                                    className="flex-1 py-2.5 rounded-xl font-semibold text-sm transition-colors border-2"
-                                    style={
-                                        wordCount === n
-                                            ? {
-                                                  background: '#E91E8C',
-                                                  borderColor: 'transparent',
-                                                  color: 'white',
-                                              }
-                                            : { borderColor: '#f3f4f6', color: '#374151' }
-                                    }
-                                >
-                                    {n}
-                                </button>
-                            ))}
-                        </div>
-                    </section>
-
-                    {/* Start button */}
-                    <button
-                        type="button"
-                        onClick={handleStart}
-                        className="w-full py-4 rounded-xl font-bold text-base text-white transition-colors mt-auto"
-                        style={{ background: 'linear-gradient(135deg,#E91E8C,#7B3FA0)' }}
-                    >
-                        Start
-                    </button>
-                </>
-            )}
+                        {/* Start button */}
+                        <button
+                            type="button"
+                            onClick={handleStart}
+                            className="w-full py-4 rounded-xl font-bold text-base text-white transition-colors mt-auto"
+                            style={{ background: 'linear-gradient(135deg,#E91E8C,#7B3FA0)' }}
+                        >
+                            Start
+                        </button>
+                    </>
+                )}
+            </div>
+            {leaveDialog}
         </div>
     );
 }
