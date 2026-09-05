@@ -176,6 +176,63 @@ describe('SessionComplete — never a dead end', () => {
         unmount();
     });
 
+    it('offers practice for a session where every card was SKIPPED', () => {
+        /*
+         * Qodo's finding. `handlePracticeMissed` replays everything
+         * `needsReview()` covers — learning, incorrect and skipped — but the
+         * button was gated on a `learning` result existing. A round where the
+         * player skipped every card had words waiting in the review queue and
+         * no way to practise them. Reachable the moment DomainFlash gained a
+         * Skip control, which this same PR added.
+         */
+        const skippedOnly = {
+            gameType: 'domain_flash',
+            words: [{ uuid: 'a' }, { uuid: 'b' }],
+            results: [
+                { wordUuid: 'a', outcome: 'skipped', xp: 0 },
+                { wordUuid: 'b', outcome: 'skipped', xp: 0 },
+            ],
+            xpEarned: 0,
+        };
+        const { container, unmount } = mount(
+            <SessionComplete
+                session={skippedOnly}
+                learnedCount={0}
+                onPracticeMissed={jest.fn()}
+                onPlayAgain={jest.fn()}
+                onChooseAnother={jest.fn()}
+                onHome={jest.fn()}
+            />
+        );
+        const practice = Array.from(container.querySelectorAll('button')).find((b) =>
+            b.textContent.includes('Practice these words')
+        );
+        expect(practice).toBeDefined();
+        expect(practice.textContent).toContain('(2)');
+        unmount();
+    });
+
+    it('offers no practice when nothing needs reviewing', () => {
+        const allCorrect = {
+            gameType: 'arrange_word',
+            words: [{ uuid: 'a' }],
+            results: [{ wordUuid: 'a', outcome: 'correct', xp: 10 }],
+            xpEarned: 10,
+        };
+        const { container, unmount } = mount(
+            <SessionComplete
+                session={allCorrect}
+                learnedCount={1}
+                onPracticeMissed={jest.fn()}
+                onPlayAgain={jest.fn()}
+                onChooseAnother={jest.fn()}
+                onHome={jest.fn()}
+            />
+        );
+        expect(buttonTexts(container).join(' ')).not.toContain('Practice');
+        unmount();
+    });
+
     it('shows what adaptation decided, on the screen where it is decided', () => {
         const { container, unmount } = render({ adjustNotice: 'Moving you up a level.' });
         expect(container.textContent).toContain('Moving you up a level.');

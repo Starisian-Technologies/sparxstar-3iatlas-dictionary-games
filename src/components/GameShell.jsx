@@ -281,6 +281,24 @@ export default function GameShell({
      * before the last recordResult write has finished.
      */
     const pendingResultRef = useRef(Promise.resolve());
+    /*
+     * Set when the player deliberately LEAVES a round.
+     *
+     * The resume effect below auto-re-enters any session that is not marked
+     * complete, which is right after a reload and catastrophic after an exit:
+     * a result write still in flight when the player leaves lands after
+     * `clearSession()` and re-persists the very session that was deleted, and
+     * the resume effect then drags them straight back into the game they just
+     * left. A flag, not a state, because it must be readable synchronously
+     * before any await.
+     */
+    const suppressResumeRef = useRef(false);
+    /*
+     * Bumped on every deliberate transition. The loading effect captures it
+     * and re-checks after each await, so an initialisation the player has
+     * already walked away from cannot install its deck or force `playing`.
+     */
+    const runTokenRef = useRef(0);
 
     /* ── Fetch domains when source language changes ── */
     useEffect(() => {
@@ -346,6 +364,8 @@ export default function GameShell({
 
     /* ── Resume an in-progress session when the Play tab is opened ── */
     useEffect(() => {
+        /* A deliberate exit is not a crash: do not resume what was left. */
+        if (suppressResumeRef.current) return;
         if (session && session.completedAt === null && phase === 'setup') {
             /* Session is in progress — offer to resume. */
             /* For simplicity, we auto-resume: rebuild gameWords from session. */
@@ -384,6 +404,9 @@ export default function GameShell({
     useEffect(() => {
         const load = async () => {
             if (phase !== 'loading') return;
+            /* Captured once; re-checked after every await so a load the player
+             * has abandoned cannot resurrect the game around them. */
+            const token = runTokenRef.current;
             if (gameSetLoading) return;
             if (gameSetError) {
                 setSetupError(gameSetError);
@@ -425,10 +448,15 @@ export default function GameShell({
                     words: sliced,
                 });
             } catch (error) {
+                if (runTokenRef.current !== token) return;
                 setSetupError(error?.message ?? 'Unable to start the game session.');
                 setPhase('setup');
                 return;
             }
+
+            /* The player left while this was initialising. Do not put them back
+             * into a game they walked away from. */
+            if (runTokenRef.current !== token) return;
 
             setGameWords(sliced);
             setPhase('playing');
@@ -637,6 +665,10 @@ export default function GameShell({
     /* ── Start button ── */
     const handleStart = () => {
         if (!sourceLanguage) return;
+        /* A deliberate start clears the "do not resume" flag set by a
+         * deliberate exit — the player is choosing to play again. */
+        suppressResumeRef.current = false;
+        runTokenRef.current += 1;
         setSetupError(null);
         setPhase('loading');
     };
@@ -682,8 +714,21 @@ export default function GameShell({
 
     /* ── Play again ── */
     const handlePlayAgain = useCallback(async () => {
-        await clearSession();
+        /* Play Again can run while a final result is still being written, so
+         * it takes the same ordering as the other destructive transitions. */
+        suppressResumeRef.current = true;
+        runTokenRef.current += 1;
         setGameWords([]);
+
+        try {
+            await pendingResultRef.current;
+            await clearSession();
+        } catch (error) {
+            console.warn('Could not clear the session before replaying:', error);
+        }
+
+        suppressResumeRef.current = false;
+        runTokenRef.current += 1;
         setPhase('loading');
     }, [clearSession]);
 
@@ -701,10 +746,36 @@ export default function GameShell({
      */
     const leaveToHome = useCallback(async () => {
         setConfirmLeave(null);
-        await clearSession();
+        /*
+         * Navigation FIRST, storage second, and never the other way round.
+         *
+         * An earlier version awaited `clearSession()` before changing phase.
+         * `clearSession` propagates an IndexedDB deletion failure, so on a
+         * device where storage is unavailable the await rejected and the phase
+         * never changed — making `Games Home` a dead control exactly in the
+         * conditions where a player most needs it. The exit this release exists
+         * to provide cannot itself depend on the disk.
+         *
+         * The flags are set before the first await, so the resume effect and
+         * any in-flight load both see the exit immediately.
+         */
+        suppressResumeRef.current = true;
+        runTokenRef.current += 1;
         setGameWords([]);
         setAdjustNotice(null);
         setPhase('setup');
+
+        /* Now tidy up, best effort. `pendingResultRef` is awaited BEFORE the
+         * delete so a result still being written cannot re-persist the session
+         * after it is removed. */
+        try {
+            await pendingResultRef.current;
+            await clearSession();
+        } catch (error) {
+            /* The player has already left; a failed cleanup must not follow
+             * them. The stale record cannot resume — `suppressResumeRef`. */
+            console.warn('Could not clear the session on leaving:', error);
+        }
     }, [clearSession]);
 
     const handleHome = useCallback(() => {
@@ -719,9 +790,24 @@ export default function GameShell({
     /* Restart deals a fresh round of the same game rather than resuming. */
     const handleRestart = useCallback(async () => {
         setConfirmLeave(null);
-        await clearSession();
+        /* Same ordering as `leaveToHome`, and for the same reasons: a restart
+         * that cannot delete the old record must still restart. */
+        suppressResumeRef.current = true;
+        runTokenRef.current += 1;
         setGameWords([]);
         setAdjustNotice(null);
+
+        try {
+            await pendingResultRef.current;
+            await clearSession();
+        } catch (error) {
+            console.warn('Could not clear the session on restarting:', error);
+        }
+
+        /* Only now ask for a new round, so the fresh session is created after
+         * the old one has gone rather than racing it. */
+        suppressResumeRef.current = false;
+        runTokenRef.current += 1;
         setPhase('loading');
     }, [clearSession]);
 

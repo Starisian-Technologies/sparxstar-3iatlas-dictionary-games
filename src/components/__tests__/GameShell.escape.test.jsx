@@ -39,6 +39,19 @@ const WORDS = Array.from({ length: 4 }, (_, i) => ({
     part_of_speech: 'n',
 }));
 
+/*
+ * A stored session holds ADAPTED words (`headword`), not the BFF's raw
+ * `header_word` shape — `initSession` persists what the adapter produced.
+ */
+const STORED_WORDS = WORDS.map((w, i) => ({
+    uuid: `u${i}`,
+    headword: w.header_word,
+    translation_en: w.english_lemma,
+    ipa: w.ipa_pronunciation,
+    difficulty: w.difficulty,
+    domain: w.domain_code,
+}));
+
 function routeFetch() {
     return jest.fn(async (url) => {
         const u = String(url);
@@ -149,6 +162,92 @@ describe('the dead Browse control is gone', () => {
         const { container, unmount } = mount(baseProps());
         await settle();
         expect(findButton(container, 'Browse')).toBeUndefined();
+        unmount();
+    });
+});
+
+describe('the exit cannot itself become a trap (Qodo review, #23)', () => {
+    it('still leaves when deleting the stored session FAILS', async () => {
+        /*
+         * The irony this catches. `leaveToHome` awaited `clearSession()` before
+         * changing phase, and `clearSession` propagates an IndexedDB deletion
+         * failure — so on a device where storage is unavailable the await
+         * rejected and the phase never changed. The control added to fix a trap
+         * was itself a dead exit, precisely when a player most needed it.
+         */
+        const idb = require('../../hooks/idbUtils.js');
+        idb.deleteRecord.mockRejectedValueOnce(new Error('QuotaExceededError'));
+
+        window.fetch = routeFetch();
+        const { container, unmount } = mount(baseProps());
+        await settle();
+
+        await act(async () => {
+            findButton(container, 'Start').dispatchEvent(
+                new MouseEvent('click', { bubbles: true })
+            );
+        });
+        await settle();
+        expect(findButton(container, 'Restart')).toBeDefined(); /* we are playing */
+
+        await act(async () => {
+            findButton(container, 'Games Home').dispatchEvent(
+                new MouseEvent('click', { bubbles: true })
+            );
+        });
+        await settle();
+
+        /* Back on the chooser despite the storage failure. */
+        expect(findButton(container, 'Start')).toBeDefined();
+        unmount();
+    });
+
+    it('does not drag the player back into a session it could not delete', async () => {
+        /*
+         * The resume effect auto-re-enters any session that is not marked
+         * complete. If leaving cannot delete the record — or a result write
+         * lands after the delete and re-persists it — that effect would pull
+         * the player straight back into the game they just left.
+         */
+        const idb = require('../../hooks/idbUtils.js');
+        idb.deleteRecord.mockRejectedValueOnce(new Error('storage gone'));
+        /* A stored, incomplete session is exactly what the resume effect looks for. */
+        idb.getRecord.mockImplementation(async (store) =>
+            store === 'game-sessions'
+                ? {
+                      key: 'game-session:current',
+                      runId: 'r1',
+                      gameType: 'arrange_word',
+                      langSource: 'mnk',
+                      domain: '',
+                      words: STORED_WORDS,
+                      currentIndex: 0,
+                      results: [],
+                      xpEarned: 0,
+                      startedAt: Date.now(),
+                      completedAt: null,
+                  }
+                : null
+        );
+
+        window.fetch = routeFetch();
+        const { container, unmount } = mount(baseProps());
+        await settle();
+
+        /* The stored session resumes on mount — correct behaviour after a reload. */
+        expect(findButton(container, 'Games Home')).toBeDefined();
+
+        await act(async () => {
+            findButton(container, 'Games Home').dispatchEvent(
+                new MouseEvent('click', { bubbles: true })
+            );
+        });
+        await settle();
+        await settle();
+
+        /* And having LEFT deliberately, they stay left. */
+        expect(findButton(container, 'Start')).toBeDefined();
+        idb.getRecord.mockResolvedValue(null);
         unmount();
     });
 });

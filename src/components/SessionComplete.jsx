@@ -123,7 +123,19 @@ export default function SessionComplete({
 
             {/* Actions */}
             <div className="flex flex-col gap-3 w-full max-w-xs">
-                {missed > 0 && (
+                {/*
+                 * Gated on `reviewing`, not `missed`.
+                 *
+                 * `handlePracticeMissed` replays everything `needsReview()`
+                 * covers — learning, incorrect AND skipped — but this button
+                 * was shown only when a `learning` result existed. A round
+                 * where the player skipped every card therefore had words
+                 * waiting in the review queue and no way to practise them,
+                 * which became reachable the moment DomainFlash gained a Skip.
+                 * One predicate now decides both what is replayed and whether
+                 * the offer appears.
+                 */}
+                {reviewing > 0 && (
                     <button
                         type="button"
                         onClick={onPracticeMissed}
@@ -131,7 +143,7 @@ export default function SessionComplete({
                         style={{ borderColor: '#E91E8C', color: '#E91E8C' }}
                     >
                         <RotateCcw size={16} aria-hidden="true" />
-                        Practice missed words ({missed})
+                        Practice these words ({reviewing})
                     </button>
                 )}
 
