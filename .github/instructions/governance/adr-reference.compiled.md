@@ -1,4 +1,4 @@
-# Platform Decisions — Auto-synced from registry@2039580
+# Platform Decisions — Auto-synced from registry@5d14280
 # DO NOT EDIT — this file is overwritten on every registry change
 
 - ADR-001: Relational canonical record; graph is derived projection only
@@ -30,3 +30,5 @@
 - ADR-027: Ratify `wordpress/mcp-adapter` as a Legitimate Dependency
 - ADR-028: Adopt `Starisian\Sparxstar\{Product}\…` as the Canonical PHP Namespace
 - ADR-029: Reward authority is platform-level — the engine settles, clients render, myCred mirrors
+- ADR-030: Assign the `sky` Product Spec to a Single Proposing Repository
+- ADR-031: Require a Terminal Validation Outcome Before an Audit Event Is Delivered
