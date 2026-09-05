@@ -1,4 +1,5 @@
 # Invariants — Auto-synced from registry@2039580
+
 # DO NOT EDIT
 
 # Platform Invariants
@@ -23,7 +24,7 @@ evidence, not automatic truth. The evidence-first pipeline (attestation →
 review → acceptance) is this rule's enforcement; no new carrier type bypasses
 it.
 
-*Source: Session decision 2026-06-11 · Related: ADR-007.*
+_Source: Session decision 2026-06-11 · Related: ADR-007._
 
 ## INV-002 — Communication sustains shared reality
 
@@ -35,8 +36,8 @@ reality at unusual density and scale. This is the apex principle above the
 lexical, morpheme, and visual evidence specs; INV-001 is its operational
 companion.
 
-*Source: Max Barrett, session 2026-06-11 ("to preserve a social construction
-of a shared reality").*
+_Source: Max Barrett, session 2026-06-11 ("to preserve a social construction
+of a shared reality")._
 
 ## INV-003 — No graph store is ever the system of record for contributor evidence
 
@@ -44,7 +45,7 @@ Graph engines, views, and caches are derived projections rebuilt from canonical
 relational tables. Nothing is writable in a projection that is not first
 written canonically.
 
-*Source: ADR-001.*
+_Source: ADR-001._
 
 ## INV-004 — Reference-zone isolation
 
@@ -55,7 +56,7 @@ concept_id, sense_id, language refs) plus source_ref citations. The Governed
 Evidence zone may hold read-only pointers into the Reference zone (e.g.
 root_id); the reverse direction toward contributor-linked records is forbidden.
 
-*Source: ADR-002.*
+_Source: ADR-002._
 
 ## INV-005 — No orphan timed tokens
 
@@ -64,15 +65,15 @@ speaker_ref, location_id, observed_at, language_bcp47, and a source
 artifact/attestation. Ingestion that cannot satisfy the path is rejected, not
 stored.
 
-*Proposed amendment filed 2026-06-11:* *Reconciliation with ADR-011:*
+_Proposed amendment filed 2026-06-11:_ _Reconciliation with ADR-011:_
 "rejected" means **not admitted to the governed store** — it does not mean
 denied or destroyed. Ingestion that cannot satisfy the join path is
 **quarantined pending enrichment** (Machine Door save-first semantics, ADR-008, ADR-011). The contribution is preserved; admission waits on the missing
 join-path fields. Carrier handling inside quarantine remains
 RetentionClass-governed per ADR-013 — quarantine extends no retention rights.
 
-*Source: ADR-005. Proposed reconciliation clause filed 2026-06-11; cites
-ADR-008, ADR-011, ADR-013.*
+_Source: ADR-005. Proposed reconciliation clause filed 2026-06-11; cites
+ADR-008, ADR-011, ADR-013._
 
 ## INV-006 — Recurrence promotion
 
@@ -81,7 +82,7 @@ origin_status may move to `inherited` only with a populated evidence link
 Recurrence frequency alone never changes origin_status. Automated pipelines may
 propose; only reviewed judgments promote.
 
-*Source: ADR-006.*
+_Source: ADR-006._
 
 ## INV-007 — Connection types are distinct and never collapse into one edge type
 
@@ -91,14 +92,14 @@ and loan history. language_attestations connect forms to real usage by speaker,
 place, time, and context. Any graph projection must preserve these as typed,
 separate edge classes.
 
-*Source: Session decision 2026-06-11 · Related: ADR-001, ADR-002.*
+_Source: Session decision 2026-06-11 · Related: ADR-001, ADR-002._
 
 ## INV-008 — Cognate judgment target exclusivity
 
 Each cognate_judgments row references exactly one of entry_id or
 variant_form_id (XOR, enforced by check constraint).
 
-*Source: Session decision 2026-06-11 · Related: ADR-003.*
+_Source: Session decision 2026-06-11 · Related: ADR-003._
 
 ## INV-009 — Deny nothing; quarantine instead (amended by ADR-013)
 
@@ -114,7 +115,7 @@ CARRIERS are separately governed by RetentionClass: retention requires
 positive consent; absence of consent resolves to ephemeral and the densest
 lawful derivative becomes canonical (ADR-013).
 
-*Source: ADR-011, amended by ADR-013 (2026-06-11).*
+_Source: ADR-011, amended by ADR-013 (2026-06-11)._
 
 ## INV-011 — A signal routes the concern; a record carries the measurement
 
@@ -124,8 +125,8 @@ measurement. No measurement may live only inside routing language: every
 emitted signal that is threshold-derived must travel with the measured value
 in its record. Applies platform-wide, beyond ESU.
 
-*Source: Owner ruling, ESU conformance session 2026-06-11 (sky-esu v3.1
-"platform law"); recorded here as its one home.*
+_Source: Owner ruling, ESU conformance session 2026-06-11 (sky-esu v3.1
+"platform law"); recorded here as its one home._
 
 ## INV-010 — One identity authority; opaque refs everywhere
 
@@ -136,7 +137,7 @@ opaque contributor/speaker/writer references; the real-identity linkage table
 exists in Helios alone. Computed scores attach only to sessions and artifacts,
 never to persons.
 
-*Source: ADR-012 (founder decision, captured 2026-06-11).*
+_Source: ADR-012 (founder decision, captured 2026-06-11)._
 
 ## INV-012 — Governed Artifact Lineage (GAL)
 
@@ -148,7 +149,7 @@ never to persons.
 
 In one line: a governed artifact has one append-only audit lineage with policy-controlled content; three never-collapsing authority axes (provenance / canonicity / publication); one shared node shape across every seam (the [Cross-Repo Lineage-Node Contract](../contracts/cross-repo-lineage-node-contract.md)); identity is split with `release_author_ref` on public projections (per ADR-012 as amended by ADR-017); legal/sovereignty choices resolve through a versioned policy registry, never hardcoded law.
 
-*Source: WordPad ↔ DVE governance review session, 2026-06-16. Relates to ADR-012 (as amended by ADR-017).*
+_Source: WordPad ↔ DVE governance review session, 2026-06-16. Relates to ADR-012 (as amended by ADR-017)._
 
 ## INV-013 — Sovereignty and identity schemas are validated by a complete JSON Schema implementation, never hand-rolled
 
@@ -156,7 +157,7 @@ In one line: a governed artifact has one append-only audit lineage with policy-c
 
 Any schema that governs identity boundaries, sovereignty rules, or public-projection exclusions (including `governed-lineage-node.schema.json` and any successor) must be validated by a complete JSON Schema implementation (e.g. AJV draft-2020-12) that correctly enforces `additionalProperties`, `if/then/else`, `unevaluatedProperties`, and all other constraint keywords. Hand-rolled validators on sovereignty boundaries are prohibited: a partial implementation silently passes what it does not check, which is the worst failure mode on an identity or sovereignty gate. The enforcement workflow must install the validator as a declared dependency, not inline it.
 
-*Source: Governance session 2026-06-21. Precipitated by the discovery that an inline validator on the public-projection exclusion rule was not enforcing `additionalProperties: false` or the `if/then/else` conditional, leaving unknown identity-linked fields undetected on public-projection nodes.*
+_Source: Governance session 2026-06-21. Precipitated by the discovery that an inline validator on the public-projection exclusion rule was not enforcing `additionalProperties: false` or the `if/then/else` conditional, leaving unknown identity-linked fields undetected on public-projection nodes._
 
 ## INV-014 — The Locket: No Provider-Held Key to User Content
 
@@ -166,7 +167,7 @@ Any schema that governs identity boundaries, sovereignty rules, or public-projec
 
 In one line: Sparxstar holds no key material capable of decrypting a user's individual content, and operates no mechanism that can produce such material, except a per-item wrap that the user's own client creates as an explicit, recorded act of disclosure — the cryptographic form of Layer 0 / The Locket in `SPARXSTAR_AIWA_Platform_Vision_v3`. It does not claim client-integrity or key-distribution integrity, and no component may assert warrant-proofness (see long-form contract, "Boundaries").
 
-*Source: Maintainer ruling, session of 2026-08-10 (recorded in `WPAD-THREAT-MODEL-v0.5` §0.1). Grounded in `SPARXSTAR_AIWA_Platform_Vision_v3`, Layer 0 ("The Locket").*
+_Source: Maintainer ruling, session of 2026-08-10 (recorded in `WPAD-THREAT-MODEL-v0.5` §0.1). Grounded in `SPARXSTAR_AIWA_Platform_Vision_v3`, Layer 0 ("The Locket")._
 
 ## INV-015 — A credential is valid for exactly one resource, in exactly one class
 
@@ -174,7 +175,7 @@ Every protected resource validates its own exact expected audience and accepts
 nothing else. Five failures, all closed:
 
 - **Missing** — a token with no `aud` claim is refused.
-- **Array-valued** — a token whose `aud` is a list is refused, *including* when
+- **Array-valued** — a token whose `aud` is a list is refused, _including_ when
   the list contains this resource's own audience. A library check satisfied by
   membership is not sufficient: the claim must be a scalar, and it must match.
 - **Wrong resource** — an audience that is not this resource's expected
@@ -211,7 +212,7 @@ platform-wide.
 No client may originate, compute, or infer earned value. A points total, a
 star, a badge, a gold amount or a placement appears in a client only because an
 authoritative settlement response from the RLC Node engine returned it, carrying
-an identifier. *What* that identifier is, and who mints it, is OQ-017 and is
+an identifier. _What_ that identifier is, and who mints it, is OQ-017 and is
 deliberately not decided here; this invariant requires only that one be present
 in the response, whatever shape OQ-017 settles on. A client may hold display metadata for an
 identifier — a name, an icon, a description, a localization key — and may
@@ -239,5 +240,5 @@ are the same defect one step earlier, and are equally forbidden; a client
 catalogue is a rendering of the server's vocabulary, never a second opinion
 about it.
 
-*Source: ADR-029 (chief-architect draft, 2026-09-05), raised during the
-Dictionary Games UX and progression review.*
+_Source: ADR-029 (chief-architect draft, 2026-09-05), raised during the
+Dictionary Games UX and progression review._

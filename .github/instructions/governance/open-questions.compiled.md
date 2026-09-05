@@ -1,4 +1,5 @@
 # Open Questions — Auto-synced from registry@2039580
+
 # DO NOT EDIT
 
 # Open Questions
@@ -199,7 +200,7 @@ all — and if so, which of the ten mockup awards have a solo equivalent — is 
 product decision, not an architectural one.
 
 **Gold.** State it precisely, because "blocked" overstates it: Gold is
-*half-defined*. Earning is implemented and running — `grantXp(ctx, xp, 1, tx)`
+_half-defined_. Earning is implemented and running — `grantXp(ctx, xp, 1, tx)`
 grants one unit on consensus, discovery and RSC completion, raising
 `lifetime_gold` and writing a `kind: 'gold'` ledger row. What does not exist is
 the other half: ownership, any spend or redemption path, and whether a balance
@@ -218,7 +219,7 @@ product promise the platform cannot keep.
   settled them — Games and the UI submit results and render what comes back,
   and grant nothing.
 
-What this does **not** resolve, and OQ-017 still carries: *which* awards exist.
+What this does **not** resolve, and OQ-017 still carries: _which_ awards exist.
 No award id vocabulary exists server-side, so a client still cannot be in
 parity with the server. The ruling settles authority, not inventory.
 
@@ -246,14 +247,14 @@ carries every defect corrected in the engine copy by
 - **lines 685–687, 698–700** — six "+ Gold badge" rows. Gold is a currency;
   `'badge'` is a reserved `LedgerKind` with no writer.
 - **line 154** — "Join rejected with 423 Locked + localized 'Daily limit
-  reached'", which the *same document* contradicts at **line 620** (423 =
+  reached'", which the _same document_ contradicts at **line 620** (423 =
   `account_locked` + `unlock_path`) and **line 623** (451 =
   `screen_time_exceeded` + `reset_at`). The registry's canonical product spec
   assigns 423 to two different failures and disagrees with itself about which
   status the screen-time gate returns.
 
 This is not a stale-copy nuisance. `fetch-specs.yml` pulls the registry copy
-into every consuming repo's `.sparxstar/specs/` at CI time, so the *wrong*
+into every consuming repo's `.sparxstar/specs/` at CI time, so the _wrong_
 answer is the one that propagates, and a UI built against it would tell a
 learner who used up their daily minutes that their account is locked.
 

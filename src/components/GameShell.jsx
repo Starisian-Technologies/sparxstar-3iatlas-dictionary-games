@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Loader2, ChevronDown } from 'lucide-react';
-import { useGameSet } from '../hooks/useGameSet.js';
+import { MAX_PACK_SIZE, useGameSet } from '../hooks/useGameSet.js';
 import { useGameSession } from '../hooks/useGameSession.js';
 import { useProgressSync } from '../hooks/useProgressSync.js';
 import { MODE, needsReview } from '../pedagogy.js';
 import GameNav from './GameNav.jsx';
 import { emptyLiteracy, literacyKey, promoteIfReady, recordWord, UNIT_BANDS } from '../literacy.js';
+import { emptyRecent, remember } from '../recent.js';
 import LeaveGameDialog from './LeaveGameDialog.jsx';
 import {
     ADJUST,
@@ -88,9 +89,23 @@ const OFFSETS_KEY = 'aiwa-dict-difficulty-offsets';
  * words back on three-unit ones.
  */
 const LITERACY_KEY = 'aiwa-dict-literacy';
+/*
+ * Recently-served entry ids, per language+skill. Ids ONLY — see `recent.js`.
+ * Kept beside the literacy record because it is the same kind of thing: local
+ * progress state that shapes the next round and never leaves the device.
+ */
+const RECENT_KEY = 'aiwa-dict-recent';
+
+function readStoredRecent() {
+    return readStoredMap(RECENT_KEY);
+}
 
 function readStoredLiteracy() {
-    const stored = getLocalStorageItem(LITERACY_KEY);
+    return readStoredMap(LITERACY_KEY);
+}
+
+function readStoredMap(key) {
+    const stored = getLocalStorageItem(key);
     if (!stored.available || !stored.value) return {};
     try {
         const parsed = JSON.parse(stored.value);
@@ -276,11 +291,19 @@ export default function GameShell({
          * adaptation offset — the level selector changed nothing about which
          * words were played. Selection needs more candidates than it keeps.
          *
-         * Three times the round, capped at the hook's own 50 ceiling. The
-         * Dictionary charges budget per returned entry, so this is deliberately
-         * a small multiple rather than "fetch everything".
+         * Three times the round was enough to make the LEVEL selector work and
+         * not enough to make VARIETY work. After the unit-band filter and the
+         * split into current/review/stretch pools, thirty candidates can leave
+         * a pool holding barely more words than the round needs — and a pool
+         * with no slack deals the same words however well it shuffles. That is
+         * how one fixed pack survived a correct mix.
+         *
+         * Six times the round with a floor of forty, capped at the BFF's own
+         * ceiling. The Dictionary charges budget per returned entry, so this is
+         * still a bounded multiple rather than "fetch everything"; it buys the
+         * pools enough members to draw from.
          */
-        limit: Math.min(50, wordCount * 3),
+        limit: Math.min(MAX_PACK_SIZE, Math.max(wordCount * 6, 40)),
         /*
          * `listen_write` is the one game that cannot be played without audio,
          * so it asks the Dictionary for audio-verified entries only. The old
@@ -323,6 +346,7 @@ export default function GameShell({
      * needs to know about.
      */
     const literacyRef = useRef(readStoredLiteracy());
+    const recentRef = useRef(readStoredRecent());
     /*
      * Words this learner has missed, across rounds.
      *
@@ -491,7 +515,24 @@ export default function GameShell({
                 /* Feeds the review pool — words this learner has missed before
                  * come back through supported practice rather than vanishing. */
                 needsReviewFor: (w) => missedRef.current.has(w?.uuid),
+                /*
+                 * Every new game and every new round draws a fresh set. This is
+                 * what makes repetition mean something: a word comes back
+                 * because the review pool chose it or because the approved
+                 * corpus is genuinely small, never because selection had no
+                 * reason to move on.
+                 */
+                recent: recentRef.current[litKey] ?? emptyRecent(),
             });
+
+            /* Remember what this round served, before it is played. Bounded ids
+             * only, and written per language+skill so one language's history
+             * never suppresses another's words. */
+            recentRef.current[litKey] = remember(
+                recentRef.current[litKey] ?? emptyRecent(),
+                sliced.map((w) => w?.uuid).filter(Boolean)
+            );
+            setLocalStorageItem(RECENT_KEY, JSON.stringify(recentRef.current));
             setSetupError(null);
 
             try {

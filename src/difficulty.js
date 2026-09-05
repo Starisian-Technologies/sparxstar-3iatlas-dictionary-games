@@ -32,6 +32,7 @@
 
 import { SPELLABLE_UNIT_RANGE, profileFor, segmentHeadword } from './orthography.js';
 import { DEFAULT_POLICY, bandForWord, bandIndex } from './literacy.js';
+import { excludedIds, shuffle } from './recent.js';
 
 /* ── The player's level ─────────────────────────────────────────────────── */
 
@@ -342,6 +343,10 @@ export function selectForLevel(
         band = null,
         policy = DEFAULT_POLICY,
         needsReviewFor = null,
+        /* Ids served in recent rounds, avoided but never a filter — see below. */
+        recent = null,
+        /* Injectable so tests assert distribution instead of hoping. */
+        rng = Math.random,
     } = {}
 ) {
     const profile = levelProfile(level);
@@ -413,32 +418,94 @@ export function selectForLevel(
         return out;
     };
 
-    const used = new Set();
-    const picked = [
-        ...take(currentPool, Math.round(wanted * policy.mix.current), used),
-        ...take(reviewPool, Math.round(wanted * policy.mix.review), used),
-        /* The stretch pool is walked by the adaptive offset, so fine-tuning
-         * moves WHICH harder words appear without changing the band. */
-        ...take(
-            nextPool.slice(Math.max(0, Math.round(offset))),
-            Math.round(wanted * policy.mix.next),
-            used
-        ),
-    ];
+    /*
+     * VARIATION INSIDE THE POOL — never around it.
+     *
+     * The pools above are already the *only* words this learner may be served:
+     * every one has passed approval, domain, playability, skill, the
+     * orthographic-unit ceiling and the difficulty band. Nothing below widens
+     * that set. What changes is which members of it a given round draws.
+     *
+     * Without this, `take` walked each pool from the front of a deterministic
+     * sort, so the same corpus and band dealt the same words every session —
+     * one fixed pack, indistinguishable to a learner from the deliberate review
+     * pool. Excluding recently-served ids and shuffling what remains makes
+     * repetition mean something again: it happens because the review pool chose
+     * the word, or because the approved corpus is genuinely small, and for no
+     * other reason.
+     */
+    const vary = (pool, exclude) =>
+        shuffle(
+            pool.filter((e) => !exclude.has(e.word?.uuid)),
+            rng
+        );
 
     /*
-     * DETERMINISTIC FALLBACK. A pool that cannot fill its share must not
-     * shorten the round: a language with few review words would otherwise deal
-     * a short round forever. Backfill runs in a fixed order — current, review,
-     * next, then anything playable — so the same inputs always give the same
-     * round.
+     * RELAX THE OLDEST MEMORY FIRST, AND ONLY THE MEMORY.
+     *
+     * When the pools cannot fill a round under full exclusion, the round is not
+     * shortened and the rules are not loosened. Instead the recent memory gives
+     * ground from its OLD end: words seen longest ago return before words seen
+     * most recently. Each step releases a quarter of the ring, so a small corpus
+     * degrades gracefully to "you will see these again" rather than abruptly to
+     * "here is the same pack".
      */
-    if (picked.length < wanted) {
-        for (const pool of [currentPool, reviewPool, nextPool, scored]) {
-            picked.push(...take(pool, wanted - picked.length, used));
-            if (picked.length >= wanted) break;
+    /*
+     * One attempt at a given exclusion level: the mix, then a backfill that
+     * still honours that exclusion.
+     *
+     * The backfill matters more than it looks. A pool that cannot fill its
+     * share must not shorten the round — a language with few review words
+     * would otherwise deal a short round forever — and an EMPTY review pool is
+     * the ordinary case, not an edge one, because a learner who has missed
+     * nothing has nothing to review. Backfilling without honouring exclusion
+     * therefore fired on almost every round and handed back recently-served
+     * words while unseen ones sat available. Order stays fixed: current,
+     * review, next, then anything already proved eligible.
+     */
+    const attempt = (exclude) => {
+        const used = new Set();
+        const out = [
+            ...take(vary(currentPool, exclude), Math.round(wanted * policy.mix.current), used),
+            ...take(vary(reviewPool, exclude), Math.round(wanted * policy.mix.review), used),
+            /* The stretch pool is walked by the adaptive offset, so fine-tuning
+             * still moves WHICH harder words appear without changing the band;
+             * the shuffle varies within the window the offset selected. */
+            ...take(
+                vary(nextPool.slice(Math.max(0, Math.round(offset))), exclude),
+                Math.round(wanted * policy.mix.next),
+                used
+            ),
+        ];
+        if (out.length < wanted) {
+            for (const pool of [currentPool, reviewPool, nextPool, scored]) {
+                out.push(...take(vary(pool, exclude), wanted - out.length, used));
+                if (out.length >= wanted) break;
+            }
         }
+        return out;
+    };
+
+    const ringSize = recent?.ids?.length ?? 0;
+    const steps = [
+        0,
+        ...(ringSize > 0 ? [0.25, 0.5, 0.75, 1].map((f) => Math.ceil(ringSize * f)) : []),
+    ];
+
+    let picked = [];
+    for (const forget of steps) {
+        picked = attempt(recent ? excludedIds(recent, forget) : new Set());
+        if (picked.length >= wanted) break;
     }
+
+    /*
+     * Last resort: the memory has been fully released and the eligible corpus
+     * still cannot fill a round, so words must repeat within it. This is the
+     * "approved corpus is genuinely too small" case the pedagogy accepts —
+     * `scored` is the eligible set, so even here nothing outside the learner's
+     * permitted pools is reachable.
+     */
+    if (picked.length < wanted) picked = attempt(new Set());
 
     return picked.slice(0, wanted).map((e) => e.word);
 }
