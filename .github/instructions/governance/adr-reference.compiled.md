@@ -1,0 +1,32 @@
+# Platform Decisions — Auto-synced from registry@2039580
+# DO NOT EDIT — this file is overwritten on every registry change
+
+- ADR-001: Relational canonical record; graph is derived projection only
+- ADR-002: Three trust zones; comparative/etymology lives in the Reference zone
+- ADR-003: v1 comparative scope — cognacy + borrowing now; expressions v1.5; register deferred
+- ADR-004: Morpheme tier at Phase 3.5; segmentation authority boundary
+- ADR-005: Idiolect analytics deferred; timed-token provenance invariant adopted now
+- ADR-006: Recurrence promotion rule — no "cognate/ancient" from recurrence alone
+- ADR-007: Visual writing and sign evidence layer; Phase 3.6 reserved
+- ADR-008: Two doors, one chain — ingress topology and custody
+- ADR-009: The Librarian — meaning organization and pedagogical synthesis
+- ADR-010: SPARXSTAR Anansi — the entity weaver; proposer, never decider
+- ADR-011: Unconditional capture; asynchronous governance — deny nothing, quarantine instead
+- ADR-012: Contributor identity keystone — Helios-minted, suite-wide, durable, pseudonymous-but-stable
+- ADR-013: Contribution vs. carrier — retention by consent; INV-009 amended
+- ADR-014: SPARXSTAR Naming Convention — SPX Prefix Standard
+- ADR-015: Decision-record namespaces
+- ADR-016: SPARXSTAR Naming Convention
+- ADR-017: Three-layer identity reference scheme
+- ADR-018: The ADR Registry Hosts Executable Conformance Enforcement Scoped to Invariant Contracts
+- ADR-019: Platform Toolchain and Quality Enforcement Standard (STD-TOOLCHAIN-001)
+- ADR-020: Four Identity credential classes, each with its own audience and issuance policy
+- ADR-021: What ADR immutability covers — decision content, not the index or supersession metadata
+- ADR-022: Assign WordPress Ability Registration by Domain
+- ADR-023: Require WordPress 7.1 for Ability-Registering Repositories
+- ADR-024: Rename DVE's Compiled SCF Schemas to Tool Schemas
+- ADR-025: Sanitize Ability Attempt Telemetry and Queue It Durably
+- ADR-026: Treat Ability Validation Filters as Assertions Only
+- ADR-027: Ratify `wordpress/mcp-adapter` as a Legitimate Dependency
+- ADR-028: Adopt `Starisian\Sparxstar\{Product}\…` as the Canonical PHP Namespace
+- ADR-029: Reward authority is platform-level — the engine settles, clients render, myCred mirrors
