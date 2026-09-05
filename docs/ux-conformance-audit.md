@@ -20,11 +20,11 @@ The brief asks for comparison against **approved UI mockups** and a **canonical
 star/badge specification**. Both were searched for and neither exists in any
 repository this session can reach:
 
-| Source the brief names    | Search performed                                                                            | Result                                                                                                    |
-| ------------------------- | ------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| Approved UI mockups       | `find` for `*mockup*`, `*mock*`, `*design*`, `*figma*`, `*wireframe*` across the games repo | Only `__mocks__/styleMock.cjs`, a Jest stub. **No mockups.**                                              |
-| Canonical star formula    | `grep -i star` across games docs, RLC engine, RLC UI                                        | Stars are defined for `rwc`/`rsc` classroom modes only — see below. **Nothing for the dictionary games.** |
-| Canonical badge inventory | `grep -i badge` across all five repos                                                       | Named in RLC spec §1.6/§2.1 as myCred's. **No inventory, no thresholds.**                                 |
+| Source the brief names    | Search performed                                                                                              | Result                                                                                                                                                                                                                                                                                      |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Approved UI mockups       | Originally: `find` for `*mockup*`, `*mock*`, `*design*`, `*figma*`, `*wireframe*` — **across this repo only** | **That search was too narrow and its conclusion was wrong.** Mockups DO exist, in `sparxstar-3iatlas-rlc-ui/.github/instructions/` (`RLC-game-play.png`, `RLC-awards*.png`), signposted by that repo's own `AGENTS.md`. They are **RLC mockups, not Dictionary Games mockups** — see below. |
+| Canonical star formula    | `grep -i star` across games docs, RLC engine, RLC UI                                                          | Stars are defined for `rwc`/`rsc` classroom modes only — see below. **Nothing for the dictionary games.**                                                                                                                                                                                   |
+| Canonical badge inventory | `grep -i badge` across all five repos                                                                         | Named in RLC spec §1.6/§2.1 as myCred's. **No inventory, no thresholds.**                                                                                                                                                                                                                   |
 
 Sections 8 (mockup fidelity) and the star/badge half of section 5 are therefore
 **blocked pending input**, per the brief's own instruction to report the gap
@@ -76,6 +76,63 @@ where it is computed. Before stars or badges are implemented:
 3. Add them to the server-authoritative contract.
 4. Render settled results in the client.
 
+## The mockups, and why they do not settle this
+
+**Correction first.** An earlier revision of this document said no approved
+mockups existed "in any reachable repo". That was wrong, and the error was
+mine: the search was run **across this repository only**, and the conclusion
+was stated as though it covered everything.
+
+Four mockups exist, in `sparxstar-3iatlas-rlc-ui/.github/instructions/`, and
+that repo's `AGENTS.md` points straight at them:
+
+    RLC-game-play.png   RLC-awards.png   RLC-awards-2.png   RLC-awards-3.png
+
+**They are RLC mockups, not Dictionary Games mockups.** The gameplay screens
+show a multiplayer classroom capture session: a game code (`AW2478`), 8/12
+players, a round timer, the prompt "Collect words that mean: WELL", a live
+leaderboard, and a TEACHER MODE console with Word Lists, Players and Reports.
+That is Rapid Language Collection. Dictionary Games is single-player vocabulary
+and spelling practice with no session, no peers and no teacher.
+
+### They DO define an awards inventory — for RLC
+
+| Badge               | Criterion                                  | Gold | Stars |
+| :------------------ | :----------------------------------------- | ---: | ----: |
+| Crown Star          | Session champion (top scorer)              | +500 |     2 |
+| Silver Wave         | Second highest scorer                      | +300 |     1 |
+| Bronze Flame        | Third highest scorer                       | +200 |     1 |
+| Rare Word Discovery | Found a word not in the dictionary         | +600 |     2 |
+| Elder Knowledge     | Preserving important cultural language     | +400 |     2 |
+| Golden Voice        | Most audio contributions, clear recordings | +300 |     1 |
+| Community Voice     | Most trusted by peers in QC review         | +250 |     1 |
+| Lightning Linguist  | Fast, accurate and consistent              | +250 |     1 |
+| Perfect Round       | 100% accuracy in a round                   | +200 |     1 |
+| Helping Hand        | Helped others, built a stronger team       | +150 |     1 |
+
+Plus a **fourth reward type, Gold**, alongside XP and Stars, and the rule
+"collect stars to level up and unlock new badges".
+
+### Why this is not simply lifted into Dictionary Games
+
+Three conflicts, each with the brief rather than with taste:
+
+1. **Three of the ten are placement awards** — first, second, third — and the
+   gameplay screens are built around a leaderboard. The brief is explicit:
+   _"Do not add a public leaderboard in this phase. Competition could discourage
+   adults developing literacy."_
+2. **Gold is a currency nobody has specified for these games.** Adopting the
+   table wholesale would introduce a reward type by accident.
+3. **Four badges need RLC capabilities these games do not have** — peer QC
+   review, audio contribution volume, teamwork, and discovering words absent
+   from the dictionary.
+
+**Recommendation, not a decision.** If Dictionary Games is to have badges, the
+plausible carry-overs are the three that do not depend on competition or on RLC
+mechanics — Perfect Round, Elder Knowledge, Rare Word Discovery — with the
+placement trio and Gold deliberately excluded. That is a product judgement and
+is left to the owner; nothing has been implemented.
+
 ## Status of every finding
 
 Split by state, because an audit that still describes corrected code as "current
@@ -121,7 +178,7 @@ Each has a test that fails when the fix is reverted — checked, not assumed.
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Stars           | No canonical formula. Ownership now ruled Node/RLC; the contract does not yet carry it.                                                                                                                      |
 | Badges          | No inventory and no thresholds, in any repo.                                                                                                                                                                 |
-| Mockup fidelity | No mockups exist in any reachable repo. Requested from the owner.                                                                                                                                            |
+| Mockup fidelity | Mockups exist but depict a **different product** — see "The mockups, and why they do not settle this" below. Dictionary Games has none.                                                                      |
 | The book        | _Digital Games and Language Learning_ was not supplied to this repository and has **not** been read here. Every rule implemented comes from the brief's enumeration of it — a specification, not a citation. |
 
 ## Open questions requiring a decision
@@ -132,5 +189,5 @@ Each has a test that fails when the fix is reverted — checked, not assumed.
    client-side (faster, but puts reward logic where §1.6 forbids it)?
 2. **Badge inventory and thresholds.** None exists. The brief lists candidate
    milestones; they need to become a canonical list with owners before code.
-3. **Approved UI mockups.** Not in any repo reachable here. Sections 1 and 8
-   cannot be completed without them.
+3. **Approved UI mockups for Dictionary Games.** The RLC mockups exist and are
+   not these. Sections 1 and 8 still cannot be completed.
