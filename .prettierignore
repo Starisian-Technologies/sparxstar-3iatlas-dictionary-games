@@ -2,3 +2,8 @@ node_modules/
 dist/
 dist-site/
 pnpm-lock.yaml
+
+# Governance snapshot: synced from the architecture registry, never edited here.
+# Formatting it produces a diff the sync then reverts, and CI fails on whichever
+# side ran last. Read-only by governance rule.
+.github/instructions/governance/
