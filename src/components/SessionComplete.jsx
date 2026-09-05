@@ -3,6 +3,8 @@ import { CheckCircle2, RotateCcw, List, Home, Grid3x3 } from 'lucide-react';
 import { PRODUCTION_GAMES } from '../constants.js';
 import { needsReview } from '../pedagogy.js';
 import Celebration from './Celebration.jsx';
+import BadgeCard from './BadgeCard.jsx';
+import { earnedBadges } from '../awards.js';
 
 /**
  * SessionComplete — post-session summary screen.
@@ -15,6 +17,10 @@ import Celebration from './Celebration.jsx';
  *   onChooseAnother  {Function} Back to the game chooser
  *   onHome           {Function} Back to the games menu
  *   adjustNotice     {string}   What adaptation decided at the end of this round
+ *   awards           {Array}    OPTIONAL. Awards SETTLED BY THE ENGINE for this
+ *                               session. Display only — this screen cannot
+ *                               decide that an award was earned, and an absent
+ *                               list simply renders nothing.
  *   onBrowse         {Function} OPTIONAL. Switch to the host's Browse tab.
  *                               Rendered only when a host actually supplies one
  *                               — the games site passed an empty function, so
@@ -29,6 +35,7 @@ export default function SessionComplete({
     onChooseAnother,
     onHome,
     adjustNotice = null,
+    awards = null,
     onBrowse = null,
 }) {
     if (!session) return null;
@@ -50,6 +57,9 @@ export default function SessionComplete({
     const skipped = results.filter((r) => r.outcome === 'skipped').length;
     const reviewing = results.filter((r) => needsReview(r.outcome)).length;
     const answered = results.length;
+    /* Whatever the engine settled, looked up in the catalogue. Never computed
+     * here — see the header of `src/awards.js`. */
+    const badges = earnedBadges(awards);
     const xp = session.xpEarned ?? 0;
     const isProductionGame = Boolean(PRODUCTION_GAMES?.has?.(session.gameType));
 
@@ -96,6 +106,19 @@ export default function SessionComplete({
             <p className="mb-6 text-xs text-gray-400">
                 {answered} of {total} questions answered
             </p>
+
+            {badges.length > 0 && (
+                <div className="mb-6 w-full max-w-xs">
+                    <p className="mb-2 text-xs font-bold uppercase tracking-[0.14em] text-gray-400">
+                        {badges.length === 1 ? 'New award' : 'New awards'}
+                    </p>
+                    <div className="grid grid-cols-2 gap-3">
+                        {badges.map((award) => (
+                            <BadgeCard key={award.id} award={award} />
+                        ))}
+                    </div>
+                </div>
+            )}
 
             {/*
              * What adaptation decided, shown HERE.

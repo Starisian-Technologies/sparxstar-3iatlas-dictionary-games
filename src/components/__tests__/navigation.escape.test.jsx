@@ -240,6 +240,52 @@ describe('SessionComplete — never a dead end', () => {
         unmount();
     });
 
+    it('renders awards the engine settled, in the house style', () => {
+        const { container, unmount } = render({ awards: ['perfect_round'] });
+        expect(container.textContent).toContain('Perfect Round');
+        expect(container.textContent).toContain('New award');
+        unmount();
+    });
+
+    it('shows NO awards section when the engine settled none', () => {
+        /* And none when the field never arrived — the common case, since
+         * nothing server-side grants these for Dictionary Games yet. */
+        for (const awards of [undefined, [], null]) {
+            const { container, unmount } = render({ awards });
+            expect(container.textContent).not.toContain('New award');
+            unmount();
+        }
+    });
+
+    it('never invents an award from the session results', () => {
+        /*
+         * The session below is a flawless round — exactly what a naive
+         * implementation would call a "Perfect Round". Nothing is shown,
+         * because the engine settled nothing.
+         */
+        const flawless = {
+            gameType: 'arrange_word',
+            words: [{ uuid: 'a' }, { uuid: 'b' }],
+            results: [
+                { wordUuid: 'a', outcome: 'correct', xp: 10 },
+                { wordUuid: 'b', outcome: 'correct', xp: 10 },
+            ],
+            xpEarned: 20,
+        };
+        const { container, unmount } = mount(
+            <SessionComplete
+                session={flawless}
+                learnedCount={2}
+                onPracticeMissed={jest.fn()}
+                onPlayAgain={jest.fn()}
+                onChooseAnother={jest.fn()}
+                onHome={jest.fn()}
+            />
+        );
+        expect(container.textContent).not.toContain('Perfect Round');
+        unmount();
+    });
+
     it('shows what adaptation decided, on the screen where it is decided', () => {
         const { container, unmount } = render({ adjustNotice: 'Moving you up a level.' });
         expect(container.textContent).toContain('Moving you up a level.');
