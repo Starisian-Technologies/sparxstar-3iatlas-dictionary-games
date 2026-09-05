@@ -1,10 +1,17 @@
 /**
  * Per-game help, drawn from real Dictionary fields.
  *
- * SOURCE NOTE: *Digital Games and Language Learning* has NOT been read here —
- * it was never supplied to this repository. The rules below come from the
- * corrective brief's enumeration of it, which is a specification, not a
- * citation. Do not describe any of this as "what the book says".
+ * SOURCE NOTE: the book HAS now been read (`docs/research-reconciliation.md`).
+ * Fading support is genuinely its idea — via Bruner, it names "adjustable level
+ * of support … taking the learner's zone of proximal development into account"
+ * and support that "dwindle[s] away to nothing" as independence grows.
+ *
+ * But its scaffolding is SOCIAL: the first essential feature is "collaborative
+ * interaction between a novice and an expert". These ladders provide the
+ * adjustable and fading parts and NOT that one — there is no expert in the
+ * loop. On the source's account the human is part of the mechanism, so this is
+ * a real gap, and the classroom teacher role is the missing half rather than a
+ * later nicety.
  *
  * WHY THIS IS NOT ONE SHARED HINT
  *

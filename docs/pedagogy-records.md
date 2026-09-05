@@ -124,9 +124,13 @@ Two things are common to all six and are stated once here rather than repeated:
 
 ## Open against these records
 
-1. **Reconcile with the book.** Not possible here: it was not supplied. Once it
-   is, each record's scaffolding and feedback sequence should be checked against
-   the source rather than against the brief alone.
-2. **`ListenWrite` has no content** for Mandinka until recordings exist.
-3. **Teacher roles are provisional** — the classroom version is not built, and
+1. **Teacher role is load-bearing, and provisional.** The reconciliation shows
+   the source treats novice–expert interaction as part of the scaffolding
+   mechanism, not an optional extra. These roles are a starting sketch and AIWA
+   holds the authority over them.
+2. **Storytelling is absent.** It is one of the four dynamics the source names
+   and no game here has a narrative frame. A product judgement, not an
+   oversight — but it should be made deliberately.
+3. **`ListenWrite` has no content** for Mandinka until recordings exist.
+4. **Teacher roles are provisional** — the classroom version is not built, and
    AIWA holds authority over the pedagogy, not this repository.

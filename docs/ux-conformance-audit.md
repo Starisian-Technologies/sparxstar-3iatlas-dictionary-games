@@ -5,9 +5,9 @@
 > Not "all fixed". The navigation repair, the hint data path, the literacy
 > progression engine, the controlled question mix and the per-game help are
 > implemented and tested. Stars, badges and mockup conformity are **blocked**;
-> reconciliation against the research source is **open** because the book was
-> never supplied. The three sections below say which is which, and nothing is
-> claimed as done that is not.
+> the research source has now been read and reconciled
+> (`docs/research-reconciliation.md`). The three sections below say which is
+> which, and nothing is claimed as done that is not.
 
 > Step 1 of the corrective brief. Every row was verified by reading the code at
 > `d26a7e5` (`main`) or the cited spec file. Nothing here is recalled: each

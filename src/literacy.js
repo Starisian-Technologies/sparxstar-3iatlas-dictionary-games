@@ -2,14 +2,22 @@
  * The literacy progression engine.
  *
  * ==========================================================================
- * SOURCE NOTE — read this before citing research in a comment below.
+ * SOURCE NOTE
  *
- * The brief that produced this module enumerates findings from *Digital Games
- * and Language Learning: Theory, Development and Implementation*. THAT BOOK WAS
- * NOT SUPPLIED TO THIS REPOSITORY and has not been read here. The rules encoded
- * below are the brief's enumeration of them, which is a specification, not a
- * citation. Where a threshold is a product decision rather than a finding, the
- * comment says so. Nothing here should be described as "what the book says".
+ * *Digital Games and Language Learning: Theory, Development and Implementation*
+ * (Peterson, Yamazaki & Thomas) HAS now been read — the reconciliation is in
+ * `docs/research-reconciliation.md`.
+ *
+ * It DIRECTLY supports the central rule below. Reporting Kyriakova & Angelova
+ * (2014), the book describes games providing "difficulty progression on an
+ * individual basis, keeping players at a particular level until they have
+ * demonstrated that they are able to pass that level and progress to the next
+ * one." That is this module.
+ *
+ * It supplies NONE of the numbers — not ten words, not the accuracy floor, not
+ * the 3/4/5/6-7/8+ ladder. Those are product decisions awaiting pilot data,
+ * which is why `progressionPolicy()` makes them configurable. Do not cite the
+ * book for a threshold.
  * ==========================================================================
  *
  * WHAT THIS IS FOR
