@@ -21,77 +21,100 @@ Sections 8 (mockup fidelity) and the star/badge half of section 5 are therefore
 **blocked pending input**, per the brief's own instruction to report the gap
 rather than invent. Everything else proceeds.
 
-## The reward-ownership finding
+## The reward-ownership finding — CORRECTED
 
-This is the most consequential result of the audit, because it says the brief's
-section 5 cannot be implemented as written without a contract change.
+**An earlier revision of this document was wrong, and the correction matters
+more than the original claim.**
 
-`sparxstar-3iatlas-rlc-node-engine/.github/instructions/sparxstar-3iatlas-rlc-spec-v4.0.md`
-§1.6, verbatim:
+It said WordPress/myCred owns points, stars and badges, citing RLC spec v4.0
+§1.6 verbatim:
 
 > AIWA fires hooks to myCred. myCred handles all reward logic — points, stars,
-> badges, display, redemption, adult vs student rules, school configuration.
-> AIWA does not implement reward logic, tiers, or redemption. That is myCred's
-> job.
->
-> XP, Gold, stars, and badges are all myCred entities. The backend fires the
-> hook. Done.
+> badges, display, redemption… XP, Gold, stars, and badges are all myCred
+> entities.
 
-And the engine's own manifests agree. `src/games/manifests.ts` gives the
-classroom modes a star table:
+That quotation is accurate — the sentence is really in that file. The
+**conclusion drawn from it was not**, because it conflicts with the locked
+Node-only product boundary. The owner's ruling:
 
-```ts
-stars: [ …, { kind: 'teacher', rule: 'teachers_star' } ],
-star_xp: STAR_XP,
-```
+> The RLC engine is authoritative for XP and its ledger. The games client may
+> display reward results but must not invent authoritative awards. **Do not add
+> WordPress or myCred to Dictionary Games.**
 
-while the manifest the dictionary games actually settle against carries scoring
-only — **no `stars`, no `star_xp`**:
+So the operative architecture is:
 
-```ts
-export const dictionaryQuizManifest: GameResultManifest = {
-    game_type: 'dictionary_quiz',
-    scoring_xp: { correct: 10, learning: 5, incorrect: 0, skipped: 0 },
-    question_scoped: true,
-};
-```
+| Concern                    | Owner                                                 |
+| -------------------------- | ----------------------------------------------------- |
+| XP and its ledger          | **RLC engine** (Node), authoritative                  |
+| Stars, badges              | To be defined in a server-authoritative Node contract |
+| Displaying settled results | Dictionary Games client                               |
+| Inventing an award         | Nobody, and never this client                         |
 
-So stars are a real platform concept, defined **server-side per game manifest**,
-and the dictionary quiz has none. Computing stars or badges inside this React
-client would put reward logic in exactly the place §1.6 forbids, and would
-compete with myCred rather than display it.
+**A spec correction is owed elsewhere.** RLC spec v4.0 §1.6 still names myCred
+as the owner of reward logic. Under "one home per fact", that section now
+contradicts the Node-only boundary and should be corrected in the engine repo —
+this document must not become a second, competing home for the ruling. Flagged
+here rather than edited there, because that file is outside this PR.
 
-**Recommendation, for approval — not implemented:** add a `stars` array and
-`star_xp` to `dictionaryQuizManifest` in the engine, and have the games _render_
-what the engine returns. That keeps one home for the fact. The star rule itself
-and the badge inventory are product decisions and are listed as open questions
-at the end of this document.
+What is unchanged is the _practical_ conclusion, and it is the reason no star
+or badge code appears in this branch: the engine's `dictionaryQuizManifest`
+carries `scoring_xp` and **no `stars` / `star_xp`**, while the classroom `rwc`
+and `rsc` manifests do carry them. Whoever owns the reward, this client is not
+where it is computed. Before stars or badges are implemented:
 
-## What the accompanying PR closes
+1. Verify their canonical Node/RLC ownership.
+2. Define the star formula and badge inventory in an approved specification.
+3. Add them to the server-authoritative contract.
+4. Render settled results in the client.
 
-Rows 1, 2, 3b, 4, 5 (visibility), 8, 11 and 12 are corrected in the same PR as
-this document. Rows 9, 10 and 13 are blocked as described above and are
-untouched — no star, badge, or mockup-derived behaviour was invented to make a
-checklist look complete.
+## Status of every finding
 
-## Discrepancy table
+Split by state, because an audit that still describes corrected code as "current
+implementation" misleads the next reader. **Before** is what shipped; **Now** is
+the state on this branch.
 
-| #   | Requirement                                | Specification source | Current implementation                                                                                                                                                                                                                                 | Production behaviour                                                                                                                                                                                                                        | Required correction                                                                       |
-| --- | ------------------------------------------ | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| 1   | Player can leave a game at any point       | Brief §2             | `GameShell.jsx:716-751` — the in-play header renders Level buttons and an `Adaptive:` toggle and nothing else                                                                                                                                          | Trapped once a round starts                                                                                                                                                                                                                 | Persistent nav bar with `Games Home` + `Restart` in every state                           |
-| 2   | Completion offers a real navigation choice | Brief §2             | `SessionComplete.jsx:77-110` — three actions: Practice missed, **Browse dictionary**, Play again                                                                                                                                                       | Trapped. The only non-play action calls `onBrowse` → `App.jsx:74-78` `handleBrowse`, **an empty function**. Its comment says "rather than render a dead control" — but the control renders unconditionally                                  | Replace with `Play Again` / `Choose Another Game` / `Games Home`; delete the dead control |
-| 3   | Hint works in all six games                | Brief §3             | Only `ArrangeWord.jsx:207` calls `takeHint()`. `CompleteSentence`/`ListenWrite` render a passive "starts with…" line with no control; `DomainFlash`, `MeaningMatch`, `LetterReveal` have no hint                                                       | 1 of 6 games has a working Hint                                                                                                                                                                                                             | Shared Hint control; per-game hint content from real dictionary fields                    |
-| 3b  | Hint responds on first press               | Brief §3             | `pedagogy.js:126-129` `hintLevelFor = max(0, attemptsUsed - offset)`, Challenge sets `offset = 1`; `currentHintLevel` adds `hintsUsed`                                                                                                                 | **In Challenge mode the first Hint press is a no-op**: `max(0, 0+0-1) = 0` and `max(0, 0+1-1) = 0`. Exactly the reported defect                                                                                                             | Make the first press always increase help                                                 |
-| 4   | Skip works in all six games                | Brief §3             | `skip(attempt)` called only in `ArrangeWord` and `MeaningMatch`. `CompleteSentence`/`ListenWrite`/`LetterReveal` render Skip but bypass the shared transition, calling `xpFor(OUTCOME.SKIPPED)` directly. **`DomainFlash` has no Skip control at all** | Skip semantics differ per game; one game cannot skip                                                                                                                                                                                        | Route every Skip through `pedagogy.skip()`; add Skip to DomainFlash                       |
-| 5   | Adaptation is observable                   | Brief §4             | Implemented and genuinely wired: `GameShell.jsx:599` `decideAdjustment` → `setOffsets` → `:403-407` `selectForLevel(..., offset)`                                                                                                                      | Invisible. `adjustNotice` renders **only in the playing phase** (`:752`) but is set immediately before `setPhase('complete')` (`:618`), so it is never on screen at the moment it is decided. No persistent level/offset indicator anywhere | Show the decision on the completion screen; add a diagnostics panel for test builds       |
-| 6   | Dictionary level drives selection          | Brief §4             | `difficulty.js` `questionDifficulty` — CEFR band × 10 dominates                                                                                                                                                                                        | Correct — no competing classification                                                                                                                                                                                                       | None. Verified conformant                                                                 |
-| 7   | XP is single-sourced                       | Brief §6             | All six games call `xpFor(outcome)`; `useGameSession.js:191` accumulates                                                                                                                                                                               | Correct                                                                                                                                                                                                                                     | None for XP itself                                                                        |
-| 8   | Scoreboard reconciles all categories       | Brief §6             | `SessionComplete.jsx:24-27` reports only `correct`, `learning`, `xpEarned`                                                                                                                                                                             | Missing: incorrect, skipped, words sent to review, star and badge progress                                                                                                                                                                  | Full reconciliation + invariant tests                                                     |
-| 9   | Stars                                      | Brief §5             | None                                                                                                                                                                                                                                                   | Absent                                                                                                                                                                                                                                      | **BLOCKED** — see reward-ownership finding                                                |
-| 10  | Badges                                     | Brief §5             | None                                                                                                                                                                                                                                                   | Absent                                                                                                                                                                                                                                      | **BLOCKED** — no canonical inventory exists                                               |
-| 11  | Global navigation in header                | Brief §8             | `App.jsx:82-107` — title, screen name, sign-in/out                                                                                                                                                                                                     | No global nav                                                                                                                                                                                                                               | Add nav                                                                                   |
-| 12  | Completion fanfare                         | Brief §7             | `SessionComplete.jsx:32-39` — a static 🏆 emoji                                                                                                                                                                                                        | No animation at all, so nothing to gate on `prefers-reduced-motion`                                                                                                                                                                         | Add celebration honouring reduced motion                                                  |
-| 13  | Mockup fidelity                            | Brief §8             | —                                                                                                                                                                                                                                                      | —                                                                                                                                                                                                                                           | **BLOCKED** — no mockups exist to compare against                                         |
+### Implemented and verified in this branch
+
+Each has a test that fails when the fix is reverted — checked, not assumed.
+
+| Defect (before)                                       | Now                                                 | Proof                                    |
+| ----------------------------------------------------- | --------------------------------------------------- | ---------------------------------------- |
+| No exit of any kind once a round started              | `GameNav` in every phase                            | Removing `{nav}` fails 2 tests           |
+| Summary's only non-play exit called an empty function | Three real exits; Browse only with a real handler   | `navigation.escape`, `GameShell.escape`  |
+| First Hint press was a no-op in Challenge mode        | Requested hints always raise help                   | Old expression fails the Challenge tests |
+| DomainFlash had no Skip                               | Skip records `skipped`                              | `games.notrapped`                        |
+| Adaptation was invisible                              | Decision shown on the summary                       | `navigation.escape`                      |
+| Scoreboard reported 3 of 5 categories                 | Every outcome, plus review and answered             | `navigation.escape`                      |
+| No fanfare, nothing to gate on reduced motion         | Bounded, reduced-motion-aware confetti              | `celebration`                            |
+| Exit died when IndexedDB deletion failed              | Navigation first, cleanup best-effort               | Reverting the ordering fails 2 tests     |
+| Leave/restart could resurrect a deleted session       | Pending write awaited; resume suppressed            | `GameShell.escape`                       |
+| Leave during loading raced initialisation             | Run token re-checked after each await               | `GameShell.escape`                       |
+| Skipped-only rounds could not be practised            | Gated on `needsReview`                              | `navigation.escape`                      |
+| Leave dialog was a keyboard trap                      | Focus in, Escape out, focus restored                | `navigation.escape`                      |
+| `LEVEL_PROFILE.maxUnits` declared, read by nothing    | Enforced in `selectForLevel`                        | `difficulty`                             |
+| `hintsUsed` never left the games                      | Carried to adaptation and literacy                  | `difficulty`, integration test           |
+| No literacy progression at all                        | `src/literacy.js`; band drives selection            | `literacy`                               |
+| Window slide, no controlled mix                       | 60/25/15 pools, deterministic fallback              | `difficulty`                             |
+| "Applies from the next question" was half false       | Says what actually happens                          | —                                        |
+| Hint existed in 1 of 6 games                          | Interactive Hint in both written-spelling games too | `pedagogy`                               |
+
+### Still open
+
+| Item                                                | Why                                                                                                                                                |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hints in Meaning Match, Letter Reveal, Domain Flash | Each needs help suited to its own mechanic — eliminate a distractor, pronunciation, related word — not a copy of the spelling hint. Not yet built. |
+| Per-game pedagogy records                           | Learning objective, prior knowledge, scaffolding and feedback sequence, mastery requirement, teacher role — one record per game.                   |
+| Pilot instrumentation                               | Events exist; not every pilot question is answerable from them yet.                                                                                |
+| Research-to-requirement table in the canonical spec | Belongs in `dictionary-games-tech-spec.md`, not here.                                                                                              |
+
+### Blocked, pending a decision
+
+| Item            | Blocker                                                                                                                                                                                                      |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Stars           | No canonical formula. Ownership now ruled Node/RLC; the contract does not yet carry it.                                                                                                                      |
+| Badges          | No inventory and no thresholds, in any repo.                                                                                                                                                                 |
+| Mockup fidelity | No mockups exist in any reachable repo. Requested from the owner.                                                                                                                                            |
+| The book        | _Digital Games and Language Learning_ was not supplied to this repository and has **not** been read here. Every rule implemented comes from the brief's enumeration of it — a specification, not a citation. |
 
 ## Open questions requiring a decision
 

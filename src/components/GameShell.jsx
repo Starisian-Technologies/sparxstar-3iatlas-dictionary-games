@@ -5,6 +5,7 @@ import { useGameSession } from '../hooks/useGameSession.js';
 import { useProgressSync } from '../hooks/useProgressSync.js';
 import { MODE, needsReview } from '../pedagogy.js';
 import GameNav from './GameNav.jsx';
+import { emptyLiteracy, literacyKey, promoteIfReady, recordWord, UNIT_BANDS } from '../literacy.js';
 import LeaveGameDialog from './LeaveGameDialog.jsx';
 import {
     ADJUST,
@@ -78,6 +79,27 @@ const GAME_TYPES = [
 
 /** Where per-language, per-skill difficulty offsets live for a guest. */
 const OFFSETS_KEY = 'aiwa-dict-difficulty-offsets';
+/**
+ * Where the literacy profile lives for a guest.
+ *
+ * Separate from the difficulty offsets on purpose. An offset is a small,
+ * disposable nudge inside a band; a literacy band is what the learner has
+ * demonstrated, and losing it would put an adult who had worked up to five-unit
+ * words back on three-unit ones.
+ */
+const LITERACY_KEY = 'aiwa-dict-literacy';
+
+function readStoredLiteracy() {
+    const stored = getLocalStorageItem(LITERACY_KEY);
+    if (!stored.available || !stored.value) return {};
+    try {
+        const parsed = JSON.parse(stored.value);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+        /* Corrupt storage is a fresh start, never a crash on open. */
+        return {};
+    }
+}
 
 const getLocalStorageItem = (key) => {
     try {
@@ -295,6 +317,23 @@ export default function GameShell({
      */
     const suppressResumeRef = useRef(false);
     /*
+     * Literacy profiles, keyed `${language}:${skill}`. A ref because results
+     * arrive inside an async chain and must accumulate synchronously; mirrored
+     * into state only when a band actually changes, which is what the screen
+     * needs to know about.
+     */
+    const literacyRef = useRef(readStoredLiteracy());
+    /*
+     * Words this learner has missed, across rounds.
+     *
+     * A ref rather than derived from the current session: review is supposed to
+     * bring a difficult word BACK, which means it must outlive the round that
+     * missed it. Reading it off `session.results` would also make the loading
+     * effect depend on every result and re-run mid-round.
+     */
+    const missedRef = useRef(new Set());
+    const [bandNotice, setBandNotice] = useState(null);
+    /*
      * Bumped on every deliberate transition. The loading effect captures it
      * and re-checks after each await, so an initialisation the player has
      * already walked away from cannot install its deck or force `playing`.
@@ -431,12 +470,27 @@ export default function GameShell({
              * word.
              */
             const skill = GAME_SKILL[selectedGame];
+            /*
+             * The literacy band drives selection, not just the score.
+             *
+             * A learner with no stored profile starts at THREE UNITS rather
+             * than at unrestricted Practice. Most players here speak Mandinka
+             * fluently and may never have written it: fluency is not literacy,
+             * and handing an adult a word they cannot spell as their first
+             * experience is the discouragement this design exists to avoid.
+             */
+            const litKey = literacyKey(sourceLanguage ?? '', skill);
+            const literacy = literacyRef.current[litKey] ?? emptyLiteracy();
             const sliced = selectForLevel(fetchedWords, {
                 level: playerLevel,
                 languageCode: sourceLanguage ?? '',
                 gameId: selectedGame,
                 offset: offsets[progressKey(sourceLanguage ?? '', skill)] ?? 0,
                 count: wordCount,
+                band: literacy.band,
+                /* Feeds the review pool — words this learner has missed before
+                 * come back through supported practice rather than vanishing. */
+                needsReviewFor: (w) => missedRef.current.has(w?.uuid),
             });
             setSetupError(null);
 
@@ -503,7 +557,14 @@ export default function GameShell({
 
     /* ── Handle a single word result from any game component ── */
     const handleWordResult = useCallback(
-        (uuid, outcome, attempts, xp, timeMs) => {
+        /*
+         * `hintsUsed` is the sixth argument, and it is not decorative: it is
+         * what adaptation was missing. `recordOutcome` has always accepted it
+         * and nothing ever passed it, so `hintRate` read zero however much help
+         * a learner took, and any decision that consulted it was made on a
+         * number that could not change.
+         */
+        (uuid, outcome, attempts, xp, timeMs, hintsUsed = 0) => {
             /*
              * Chain onto pendingResultRef so that back-to-back synchronous calls
              * (e.g. the final onResult + onComplete pair in DomainFlash) are serialized.
@@ -540,7 +601,29 @@ export default function GameShell({
                     const skillKey = progressKey(sourceLanguage ?? '', GAME_SKILL[selectedGame]);
                     performanceRef.current[skillKey] = recordOutcome(
                         performanceRef.current[skillKey] ?? emptyPerformance(),
-                        { outcome, attempts, timeMs }
+                        { outcome, attempts, hintsUsed, timeMs }
+                    );
+
+                    /*
+                     * And to the literacy profile, which is a different
+                     * question: adaptation asks "is this round pitched right?",
+                     * literacy asks "is this learner ready for longer words?".
+                     * Mastery here means first attempt, no hints — help is free
+                     * of penalty but it is not evidence of readiness.
+                     */
+                    if (needsReview(outcome)) missedRef.current.add(uuid);
+                    else missedRef.current.delete(uuid);
+
+                    const litKey = literacyKey(sourceLanguage ?? '', GAME_SKILL[selectedGame]);
+                    literacyRef.current[litKey] = recordWord(
+                        literacyRef.current[litKey] ?? emptyLiteracy(),
+                        {
+                            wordUuid: uuid,
+                            outcome,
+                            attempts,
+                            hintsUsed,
+                            skill: GAME_SKILL[selectedGame],
+                        }
                     );
 
                     await addEvent({
@@ -632,6 +715,29 @@ export default function GameShell({
          * moves nothing, and one mistake never moves anything.
          */
         const skillKey = progressKey(sourceLanguage ?? '', GAME_SKILL[selectedGame]);
+        /*
+         * Promotion is decided here, and it is a DIFFERENT decision from
+         * adaptation. Adaptation nudges the window by ±2 inside a band;
+         * promotion moves the learner to longer words and requires sustained
+         * mastery across ten unique words. Accumulated XP never promotes.
+         */
+        const litKey = literacyKey(sourceLanguage ?? '', GAME_SKILL[selectedGame]);
+        const promotion = promoteIfReady(literacyRef.current[litKey] ?? emptyLiteracy());
+        if (promotion.promoted) {
+            literacyRef.current[litKey] = promotion.literacy;
+            const to = UNIT_BANDS.find((b) => b.id === promotion.to);
+            setBandNotice(
+                to
+                    ? `You are ready for longer words — now up to ${
+                          Number.isFinite(to.max) ? to.max : to.min + '+'
+                      } letters.`
+                    : null
+            );
+        } else {
+            setBandNotice(null);
+        }
+        setLocalStorageItem(LITERACY_KEY, JSON.stringify(literacyRef.current));
+
         const adjustment = decideAdjustment(performanceRef.current[skillKey], { adaptive });
         if (adjustment !== ADJUST.HOLD) {
             setOffsets((prev) => ({
@@ -904,8 +1010,18 @@ export default function GameShell({
                             {p.label}
                         </button>
                     ))}
+                    {/*
+                     * Says what actually happens, which is two different things
+                     * at two different times.
+                     *
+                     * It read "Applies from the next question" — true of the
+                     * assistance, false of the words. The deck is chosen when
+                     * the round loads, so changing level mid-round cannot
+                     * re-deal it; the code comments admitted this while the
+                     * label told the player otherwise.
+                     */}
                     <span className="w-full text-[11px] text-gray-400">
-                        Applies from the next question
+                        Help changes next question; new word level begins next game
                     </span>
                     <button
                         type="button"
@@ -954,7 +1070,7 @@ export default function GameShell({
                     onPlayAgain={handlePlayAgain}
                     onChooseAnother={handleChooseAnother}
                     onHome={handleHome}
-                    adjustNotice={adjustNotice}
+                    adjustNotice={bandNotice ?? adjustNotice}
                     /* Forwarded, not defaulted: a host that implements a
                      * Browse tab gets the control, and a host that does not
                      * gets no dead button. */

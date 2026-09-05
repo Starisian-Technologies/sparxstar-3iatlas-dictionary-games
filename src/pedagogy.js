@@ -270,5 +270,15 @@ export function resultFor(attempt, now = Date.now()) {
         attempts: Math.max(1, attempt.attemptsUsed),
         xp: xpFor(attempt.outcome ?? OUTCOME.SKIPPED),
         timeMs: elapsedMs(attempt, now),
+        /*
+         * Carried out of the learn-loop because adaptation needs it.
+         *
+         * `recordOutcome` has always accepted `hintsUsed`, but nothing supplied
+         * it: the games' `onResult` contract stopped at `timeMs`, so `hintRate`
+         * was structurally zero no matter how much help a learner took. A test
+         * calling `decideAdjustment` with synthetic hint data proved only that
+         * the arithmetic worked, never that the UI fed it.
+         */
+        hintsUsed: attempt.hintsUsed ?? 0,
     };
 }

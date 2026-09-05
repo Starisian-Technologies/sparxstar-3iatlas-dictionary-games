@@ -62,8 +62,8 @@ export default function MeaningMatch({
     if (!word) return null;
 
     const report = (resolved) => {
-        const { outcome, attempts, xp, timeMs } = resultFor(resolved);
-        onResult(word.uuid, outcome, attempts, xp, timeMs);
+        const { outcome, attempts, xp, timeMs, hintsUsed } = resultFor(resolved);
+        onResult(word.uuid, outcome, attempts, xp, timeMs, hintsUsed);
     };
 
     const handleSelect = (idx) => {

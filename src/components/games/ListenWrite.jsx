@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Volume2, RotateCcw } from 'lucide-react';
+import { Volume2, RotateCcw, Lightbulb } from 'lucide-react';
 import AccessoryBar from '../AccessoryBar.jsx';
 import AnswerReveal from '../AnswerReveal.jsx';
 import { MODE, OUTCOME, xpFor } from '../../pedagogy.js';
@@ -44,6 +44,15 @@ export default function ListenWrite({
     const [index, setIndex] = useState(0);
     const [input, setInput] = useState('');
     const [attempts, setAttempts] = useState(0);
+    /*
+     * Hints the player ASKED for, counted separately from wrong attempts.
+     *
+     * Two reasons. Adaptation needs it — `recordOutcome` has always taken
+     * `hintsUsed` and nothing ever supplied it, so hint rate was structurally
+     * zero. And a word spelled with help is `learning`, not `correct`, which
+     * cannot be decided without knowing help was taken.
+     */
+    const [hintsUsed, setHintsUsed] = useState(0);
     const [revealed, setRevealed] = useState('');
     const [status, setStatus] = useState(null);
     /*
@@ -70,7 +79,14 @@ export default function ListenWrite({
         audio.pause();
         audio.src = word.audio_url;
         audio.currentTime = 0;
-        audio.play().catch(() => {});
+        /*
+         * `play()` does not always return a Promise. The spec says it does, but
+         * jsdom returns undefined and so do some older mobile browsers — and
+         * `undefined.catch` throws inside the effect, unmounting the game with
+         * a blank screen. Autoplay here is best-effort, so a missing Promise is
+         * not an error.
+         */
+        audio.play()?.catch?.(() => {});
         return () => {
             audio.pause();
         };
@@ -126,7 +142,14 @@ export default function ListenWrite({
         if (!audio || !word?.audio_url) return;
         audio.pause();
         audio.currentTime = 0;
-        audio.play().catch(() => {});
+        /*
+         * `play()` does not always return a Promise. The spec says it does, but
+         * jsdom returns undefined and so do some older mobile browsers — and
+         * `undefined.catch` throws inside the effect, unmounting the game with
+         * a blank screen. Autoplay here is best-effort, so a missing Promise is
+         * not an error.
+         */
+        audio.play()?.catch?.(() => {});
     };
 
     const handleSubmit = (e) => {
@@ -145,14 +168,15 @@ export default function ListenWrite({
              * code always reported `correct`, so a player who needed all three
              * attempts was paid the same as one who knew it outright.
              */
-            const resolved = attempts === 0 ? OUTCOME.CORRECT : OUTCOME.LEARNING;
+            const resolved = attempts === 0 && hintsUsed === 0 ? OUTCOME.CORRECT : OUTCOME.LEARNING;
             setOutcome(resolved);
             onResult(
                 word.uuid,
                 resolved,
                 attempts + 1,
                 xpFor(resolved),
-                Date.now() - wordStartRef.current
+                Date.now() - wordStartRef.current,
+                hintsUsed
             );
         } else {
             const nextAttempts = attempts + 1;
@@ -175,7 +199,8 @@ export default function ListenWrite({
                     OUTCOME.INCORRECT,
                     nextAttempts,
                     xpFor(OUTCOME.INCORRECT),
-                    Date.now() - wordStartRef.current
+                    Date.now() - wordStartRef.current,
+                    hintsUsed
                 );
             } else {
                 /*
@@ -188,12 +213,31 @@ export default function ListenWrite({
                  * `hintLevelFor`. It does not remove it: a player who cannot
                  * get the word must still be able to finish, in either mode.
                  */
-                const unitsGiven = mode === MODE.CHALLENGE ? nextAttempts - 1 : nextAttempts;
+                const fromAttempts = mode === MODE.CHALLENGE ? nextAttempts - 1 : nextAttempts;
+                const unitsGiven = fromAttempts + hintsUsed;
                 setRevealed(
                     segmentHeadword(target, languageCode).slice(0, Math.max(0, unitsGiven)).join('')
                 );
             }
         }
+    };
+
+    /*
+     * Hint: reveal one more orthographic unit, on request.
+     *
+     * Capped one unit short of the whole word, so a hint never simply answers
+     * it. Taking one makes the result `learning` rather than `correct` — help
+     * is free of penalty but it is not the same as knowing.
+     */
+    const handleHint = () => {
+        if (status === 'correct' || outcome !== null) return;
+        const units = segmentHeadword(target, languageCode);
+        const next = hintsUsed + 1;
+        const fromAttempts = mode === MODE.CHALLENGE ? Math.max(0, attempts - 1) : attempts;
+        const given = Math.min(fromAttempts + next, Math.max(0, units.length - 1));
+        setHintsUsed(next);
+        setRevealed(units.slice(0, given).join(''));
+        onEvent?.({ type: 'game_hint_used', game: 'listen_write', word_uuid: word.uuid });
     };
 
     /* Skip. Always available, in both modes — neither game had any way out
@@ -208,7 +252,8 @@ export default function ListenWrite({
             OUTCOME.SKIPPED,
             Math.max(1, attempts),
             xpFor(OUTCOME.SKIPPED),
-            Date.now() - wordStartRef.current
+            Date.now() - wordStartRef.current,
+            hintsUsed
         );
         onEvent?.({ type: 'game_skip_used', game: 'listen_write', word_uuid: word.uuid });
     };
@@ -220,6 +265,7 @@ export default function ListenWrite({
             setIndex((i) => i + 1);
             setInput('');
             setAttempts(0);
+            setHintsUsed(0);
             setRevealed('');
             setStatus(null);
             setOutcome(null);
@@ -307,7 +353,17 @@ export default function ListenWrite({
 
             {/* Escape, always available. */}
             {outcome === null && (
-                <div className="flex shrink-0 justify-end">
+                <div className="flex shrink-0 items-center justify-end gap-2">
+                    {/* Help on request, beside the way out. Both are always
+                     *  available: a learner may take either at any point. */}
+                    <button
+                        type="button"
+                        onClick={handleHint}
+                        className="flex min-h-[44px] items-center gap-2 rounded-xl border border-gray-300 px-4 text-sm font-medium text-gray-700 dark:border-gray-600 dark:text-gray-200"
+                    >
+                        <Lightbulb size={16} aria-hidden="true" />
+                        Hint
+                    </button>
                     <button
                         type="button"
                         onClick={handleSkip}
