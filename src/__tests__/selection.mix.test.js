@@ -85,10 +85,18 @@ describe('the controlled mix', () => {
         expect(new Set(picked.map((w) => w.uuid)).size).toBe(picked.length);
     });
 
-    it('backfills deterministically rather than shortening the round', () => {
+    it('backfills rather than shortening the round', () => {
         /*
          * A language with almost no review words must not deal a short round
-         * forever. Same inputs, same output — no randomness in the fallback.
+         * forever. THAT is the guarantee; determinism was only how it used to
+         * be reached.
+         *
+         * This test asserted "same inputs, same output" until 2026-09, and that
+         * assertion is what made the selector deal one fixed pack of words
+         * every session — a learner met the same words forever, which reads to
+         * them as broken rather than as the deliberate review pool. Selection
+         * now varies inside each permitted pool. The round is still always
+         * full-length, which is what the test was protecting.
          */
         const opts = {
             level: LEVEL.PRACTICE,
@@ -97,10 +105,33 @@ describe('the controlled mix', () => {
             band: 'b3',
             needsReviewFor: () => false,
         };
-        const first = selectForLevel(pool, opts);
-        const second = selectForLevel(pool, opts);
+        for (let i = 0; i < 25; i += 1) {
+            expect(selectForLevel(pool, opts).length).toBe(8);
+        }
+    });
+
+    it('is reproducible when the caller supplies the randomness', () => {
+        /*
+         * Variation must not cost debuggability: given the same rng, the same
+         * inputs still give the same round, so a reported session can be
+         * replayed exactly.
+         */
+        const seeded = () => {
+            let n = 0;
+            /* Deterministic, spread across [0,1) — not a real PRNG, just a
+             * fixed sequence both runs share. */
+            return () => ((n = (n * 1103515245 + 12345) & 0x7fffffff), n / 0x7fffffff);
+        };
+        const opts = {
+            level: LEVEL.PRACTICE,
+            languageCode: 'mnk',
+            count: 8,
+            band: 'b3',
+            needsReviewFor: () => false,
+        };
+        const first = selectForLevel(pool, { ...opts, rng: seeded() });
+        const second = selectForLevel(pool, { ...opts, rng: seeded() });
         expect(first.map((w) => w.uuid)).toEqual(second.map((w) => w.uuid));
-        expect(first.length).toBe(8);
     });
 
     it('keeps the old window behaviour when there is no literacy band', () => {

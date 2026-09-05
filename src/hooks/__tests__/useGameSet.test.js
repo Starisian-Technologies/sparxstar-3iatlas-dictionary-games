@@ -17,7 +17,7 @@
  */
 import { act } from 'react';
 import { renderHook } from '../../testUtils/renderHook.js';
-import { useGameSet } from '../useGameSet.js';
+import { MAX_PACK_SIZE, useGameSet } from '../useGameSet.js';
 
 const BFF = '/api/dictionary';
 
@@ -180,7 +180,12 @@ describe('useGameSet — GET {bffPath}/game-set (private dictionary, via the BFF
 
         // The BFF refuses an over-cap size; a caller passing a large number is
         // a product question about pack size, not something to show a player.
-        expect(window.fetch.mock.calls[0][0]).toContain('size=50');
+        //
+        // Asserted against the exported constant, not a literal. This said
+        // `size=50` while the BFF's own GAMES_MAX_PACK_SIZE allowed 100, so the
+        // test pinned a ceiling that disagreed with the service and there was
+        // nothing to catch the disagreement.
+        expect(window.fetch.mock.calls[0][0]).toContain(`size=${MAX_PACK_SIZE}`);
     });
 
     it('reports a failure without inventing an empty word list', async () => {

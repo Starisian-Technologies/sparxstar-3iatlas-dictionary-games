@@ -39,6 +39,25 @@ import { DICTIONARY_BFF_PATH } from '../constants.js';
 import { adaptGamePackWords } from '../api/gamePackAdapter.js';
 
 /**
+ * The largest pack a caller may request.
+ *
+ * ONE home for this number. It was 50 here while the BFF's own
+ * `GAMES_MAX_PACK_SIZE` allows 100, so the client silently halved the ceiling
+ * it was written against — and a selection layer that needs a broad candidate
+ * pool in order to vary its rounds could not ask for one, however the
+ * deployment was configured. Two ceilings for one concept is the same
+ * duplicate-home defect as two canonical specs, just smaller.
+ *
+ * The BFF refuses an over-cap size rather than clamping it, and so does the
+ * Dictionary behind it. Clamping here keeps a caller passing a large number
+ * from turning into a 400 the player sees — the ceiling is a product decision
+ * about pack size, not an input-validation failure. If a deployment lowers
+ * GAMES_MAX_PACK_SIZE, the BFF still refuses and this clamp simply stops being
+ * the binding one; it is a client-side courtesy, never the enforcement.
+ */
+export const MAX_PACK_SIZE = 100;
+
+/**
  * @param {object} opts
  * @param {string} opts.language     ISO 639-3 code (required), e.g. 'mnk'
  * @param {string} [opts.domain]     Domain code (optional)
@@ -58,13 +77,7 @@ export function useGameSet({
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
 
-    /*
-     * The BFF refuses an over-cap size rather than clamping it, and so does the
-     * Dictionary behind it. Clamping here keeps a caller passing a large number
-     * from turning into a 400 the player sees — the ceiling is a product
-     * decision about pack size, not an input-validation failure.
-     */
-    const normalizedLimit = Math.min(50, Math.max(1, limit));
+    const normalizedLimit = Math.min(MAX_PACK_SIZE, Math.max(1, limit));
 
     useEffect(() => {
         if (!language) {
