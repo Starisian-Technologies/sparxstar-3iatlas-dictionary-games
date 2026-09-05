@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { Volume2, SkipForward } from 'lucide-react';
+import { Volume2, SkipForward, Lightbulb } from 'lucide-react';
 import { OUTCOME, xpFor } from '../../pedagogy.js';
+import { nextHint } from '../../hints.js';
 
 /**
  * DomainFlash — Game 4.6
@@ -31,6 +32,15 @@ export default function DomainFlash({ words, language, onResult, onComplete }) {
     const [index, setIndex] = useState(0);
     const [flipped, setFlipped] = useState(false);
     const [answered, setAnswered] = useState(false);
+    /*
+     * Help on a self-graded card.
+     *
+     * A flashcard is not marked by the app, so help here is not about earning a
+     * result: it is about giving the player enough to judge honestly whether
+     * they knew the word. Pronunciation, meaning, an example, then the root.
+     */
+    const [shownHints, setShownHints] = useState([]);
+    const [hintsUsed, setHintsUsed] = useState(0);
     const wordStartRef = useRef(Date.now());
 
     const word = deck[index];
@@ -74,6 +84,14 @@ export default function DomainFlash({ words, language, onResult, onComplete }) {
      * an outcome that paid +5 for a word the player said they did not know,
      * which is a defect against the approved table rather than a new hook.
      */
+    const handleHint = () => {
+        if (answered) return;
+        const hint = nextHint('domain_flash', word, shownHints.length, { language });
+        if (!hint) return;
+        setShownHints((prev) => [...prev, hint]);
+        setHintsUsed((n) => n + 1);
+    };
+
     const handleKnew = () => {
         if (answered) return;
         setAnswered(true);
@@ -82,7 +100,8 @@ export default function DomainFlash({ words, language, onResult, onComplete }) {
             OUTCOME.CORRECT,
             1,
             xpFor(OUTCOME.CORRECT),
-            Date.now() - wordStartRef.current
+            Date.now() - wordStartRef.current,
+            hintsUsed
         );
         next();
     };
@@ -95,7 +114,8 @@ export default function DomainFlash({ words, language, onResult, onComplete }) {
             OUTCOME.INCORRECT,
             1,
             xpFor(OUTCOME.INCORRECT),
-            Date.now() - wordStartRef.current
+            Date.now() - wordStartRef.current,
+            hintsUsed
         );
         next();
     };
@@ -117,7 +137,8 @@ export default function DomainFlash({ words, language, onResult, onComplete }) {
             OUTCOME.SKIPPED,
             1,
             xpFor(OUTCOME.SKIPPED),
-            Date.now() - wordStartRef.current
+            Date.now() - wordStartRef.current,
+            hintsUsed
         );
         /* No telemetry emit here: this game takes no `onEvent` prop, by the
          * decision recorded above while OQ-G4 is open. `onEvent?.()` would be a
@@ -132,6 +153,8 @@ export default function DomainFlash({ words, language, onResult, onComplete }) {
             setIndex((i) => i + 1);
             setFlipped(false);
             setAnswered(false);
+            setShownHints([]);
+            setHintsUsed(0);
         }
     };
 
@@ -207,7 +230,19 @@ export default function DomainFlash({ words, language, onResult, onComplete }) {
                                 <Volume2 size={22} aria-hidden="true" />
                             </button>
                         )}
-                        <div className="flex gap-3 mt-4 w-full max-w-xs">
+                        {shownHints.length > 0 && (
+                            <div className="mt-3 w-full max-w-xs space-y-1 rounded-xl bg-gray-50 p-3 text-left text-sm dark:bg-gray-800">
+                                {shownHints.map((h) => (
+                                    <p key={h.id} className="text-gray-700 dark:text-gray-200">
+                                        <span className="text-xs uppercase tracking-wide text-gray-400">
+                                            {h.label}:{' '}
+                                        </span>
+                                        {h.text}
+                                    </p>
+                                ))}
+                            </div>
+                        )}
+                        <div className="mt-4 flex w-full max-w-xs flex-wrap gap-3">
                             <button
                                 type="button"
                                 onClick={handleLearning}
@@ -215,6 +250,15 @@ export default function DomainFlash({ words, language, onResult, onComplete }) {
                                 className="flex-1 py-3 rounded-xl font-semibold text-sm bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 transition-colors"
                             >
                                 Still learning
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleHint}
+                                disabled={answered}
+                                className="flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl border border-gray-300 px-3 text-sm font-medium text-gray-600 transition-colors dark:border-gray-600 dark:text-gray-300"
+                            >
+                                <Lightbulb size={16} aria-hidden="true" />
+                                Hint
                             </button>
                             <button
                                 type="button"

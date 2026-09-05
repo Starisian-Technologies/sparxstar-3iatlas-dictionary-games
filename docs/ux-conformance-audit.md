@@ -1,5 +1,14 @@
 # Dictionary Games — UX and Progression Conformance Audit
 
+> ## Status: core progression implemented; remaining requirements open or blocked
+>
+> Not "all fixed". The navigation repair, the hint data path, the literacy
+> progression engine, the controlled question mix and the per-game help are
+> implemented and tested. Stars, badges and mockup conformity are **blocked**;
+> reconciliation against the research source is **open** because the book was
+> never supplied. The three sections below say which is which, and nothing is
+> claimed as done that is not.
+
 > Step 1 of the corrective brief. Every row was verified by reading the code at
 > `d26a7e5` (`main`) or the cited spec file. Nothing here is recalled: each
 > claim names the file and line that supports it, so a reviewer can disagree
@@ -100,12 +109,11 @@ Each has a test that fails when the fix is reverted — checked, not assumed.
 
 ### Still open
 
-| Item                                                | Why                                                                                                                                                |
-| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Hints in Meaning Match, Letter Reveal, Domain Flash | Each needs help suited to its own mechanic — eliminate a distractor, pronunciation, related word — not a copy of the spelling hint. Not yet built. |
-| Per-game pedagogy records                           | Learning objective, prior knowledge, scaffolding and feedback sequence, mastery requirement, teacher role — one record per game.                   |
-| Pilot instrumentation                               | Events exist; not every pilot question is answerable from them yet.                                                                                |
-| Research-to-requirement table in the canonical spec | Belongs in `dictionary-games-tech-spec.md`, not here.                                                                                              |
+| Item                                                | Why                                                                                                                              |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Per-game pedagogy records                           | Learning objective, prior knowledge, scaffolding and feedback sequence, mastery requirement, teacher role — one record per game. |
+| Pilot instrumentation                               | Events exist; not every pilot question is answerable from them yet.                                                              |
+| Research-to-requirement table in the canonical spec | Belongs in `dictionary-games-tech-spec.md`, not here.                                                                            |
 
 ### Blocked, pending a decision
 
