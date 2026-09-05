@@ -1,4 +1,4 @@
-# Platform Decisions — Auto-synced from registry@0123ea6
+# Platform Decisions — Auto-synced from registry@ea4e3d4
 # DO NOT EDIT — this file is overwritten on every registry change
 
 - ADR-001: Relational canonical record; graph is derived projection only
@@ -33,3 +33,4 @@
 - ADR-030: Assign the `sky` Product Spec to a Single Proposing Repository
 - ADR-031: Require a Terminal Validation Outcome Before an Audit Event Is Delivered
 - ADR-032: No repository ships a `key-vault` grant surface until its wire contract is recorded where every side can read it
+- ADR-033: Name the product-specification registry the canonical home for RLC-Spec-v4.0

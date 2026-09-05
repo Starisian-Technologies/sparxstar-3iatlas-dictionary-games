@@ -1,4 +1,4 @@
-# Open Questions — Auto-synced from registry@0123ea6
+# Open Questions — Auto-synced from registry@ea4e3d4
 # DO NOT EDIT
 
 # Open Questions
@@ -257,22 +257,23 @@ into every consuming repo's `.sparxstar/specs/` at CI time, so the *wrong*
 answer is the one that propagates, and a UI built against it would tell a
 learner who used up their daily minutes that their account is locked.
 
-**Resolved by owner ruling, 2026-09-05: the product-specification registry
-(`sparxstar-product-specification-registry`) is the sole canonical home.**
+**Answered by owner ruling, 2026-09-05: the product-specification registry is
+the sole canonical home.** Stated by role, per this registry's rule against
+client-specific names in canonical decision text; the repository is identified
+in item 2 of the question above.
 
-Consequences, which are the point of the ruling:
+Two different things, deliberately kept apart:
 
-- The registry copy is corrected from verified code and contracts — not from
-  any other document — and that corrected copy is canonical.
-- The engine repo's copy and the `rlc-ui` snapshot are **no longer canonical**.
-  Neither may declare itself so, and the engine's `AGENTS.md` §2 needs updating
-  to match; until it is, that file contradicts this ruling.
-- Neither remaining copy may be hand-maintained as a rival. A derived view or a
-  pointer is fine; a second editable original is not.
+- **The ruling is made.** Teams act on it now; it is not still under
+  discussion, and this question is not awaiting an answer.
+- **It becomes platform law when
+  [ADR-033](decisions/ADR-033-canonical-home-for-rlc-spec-v4.md) is Accepted.**
+  That record is `Proposed`. Until it is ratified, cite the ruling, not a
+  binding ADR — and the consequences live in ADR-033 rather than being restated
+  here.
 
-Still open and **not** resolved by this ruling: whether the `rlc-games`
-registry key and the engine's `aiwa-rwc-rsc` key describe two products or one.
-They are currently backed by the same source document. Tracked as OQ-020.
+Not resolved by this ruling: whether the `rlc-games` registry key and the
+engine's `aiwa-rwc-rsc` key describe two products or one. Tracked as OQ-020.
 
 ## OQ-020 — Are `rlc-games` and `aiwa-rwc-rsc` two products or one? [OPEN]
 
