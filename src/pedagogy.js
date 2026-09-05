@@ -240,7 +240,21 @@ export function isResolved(attempt) {
  * rather than a player having to fail again to see more.
  */
 export function currentHintLevel(attempt) {
-    return hintLevelFor(attempt.attemptsUsed + attempt.hintsUsed, attempt.mode);
+    /*
+     * A hint the player ASKED for always counts, whatever the mode.
+     *
+     * The bug: this passed `attemptsUsed + hintsUsed` through `hintLevelFor`,
+     * which subtracts 1 in Challenge mode. On a fresh word that made the first
+     * press `max(0, 0 + 1 - 1) = 0` — the same level as before the press — so
+     * the player tapped Hint and nothing happened. Challenge mode is supposed
+     * to hold back help the player has NOT asked for; it was also swallowing
+     * the help they did ask for.
+     *
+     * So the mode offset now applies to attempts only, and requested hints are
+     * added afterwards at full value. Challenge still starts colder — a wrong
+     * attempt buys no help there — but Hint always does something.
+     */
+    return hintLevelFor(attempt.attemptsUsed, attempt.mode) + attempt.hintsUsed;
 }
 
 /**
@@ -256,5 +270,15 @@ export function resultFor(attempt, now = Date.now()) {
         attempts: Math.max(1, attempt.attemptsUsed),
         xp: xpFor(attempt.outcome ?? OUTCOME.SKIPPED),
         timeMs: elapsedMs(attempt, now),
+        /*
+         * Carried out of the learn-loop because adaptation needs it.
+         *
+         * `recordOutcome` has always accepted `hintsUsed`, but nothing supplied
+         * it: the games' `onResult` contract stopped at `timeMs`, so `hintRate`
+         * was structurally zero no matter how much help a learner took. A test
+         * calling `decideAdjustment` with synthetic hint data proved only that
+         * the arithmetic worked, never that the UI fed it.
+         */
+        hintsUsed: attempt.hintsUsed ?? 0,
     };
 }

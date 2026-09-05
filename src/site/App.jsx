@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import GameShell from '../components/GameShell.jsx';
 import { DICTIONARY_BFF_PATH, ENGINE_URL, IDENTITY_URL, UI_LANGUAGE } from './config.js';
 import { useIdentityAuth } from './auth/useIdentityAuth.js';
@@ -71,12 +71,6 @@ export default function App() {
         };
     }, []);
 
-    const handleBrowse = useCallback(() => {
-        /* The Browse tab is the AIWA app's surface, not this site's. Rather
-         * than render a dead control, GameShell's onBrowse is wired to nothing
-         * here; a future release can point it at the dictionary front end. */
-    }, []);
-
     return (
         <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-900 dark:text-slate-50">
             <header className="border-b border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
@@ -123,7 +117,12 @@ export default function App() {
                             sourceLanguage={sourceLanguage}
                             languages={languages}
                             onSourceLanguage={setSourceLanguage}
-                            onBrowse={handleBrowse}
+                            /* Deliberately NOT passed. The Browse tab is the
+                             * AIWA app's surface, not this site's, and passing
+                             * an empty function here is how a dead control
+                             * shipped as the only exit from the summary
+                             * screen. `SessionComplete` renders that button
+                             * only when a host supplies a real handler. */
                             engineUrl={ENGINE_URL}
                             /* Always supplied. It returns null until an adult
                              * signs in, which is exactly what keeps guest play

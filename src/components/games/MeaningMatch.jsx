@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
-import { SkipForward } from 'lucide-react';
+import { SkipForward, Lightbulb } from 'lucide-react';
 import AnswerReveal from '../AnswerReveal.jsx';
+import { nextHint } from '../../hints.js';
 import {
     MODE,
     beginWord,
@@ -9,6 +10,7 @@ import {
     resultFor,
     skip,
     startClock,
+    takeHint,
 } from '../../pedagogy.js';
 
 /**
@@ -43,6 +45,9 @@ export default function MeaningMatch({
      */
     const [eliminated, setEliminated] = useState([]);
     const [attempt, setAttempt] = useState(() => startClock(beginWord({ mode })));
+    /* Help shown so far, weakest first. Not spelling help: the task is choosing
+     * a meaning, so revealing letters would answer nothing that was asked. */
+    const [shownHints, setShownHints] = useState([]);
 
     const word = deck[index];
 
@@ -62,8 +67,8 @@ export default function MeaningMatch({
     if (!word) return null;
 
     const report = (resolved) => {
-        const { outcome, attempts, xp, timeMs } = resultFor(resolved);
-        onResult(word.uuid, outcome, attempts, xp, timeMs);
+        const { outcome, attempts, xp, timeMs, hintsUsed } = resultFor(resolved);
+        onResult(word.uuid, outcome, attempts, xp, timeMs, hintsUsed);
     };
 
     const handleSelect = (idx) => {
@@ -85,6 +90,22 @@ export default function MeaningMatch({
         onEvent?.({ type: 'game_retry_used', game: 'meaning_match', word_uuid: word.uuid });
     };
 
+    const handleHint = () => {
+        if (isResolved(attempt)) return;
+        const hint = nextHint('meaning_match', word, shownHints.length, { language });
+        if (!hint) return;
+
+        setAttempt((a) => takeHint(a));
+        if (hint.id === 'eliminate') {
+            /* This rung is the game's own mechanic rather than a field: remove
+             * one wrong option the player has not already ruled out. */
+            const wrong = options.findIndex((o, i) => !o.isCorrect && !eliminated.includes(i));
+            if (wrong >= 0) setEliminated((prev) => [...prev, wrong]);
+        }
+        setShownHints((prev) => [...prev, hint]);
+        onEvent?.({ type: 'game_hint_used', game: 'meaning_match', word_uuid: word.uuid });
+    };
+
     const handleSkip = () => {
         if (isResolved(attempt)) return;
         const next = skip(attempt);
@@ -100,6 +121,7 @@ export default function MeaningMatch({
             setIndex((i) => i + 1);
             setSelected(null);
             setEliminated([]);
+            setShownHints([]);
             setAttempt(startClock(beginWord({ mode })));
         }
     };
@@ -180,10 +202,33 @@ export default function MeaningMatch({
                         })}
                     </div>
 
+                    {shownHints.length > 0 && (
+                        <div className="shrink-0 space-y-1 rounded-xl bg-gray-50 p-3 text-sm dark:bg-gray-800">
+                            {shownHints
+                                .filter((h) => h.text)
+                                .map((h) => (
+                                    <p key={h.id} className="text-gray-700 dark:text-gray-200">
+                                        <span className="text-xs uppercase tracking-wide text-gray-400">
+                                            {h.label}:{' '}
+                                        </span>
+                                        {h.text}
+                                    </p>
+                                ))}
+                        </div>
+                    )}
+
                     <div className="flex shrink-0 items-center justify-between gap-2">
                         <span className="text-xs text-gray-400">
                             {attempt.maxAttempts - attempt.attemptsUsed} left
                         </span>
+                        <button
+                            type="button"
+                            onClick={handleHint}
+                            className="flex min-h-[44px] items-center gap-2 rounded-xl border border-gray-300 px-4 text-sm font-medium text-gray-700 dark:border-gray-600 dark:text-gray-200"
+                        >
+                            <Lightbulb size={16} aria-hidden="true" />
+                            Hint
+                        </button>
                         <button
                             type="button"
                             onClick={handleSkip}

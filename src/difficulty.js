@@ -31,6 +31,7 @@
  */
 
 import { SPELLABLE_UNIT_RANGE, profileFor, segmentHeadword } from './orthography.js';
+import { DEFAULT_POLICY, bandForWord, bandIndex } from './literacy.js';
 
 /* ── The player's level ─────────────────────────────────────────────────── */
 
@@ -331,31 +332,113 @@ export function applyAdjustment(offset, adjustment) {
  */
 export function selectForLevel(
     words,
-    { level = LEVEL.PRACTICE, languageCode, gameId, offset = 0, count, historyFor } = {}
+    {
+        level = LEVEL.PRACTICE,
+        languageCode,
+        gameId,
+        offset = 0,
+        count,
+        historyFor,
+        band = null,
+        policy = DEFAULT_POLICY,
+        needsReviewFor = null,
+    } = {}
 ) {
     const profile = levelProfile(level);
-    const scored = (words ?? []).map((word) => ({
+    const wanted = Number.isFinite(count) && count > 0 ? Math.floor(count) : (words ?? []).length;
+
+    /*
+     * `maxUnits` is ENFORCED here.
+     *
+     * It was declared on all three level profiles and read by nothing, so Learn
+     * mode — whose whole promise is short, supported words — could be dealt a
+     * word of any length. A documented constraint that does nothing is worse
+     * than no constraint: it reads as a guarantee in review.
+     */
+    const withinLevel = (w) => {
+        const units = segmentHeadword(w?.headword ?? '', languageCode).length;
+        return units > 0 && units <= profile.maxUnits;
+    };
+
+    const scored = (words ?? []).filter(withinLevel).map((word) => ({
         word,
         score: questionDifficulty(word, {
             languageCode,
             gameId,
             history: historyFor?.(word),
         }),
+        band: bandForWord(word, languageCode),
     }));
 
-    /* Words in the level's own bands come first; others remain available rather
-     * than being discarded, because a band-less word (26.4% of the corpus) must
-     * still be playable. */
     const inBand = (w) =>
         profile.bands.includes(String(w?.difficulty ?? '').toUpperCase()) ? 0 : 1;
-
     scored.sort((a, b) => inBand(a.word) - inBand(b.word) || a.score - b.score);
 
-    /* The offset walks the window along the sorted list: harder means start
-     * further in. Bounded so it can never empty the round. */
-    const wanted = Number.isFinite(count) && count > 0 ? Math.floor(count) : scored.length;
-    const maxStart = Math.max(0, scored.length - wanted);
-    const start = Math.min(maxStart, Math.max(0, Math.round(offset) * 2));
+    /*
+     * Without a literacy band there is nothing to mix, so this keeps the old
+     * window behaviour — that is the path used by callers that have no
+     * progression profile yet, and by every existing test.
+     */
+    if (!band) {
+        const maxStart = Math.max(0, scored.length - wanted);
+        const start = Math.min(maxStart, Math.max(0, Math.round(offset) * 2));
+        return scored.slice(start, start + wanted).map((s) => s.word);
+    }
 
-    return scored.slice(start, start + wanted).map((s) => s.word);
+    /*
+     * THE CONTROLLED MIX.
+     *
+     * A round is not a slice of one sorted list. It is three pools, so that a
+     * learner practises what they are working on, revisits what they missed,
+     * and meets a small, deliberate number of harder words — the "slightly
+     * beyond current ability" the brief requires. Sliding a window could
+     * deliver a round of nothing but review, or nothing but stretch.
+     */
+    const here = bandIndex(band);
+    const isCurrent = (e) => e.band && bandIndex(e.band.id) === here;
+    const isNext = (e) => e.band && bandIndex(e.band.id) === here + 1;
+
+    const reviewPool = scored.filter((e) => isCurrent(e) && needsReviewFor?.(e.word));
+    const currentPool = scored.filter((e) => isCurrent(e) && !needsReviewFor?.(e.word));
+    const nextPool = scored.filter(isNext);
+
+    const take = (pool, n, used) => {
+        const out = [];
+        for (const entry of pool) {
+            if (out.length >= n) break;
+            if (used.has(entry.word)) continue;
+            used.add(entry.word);
+            out.push(entry);
+        }
+        return out;
+    };
+
+    const used = new Set();
+    const picked = [
+        ...take(currentPool, Math.round(wanted * policy.mix.current), used),
+        ...take(reviewPool, Math.round(wanted * policy.mix.review), used),
+        /* The stretch pool is walked by the adaptive offset, so fine-tuning
+         * moves WHICH harder words appear without changing the band. */
+        ...take(
+            nextPool.slice(Math.max(0, Math.round(offset))),
+            Math.round(wanted * policy.mix.next),
+            used
+        ),
+    ];
+
+    /*
+     * DETERMINISTIC FALLBACK. A pool that cannot fill its share must not
+     * shorten the round: a language with few review words would otherwise deal
+     * a short round forever. Backfill runs in a fixed order — current, review,
+     * next, then anything playable — so the same inputs always give the same
+     * round.
+     */
+    if (picked.length < wanted) {
+        for (const pool of [currentPool, reviewPool, nextPool, scored]) {
+            picked.push(...take(pool, wanted - picked.length, used));
+            if (picked.length >= wanted) break;
+        }
+    }
+
+    return picked.slice(0, wanted).map((e) => e.word);
 }

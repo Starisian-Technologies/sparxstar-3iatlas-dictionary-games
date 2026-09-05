@@ -134,8 +134,8 @@ export default function ArrangeWord({
         (resolved) => {
             if (!word || reportedRef.current.has(word.uuid)) return;
             reportedRef.current.add(word.uuid);
-            const { outcome, attempts, xp, timeMs } = resultFor(resolved);
-            onResult(word.uuid, outcome, attempts, xp, timeMs);
+            const { outcome, attempts, xp, timeMs, hintsUsed } = resultFor(resolved);
+            onResult(word.uuid, outcome, attempts, xp, timeMs, hintsUsed);
         },
         [word, onResult]
     );

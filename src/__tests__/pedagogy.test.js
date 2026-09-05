@@ -250,3 +250,48 @@ describe('reporting', () => {
         expect(attemptsRemaining(recordAnswer(a, false))).toBe(DEFAULT_MAX_ATTEMPTS - 1);
     });
 });
+
+describe('a hint the player asked for always helps', () => {
+    /*
+     * The shipped defect: `currentHintLevel` passed `attemptsUsed + hintsUsed`
+     * through `hintLevelFor`, which subtracts one in Challenge mode. On a fresh
+     * word the first press computed `max(0, 0 + 1 - 1) = 0` — identical to the
+     * level before the press — so the player tapped Hint and the screen did not
+     * change. Challenge mode is meant to withhold help the player has NOT asked
+     * for; it was also swallowing the help they did.
+     */
+    for (const mode of [MODE.PRACTICE, MODE.CHALLENGE]) {
+        it(`increases help on the first press in ${mode} mode`, () => {
+            const fresh = beginWord({ mode });
+            const before = currentHintLevel(fresh);
+            const after = currentHintLevel(takeHint(fresh));
+            expect(after).toBeGreaterThan(before);
+        });
+
+        it(`keeps increasing on each further press in ${mode} mode`, () => {
+            let attempt = beginWord({ mode });
+            let previous = currentHintLevel(attempt);
+            for (let i = 0; i < 3; i += 1) {
+                attempt = takeHint(attempt);
+                const level = currentHintLevel(attempt);
+                expect(level).toBeGreaterThan(previous);
+                previous = level;
+            }
+        });
+    }
+
+    it('still withholds unrequested help in Challenge mode', () => {
+        /*
+         * The fix must not erase the mode distinction. A wrong ATTEMPT buys
+         * help in Practice and none on the first attempt in Challenge.
+         */
+        const practice = recordAnswer(beginWord({ mode: MODE.PRACTICE }), false);
+        const challenge = recordAnswer(beginWord({ mode: MODE.CHALLENGE }), false);
+        expect(currentHintLevel(practice)).toBeGreaterThan(currentHintLevel(challenge));
+    });
+
+    it('does not raise the level once the word is resolved', () => {
+        const done = skip(beginWord({ mode: MODE.PRACTICE }));
+        expect(currentHintLevel(takeHint(done))).toBe(currentHintLevel(done));
+    });
+});

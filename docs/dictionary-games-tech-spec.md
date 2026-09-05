@@ -1039,3 +1039,39 @@ same, and port it there if not.
 - **2026-06-29** — Initial spec. Repo restructured out of the extracted archive
   into a standard layout; governance, standards workflow, and AI-agent
   instruction files added.
+
+## Research-to-requirement traceability
+
+> **Source note.** _Digital Games and Language Learning: Theory, Development and
+> Implementation_ has **not been read in this repository** — it was requested and
+> never supplied (checked: session attachments, the filesystem, and Drive by
+> title and full text). Every row's "principle" is the corrective brief's
+> _enumeration_ of the book's findings, which is a specification, not a
+> citation. **Reconciling these rows against the source is an open task**, and
+> until it is done no row here should be quoted as what the book says.
+
+| Research principle                | SPARXSTAR rule                                              | Implementation                                                                                | Test or pilot measure                                                              |
+| :-------------------------------- | :---------------------------------------------------------- | :-------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------- |
+| Freedom to fail                   | No penalty; retry, help, Skip and reveal always available   | `src/pedagogy.js` (`OUTCOME`, `XP_BY_OUTCOME`, `skip`, `revealAnswer`); shared `AnswerReveal` | `games.notrapped.test.jsx` — every game, every state, has a resolution and an exit |
+| Rapid feedback                    | Immediate instructional response to the exact action        | Per-game handlers resolve synchronously; `AnswerReveal` shows meaning, IPA, example           | `AnswerReveal.test.jsx`; `hint.chain.test.jsx`                                     |
+| Individual progression            | Mastery before advancement; never points                    | `src/literacy.js` — ten unique words, first attempt, unaided                                  | `literacy.test.js` — XP cannot promote; hinted words do not count                  |
+| Adjustable scaffolding            | Assistance escalates on request and fades with success      | `src/hints.js` per-game ladders; unit reveal in the written-spelling games                    | `hints.test.js`; `pedagogy.test.js`                                                |
+| Challenge–reward balance          | Reachable next-band words, in a controlled proportion       | `selectForLevel` 60 / 25 / 15 pools with deterministic backfill                               | `selection.mix.test.js`                                                            |
+| Learner autonomy                  | Mode choice and navigation never taken away                 | `GameNav` in every phase; level control; `LeaveGameDialog`                                    | `GameShell.escape.test.jsx`; `navigation.escape.test.jsx`                          |
+| Visible progress                  | XP, and progress the player can see and check               | `SessionComplete` reconciliation; live points in `GameNav`                                    | `navigation.escape.test.jsx` — categories sum to answered                          |
+| Pedagogy-first design             | Every game has a written teaching sequence                  | `docs/pedagogy-records.md`                                                                    | Six records, one per game                                                          |
+| Separate progression from rewards | Five systems, never collapsed                               | `literacy.js` header; `difficulty.js` header                                                  | `literacy.test.js` — skills cannot promote one another                             |
+| No external-reward overuse        | Rewards mark real accomplishment; no leaderboard this phase | `Celebration` bounded and reduced-motion aware; no leaderboard                                | `celebration.test.jsx`                                                             |
+| Iterative evidence                | Thresholds configurable, not locked                         | `progressionPolicy()`; `docs/gameplay-telemetry.md`                                           | `literacy.test.js` — policy override works                                         |
+
+### Pilot questions this cannot yet answer
+
+Instrumentation exists (`docs/gameplay-telemetry.md`) but these need real
+learners, and the `3 → 4 → 5+` ladder is deliberately a **starting policy** with
+configurable thresholds rather than a locked assumption:
+
+- Whether three-unit words are actually easier for these learners.
+- Whether dictionary and CEFR levels predict real performance.
+- Whether hints lead to later independent success.
+- Which orthographic patterns cause difficulty.
+- Whether users leave particular games before completion.

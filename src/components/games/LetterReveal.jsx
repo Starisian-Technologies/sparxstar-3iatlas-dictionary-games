@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useRef } from 'react';
-import { SkipForward } from 'lucide-react';
+import { SkipForward, Lightbulb } from 'lucide-react';
 import AnswerReveal from '../AnswerReveal.jsx';
 import { MODE, OUTCOME, xpFor } from '../../pedagogy.js';
+import { nextHint } from '../../hints.js';
 import { keysFor, partitionSpellable, segmentHeadword } from '../../orthography.js';
 
 /**
@@ -86,6 +87,13 @@ export default function LetterReveal({
      */
     const [outcome, setOutcome] = useState(null);
     const [tiltCount, setTiltCount] = useState(0);
+    /*
+     * Help that is NOT more letters. This game's whole mechanic is revealing
+     * letters, so a letter hint would simply play the game for the player; the
+     * ladder offers sound, meaning and an example instead.
+     */
+    const [shownHints, setShownHints] = useState([]);
+    const [hintsUsed, setHintsUsed] = useState(0);
     const revealedRef = useRef(new Set());
     const wrongGuessesRef = useRef(0);
     const wrongLettersRef = useRef(new Set());
@@ -170,7 +178,8 @@ export default function LetterReveal({
                      * flushed yet, so reading it here reports the PREVIOUS
                      * word's outcome (or null, worth 0) for a correct answer. */
                     xpFor(resolved),
-                    Date.now() - wordStartRef.current
+                    Date.now() - wordStartRef.current,
+                    hintsUsed
                 );
             }
         } else {
@@ -206,7 +215,8 @@ export default function LetterReveal({
                     OUTCOME.INCORRECT,
                     nextWrong,
                     xpFor(OUTCOME.INCORRECT),
-                    Date.now() - wordStartRef.current
+                    Date.now() - wordStartRef.current,
+                    hintsUsed
                 );
             }
         }
@@ -228,6 +238,8 @@ export default function LetterReveal({
             setDone(false);
             setOutcome(null);
             setTiltCount(0);
+            setShownHints([]);
+            setHintsUsed(0);
         }
     };
 
@@ -242,6 +254,15 @@ export default function LetterReveal({
 
     /* Skip. Always available, in both modes, at any point in the round —
      * the game previously had no way out other than five wrong guesses. */
+    const handleHint = () => {
+        if (done || outcome !== null) return;
+        const hint = nextHint('letter_reveal', word, shownHints.length, { language });
+        if (!hint) return;
+        setShownHints((prev) => [...prev, hint]);
+        setHintsUsed((n) => n + 1);
+        onEvent?.({ type: 'game_hint_used', game: 'letter_reveal', word_uuid: word?.uuid });
+    };
+
     const handleSkip = () => {
         if (doneRef.current) return;
         doneRef.current = true;
@@ -252,7 +273,8 @@ export default function LetterReveal({
             OUTCOME.SKIPPED,
             Math.max(1, wrongGuessesRef.current),
             xpFor(OUTCOME.SKIPPED),
-            Date.now() - wordStartRef.current
+            Date.now() - wordStartRef.current,
+            hintsUsed
         );
         onEvent?.({ type: 'game_skip_used', game: 'letter_reveal', word_uuid: word.uuid });
     };
@@ -349,8 +371,31 @@ export default function LetterReveal({
 
             {/* Escape. Present in both modes and at any point in the round —
              *  previously the only way out was five wrong guesses. */}
+            {/* Help that is not more letters — this game already reveals those
+             *  as its mechanic, so a letter hint would play it for the player. */}
+            {!done && shownHints.length > 0 && (
+                <div className="mb-2 shrink-0 space-y-1 rounded-xl bg-gray-50 p-3 text-sm dark:bg-gray-800">
+                    {shownHints.map((h) => (
+                        <p key={h.id} className="text-gray-700 dark:text-gray-200">
+                            <span className="text-xs uppercase tracking-wide text-gray-400">
+                                {h.label}:{' '}
+                            </span>
+                            {h.text}
+                        </p>
+                    ))}
+                </div>
+            )}
+
             {!done && (
                 <div className="flex shrink-0 justify-end">
+                    <button
+                        type="button"
+                        onClick={handleHint}
+                        className="flex min-h-[44px] items-center gap-2 rounded-xl border border-gray-300 px-4 text-sm font-medium text-gray-700 dark:border-gray-600 dark:text-gray-200"
+                    >
+                        <Lightbulb size={16} aria-hidden="true" />
+                        Hint
+                    </button>
                     <button
                         type="button"
                         onClick={handleSkip}

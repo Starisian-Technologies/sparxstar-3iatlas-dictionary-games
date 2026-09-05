@@ -4,6 +4,9 @@ import { useGameSet } from '../hooks/useGameSet.js';
 import { useGameSession } from '../hooks/useGameSession.js';
 import { useProgressSync } from '../hooks/useProgressSync.js';
 import { MODE, needsReview } from '../pedagogy.js';
+import GameNav from './GameNav.jsx';
+import { emptyLiteracy, literacyKey, promoteIfReady, recordWord, UNIT_BANDS } from '../literacy.js';
+import LeaveGameDialog from './LeaveGameDialog.jsx';
 import {
     ADJUST,
     ADJUST_MESSAGE,
@@ -76,6 +79,27 @@ const GAME_TYPES = [
 
 /** Where per-language, per-skill difficulty offsets live for a guest. */
 const OFFSETS_KEY = 'aiwa-dict-difficulty-offsets';
+/**
+ * Where the literacy profile lives for a guest.
+ *
+ * Separate from the difficulty offsets on purpose. An offset is a small,
+ * disposable nudge inside a band; a literacy band is what the learner has
+ * demonstrated, and losing it would put an adult who had worked up to five-unit
+ * words back on three-unit ones.
+ */
+const LITERACY_KEY = 'aiwa-dict-literacy';
+
+function readStoredLiteracy() {
+    const stored = getLocalStorageItem(LITERACY_KEY);
+    if (!stored.available || !stored.value) return {};
+    try {
+        const parsed = JSON.parse(stored.value);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+        /* Corrupt storage is a fresh start, never a crash on open. */
+        return {};
+    }
+}
 
 const getLocalStorageItem = (key) => {
     try {
@@ -225,6 +249,12 @@ export default function GameShell({
 
     /* ── Session phase: 'setup' | 'loading' | 'playing' | 'complete' ── */
     const [phase, setPhase] = useState('setup');
+    /*
+     * Set when leaving would discard unfinished work, so the player is asked
+     * rather than losing a half-finished round to a mis-tap. Null means no
+     * question is pending.
+     */
+    const [confirmLeave, setConfirmLeave] = useState(null);
 
     /* ── Active game words (sliced + filtered for the chosen game) ── */
     const [gameWords, setGameWords] = useState([]);
@@ -274,6 +304,41 @@ export default function GameShell({
      * before the last recordResult write has finished.
      */
     const pendingResultRef = useRef(Promise.resolve());
+    /*
+     * Set when the player deliberately LEAVES a round.
+     *
+     * The resume effect below auto-re-enters any session that is not marked
+     * complete, which is right after a reload and catastrophic after an exit:
+     * a result write still in flight when the player leaves lands after
+     * `clearSession()` and re-persists the very session that was deleted, and
+     * the resume effect then drags them straight back into the game they just
+     * left. A flag, not a state, because it must be readable synchronously
+     * before any await.
+     */
+    const suppressResumeRef = useRef(false);
+    /*
+     * Literacy profiles, keyed `${language}:${skill}`. A ref because results
+     * arrive inside an async chain and must accumulate synchronously; mirrored
+     * into state only when a band actually changes, which is what the screen
+     * needs to know about.
+     */
+    const literacyRef = useRef(readStoredLiteracy());
+    /*
+     * Words this learner has missed, across rounds.
+     *
+     * A ref rather than derived from the current session: review is supposed to
+     * bring a difficult word BACK, which means it must outlive the round that
+     * missed it. Reading it off `session.results` would also make the loading
+     * effect depend on every result and re-run mid-round.
+     */
+    const missedRef = useRef(new Set());
+    const [bandNotice, setBandNotice] = useState(null);
+    /*
+     * Bumped on every deliberate transition. The loading effect captures it
+     * and re-checks after each await, so an initialisation the player has
+     * already walked away from cannot install its deck or force `playing`.
+     */
+    const runTokenRef = useRef(0);
 
     /* ── Fetch domains when source language changes ── */
     useEffect(() => {
@@ -339,6 +404,8 @@ export default function GameShell({
 
     /* ── Resume an in-progress session when the Play tab is opened ── */
     useEffect(() => {
+        /* A deliberate exit is not a crash: do not resume what was left. */
+        if (suppressResumeRef.current) return;
         if (session && session.completedAt === null && phase === 'setup') {
             /* Session is in progress — offer to resume. */
             /* For simplicity, we auto-resume: rebuild gameWords from session. */
@@ -377,6 +444,9 @@ export default function GameShell({
     useEffect(() => {
         const load = async () => {
             if (phase !== 'loading') return;
+            /* Captured once; re-checked after every await so a load the player
+             * has abandoned cannot resurrect the game around them. */
+            const token = runTokenRef.current;
             if (gameSetLoading) return;
             if (gameSetError) {
                 setSetupError(gameSetError);
@@ -400,12 +470,27 @@ export default function GameShell({
              * word.
              */
             const skill = GAME_SKILL[selectedGame];
+            /*
+             * The literacy band drives selection, not just the score.
+             *
+             * A learner with no stored profile starts at THREE UNITS rather
+             * than at unrestricted Practice. Most players here speak Mandinka
+             * fluently and may never have written it: fluency is not literacy,
+             * and handing an adult a word they cannot spell as their first
+             * experience is the discouragement this design exists to avoid.
+             */
+            const litKey = literacyKey(sourceLanguage ?? '', skill);
+            const literacy = literacyRef.current[litKey] ?? emptyLiteracy();
             const sliced = selectForLevel(fetchedWords, {
                 level: playerLevel,
                 languageCode: sourceLanguage ?? '',
                 gameId: selectedGame,
                 offset: offsets[progressKey(sourceLanguage ?? '', skill)] ?? 0,
                 count: wordCount,
+                band: literacy.band,
+                /* Feeds the review pool — words this learner has missed before
+                 * come back through supported practice rather than vanishing. */
+                needsReviewFor: (w) => missedRef.current.has(w?.uuid),
             });
             setSetupError(null);
 
@@ -418,10 +503,15 @@ export default function GameShell({
                     words: sliced,
                 });
             } catch (error) {
+                if (runTokenRef.current !== token) return;
                 setSetupError(error?.message ?? 'Unable to start the game session.');
                 setPhase('setup');
                 return;
             }
+
+            /* The player left while this was initialising. Do not put them back
+             * into a game they walked away from. */
+            if (runTokenRef.current !== token) return;
 
             setGameWords(sliced);
             setPhase('playing');
@@ -467,7 +557,14 @@ export default function GameShell({
 
     /* ── Handle a single word result from any game component ── */
     const handleWordResult = useCallback(
-        (uuid, outcome, attempts, xp, timeMs) => {
+        /*
+         * `hintsUsed` is the sixth argument, and it is not decorative: it is
+         * what adaptation was missing. `recordOutcome` has always accepted it
+         * and nothing ever passed it, so `hintRate` read zero however much help
+         * a learner took, and any decision that consulted it was made on a
+         * number that could not change.
+         */
+        (uuid, outcome, attempts, xp, timeMs, hintsUsed = 0) => {
             /*
              * Chain onto pendingResultRef so that back-to-back synchronous calls
              * (e.g. the final onResult + onComplete pair in DomainFlash) are serialized.
@@ -504,7 +601,29 @@ export default function GameShell({
                     const skillKey = progressKey(sourceLanguage ?? '', GAME_SKILL[selectedGame]);
                     performanceRef.current[skillKey] = recordOutcome(
                         performanceRef.current[skillKey] ?? emptyPerformance(),
-                        { outcome, attempts, timeMs }
+                        { outcome, attempts, hintsUsed, timeMs }
+                    );
+
+                    /*
+                     * And to the literacy profile, which is a different
+                     * question: adaptation asks "is this round pitched right?",
+                     * literacy asks "is this learner ready for longer words?".
+                     * Mastery here means first attempt, no hints — help is free
+                     * of penalty but it is not evidence of readiness.
+                     */
+                    if (needsReview(outcome)) missedRef.current.add(uuid);
+                    else missedRef.current.delete(uuid);
+
+                    const litKey = literacyKey(sourceLanguage ?? '', GAME_SKILL[selectedGame]);
+                    literacyRef.current[litKey] = recordWord(
+                        literacyRef.current[litKey] ?? emptyLiteracy(),
+                        {
+                            wordUuid: uuid,
+                            outcome,
+                            attempts,
+                            hintsUsed,
+                            skill: GAME_SKILL[selectedGame],
+                        }
                     );
 
                     await addEvent({
@@ -596,6 +715,29 @@ export default function GameShell({
          * moves nothing, and one mistake never moves anything.
          */
         const skillKey = progressKey(sourceLanguage ?? '', GAME_SKILL[selectedGame]);
+        /*
+         * Promotion is decided here, and it is a DIFFERENT decision from
+         * adaptation. Adaptation nudges the window by ±2 inside a band;
+         * promotion moves the learner to longer words and requires sustained
+         * mastery across ten unique words. Accumulated XP never promotes.
+         */
+        const litKey = literacyKey(sourceLanguage ?? '', GAME_SKILL[selectedGame]);
+        const promotion = promoteIfReady(literacyRef.current[litKey] ?? emptyLiteracy());
+        if (promotion.promoted) {
+            literacyRef.current[litKey] = promotion.literacy;
+            const to = UNIT_BANDS.find((b) => b.id === promotion.to);
+            setBandNotice(
+                to
+                    ? `You are ready for longer words — now up to ${
+                          Number.isFinite(to.max) ? to.max : to.min + '+'
+                      } letters.`
+                    : null
+            );
+        } else {
+            setBandNotice(null);
+        }
+        setLocalStorageItem(LITERACY_KEY, JSON.stringify(literacyRef.current));
+
         const adjustment = decideAdjustment(performanceRef.current[skillKey], { adaptive });
         if (adjustment !== ADJUST.HOLD) {
             setOffsets((prev) => ({
@@ -630,6 +772,10 @@ export default function GameShell({
     /* ── Start button ── */
     const handleStart = () => {
         if (!sourceLanguage) return;
+        /* A deliberate start clears the "do not resume" flag set by a
+         * deliberate exit — the player is choosing to play again. */
+        suppressResumeRef.current = false;
+        runTokenRef.current += 1;
         setSetupError(null);
         setPhase('loading');
     };
@@ -675,19 +821,147 @@ export default function GameShell({
 
     /* ── Play again ── */
     const handlePlayAgain = useCallback(async () => {
-        await clearSession();
+        /* Play Again can run while a final result is still being written, so
+         * it takes the same ordering as the other destructive transitions. */
+        suppressResumeRef.current = true;
+        runTokenRef.current += 1;
         setGameWords([]);
+
+        try {
+            await pendingResultRef.current;
+            await clearSession();
+        } catch (error) {
+            console.warn('Could not clear the session before replaying:', error);
+        }
+
+        suppressResumeRef.current = false;
+        runTokenRef.current += 1;
         setPhase('loading');
     }, [clearSession]);
+
+    /* ── Leaving a game ── */
+
+    /*
+     * `Games Home` from anywhere.
+     *
+     * The defect: there was no way out of a round at all, and the one control
+     * that looked like an exit — "Browse dictionary" on the summary — called a
+     * host callback wired to an empty function.
+     *
+     * Unfinished work is confirmed, finished work is not: once the round is
+     * over there is nothing left to lose, so asking would be noise.
+     */
+    const leaveToHome = useCallback(async () => {
+        setConfirmLeave(null);
+        /*
+         * Navigation FIRST, storage second, and never the other way round.
+         *
+         * An earlier version awaited `clearSession()` before changing phase.
+         * `clearSession` propagates an IndexedDB deletion failure, so on a
+         * device where storage is unavailable the await rejected and the phase
+         * never changed — making `Games Home` a dead control exactly in the
+         * conditions where a player most needs it. The exit this release exists
+         * to provide cannot itself depend on the disk.
+         *
+         * The flags are set before the first await, so the resume effect and
+         * any in-flight load both see the exit immediately.
+         */
+        suppressResumeRef.current = true;
+        runTokenRef.current += 1;
+        setGameWords([]);
+        setAdjustNotice(null);
+        setPhase('setup');
+
+        /* Now tidy up, best effort. `pendingResultRef` is awaited BEFORE the
+         * delete so a result still being written cannot re-persist the session
+         * after it is removed. */
+        try {
+            await pendingResultRef.current;
+            await clearSession();
+        } catch (error) {
+            /* The player has already left; a failed cleanup must not follow
+             * them. The stale record cannot resume — `suppressResumeRef`. */
+            console.warn('Could not clear the session on leaving:', error);
+        }
+    }, [clearSession]);
+
+    const handleHome = useCallback(() => {
+        const started = phase === 'playing' && (session?.results?.length ?? 0) > 0;
+        if (started) {
+            setConfirmLeave('home');
+            return;
+        }
+        leaveToHome();
+    }, [phase, session, leaveToHome]);
+
+    /* Restart deals a fresh round of the same game rather than resuming. */
+    const handleRestart = useCallback(async () => {
+        setConfirmLeave(null);
+        /* Same ordering as `leaveToHome`, and for the same reasons: a restart
+         * that cannot delete the old record must still restart. */
+        suppressResumeRef.current = true;
+        runTokenRef.current += 1;
+        setGameWords([]);
+        setAdjustNotice(null);
+
+        try {
+            await pendingResultRef.current;
+            await clearSession();
+        } catch (error) {
+            console.warn('Could not clear the session on restarting:', error);
+        }
+
+        /* Only now ask for a new round, so the fresh session is created after
+         * the old one has gone rather than racing it. */
+        suppressResumeRef.current = false;
+        runTokenRef.current += 1;
+        setPhase('loading');
+    }, [clearSession]);
+
+    /*
+     * `Choose another game` — home, but the intent is explicit. It is the same
+     * transition as `Games Home` because the setup screen IS the game chooser;
+     * naming it separately on the summary is what the brief asks for and costs
+     * nothing to honour.
+     */
+    const handleChooseAnother = handleHome;
+
+    /*
+     * One nav, rendered by every branch below.
+     *
+     * Built here rather than inside each branch on purpose: a branch that
+     * forgets it is the trap this fixes, and a shared constant cannot be
+     * forgotten by one of them.
+     */
+    const gameLabel = GAME_TYPES.find((g) => g.id === selectedGame)?.label ?? null;
+    const nav = (
+        <GameNav
+            gameName={phase === 'setup' ? null : gameLabel}
+            questionAt={phase === 'playing' ? (session?.currentIndex ?? 0) + 1 : null}
+            questionOf={phase === 'playing' ? gameWords.length : null}
+            points={session?.xpEarned ?? 0}
+            onHome={handleHome}
+            onRestart={phase === 'playing' || phase === 'complete' ? handleRestart : null}
+        />
+    );
+
+    /* Asked only when there is unfinished work; see `handleHome`. */
+    const leaveDialog = confirmLeave && (
+        <LeaveGameDialog onKeepPlaying={() => setConfirmLeave(null)} onLeave={leaveToHome} />
+    );
 
     /* ── Render ── */
 
     if (phase === 'loading') {
         return (
-            <div className="flex-1 flex flex-col items-center justify-center gap-4">
-                <Loader2 className="animate-spin" style={{ color: '#E91E8C' }} size={40} />
-                <p className="text-gray-400 text-sm">Loading game set&hellip;</p>
-                {gameSetError && <p className="text-red-500 text-sm">{gameSetError}</p>}
+            <div className="flex-1 flex flex-col overflow-hidden bg-white dark:bg-gray-900">
+                {nav}
+                <div className="flex flex-1 flex-col items-center justify-center gap-4">
+                    <Loader2 className="animate-spin" style={{ color: '#E91E8C' }} size={40} />
+                    <p className="text-gray-400 text-sm">Loading game set&hellip;</p>
+                    {gameSetError && <p className="text-red-500 text-sm">{gameSetError}</p>}
+                </div>
+                {leaveDialog}
             </div>
         );
     }
@@ -695,6 +969,7 @@ export default function GameShell({
     if (phase === 'playing') {
         return (
             <div className="flex-1 flex flex-col overflow-hidden bg-white dark:bg-gray-900">
+                {nav}
                 {/*
                  * Transparency strip. The current level is always visible and
                  * the player can change it or freeze adaptation at any time.
@@ -735,8 +1010,18 @@ export default function GameShell({
                             {p.label}
                         </button>
                     ))}
+                    {/*
+                     * Says what actually happens, which is two different things
+                     * at two different times.
+                     *
+                     * It read "Applies from the next question" — true of the
+                     * assistance, false of the words. The deck is chosen when
+                     * the round loads, so changing level mid-round cannot
+                     * re-deal it; the code comments admitted this while the
+                     * label told the player otherwise.
+                     */}
                     <span className="w-full text-[11px] text-gray-400">
-                        Applies from the next question
+                        Help changes next question; new word level begins next game
                     </span>
                     <button
                         type="button"
@@ -769,6 +1054,7 @@ export default function GameShell({
                     onComplete: handleComplete,
                     onEvent: addEvent,
                 })}
+                {leaveDialog}
             </div>
         );
     }
@@ -776,216 +1062,232 @@ export default function GameShell({
     if (phase === 'complete') {
         return (
             <div className="flex-1 flex flex-col overflow-y-auto bg-white dark:bg-gray-900">
+                {nav}
                 <SessionComplete
                     session={session}
                     learnedCount={learnedCount}
                     onPracticeMissed={handlePracticeMissed}
-                    onBrowse={onBrowse}
                     onPlayAgain={handlePlayAgain}
+                    onChooseAnother={handleChooseAnother}
+                    onHome={handleHome}
+                    adjustNotice={bandNotice ?? adjustNotice}
+                    /* Forwarded, not defaulted: a host that implements a
+                     * Browse tab gets the control, and a host that does not
+                     * gets no dead button. */
+                    onBrowse={onBrowse}
                 />
+                {leaveDialog}
             </div>
         );
     }
 
     /* ── Setup screen ── */
     return (
-        <div className="flex-1 flex flex-col overflow-y-auto p-4 gap-5 bg-white dark:bg-gray-900">
-            <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 shrink-0">Play</h2>
+        <div className="flex-1 flex flex-col overflow-y-auto bg-white dark:bg-gray-900">
+            {nav}
+            <div className="flex flex-1 flex-col gap-5 p-4">
+                <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 shrink-0">
+                    Play
+                </h2>
 
-            {setupError && (
-                <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
-                    {setupError}
-                </div>
-            )}
-
-            {/* Language check */}
-            {!sourceLanguage && (
-                <div className="rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700 p-6 text-center">
-                    <p className="text-gray-500 dark:text-gray-400 text-sm mb-3">
-                        Choose a source language to start playing
-                    </p>
-                    <div className="flex flex-wrap gap-2 justify-center">
-                        {languages.map((lang) => (
-                            <button
-                                key={lang.slug}
-                                type="button"
-                                onClick={() => onSourceLanguage(lang.slug)}
-                                className="px-4 py-2 rounded-full text-sm font-medium text-white transition-colors"
-                                style={{ background: '#E91E8C' }}
-                            >
-                                {lang.name}
-                            </button>
-                        ))}
+                {setupError && (
+                    <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
+                        {setupError}
                     </div>
-                </div>
-            )}
+                )}
 
-            {sourceLanguage && (
-                <>
-                    {/* Domain selector */}
-                    <section>
-                        <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">
-                            Domain (optional)
-                        </h3>
-                        {domainsLoading ? (
-                            <p className="text-sm text-gray-400">Loading domains&hellip;</p>
-                        ) : (
-                            <div className="relative">
-                                <select
-                                    value={selectedDomain}
-                                    onChange={(e) => setSelectedDomain(e.target.value)}
-                                    className="w-full appearance-none px-4 py-3 pr-10 rounded-xl bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:outline-none"
-                                >
-                                    <option value="">All domains</option>
-                                    {domains.map((d) => (
-                                        <option key={d.slug} value={d.slug}>
-                                            {d.name}
-                                            {d.count > 0 ? ` (${d.count})` : ''}
-                                        </option>
-                                    ))}
-                                </select>
-                                <ChevronDown
-                                    size={16}
-                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
-                                    aria-hidden="true"
-                                />
-                            </div>
-                        )}
-                    </section>
-
-                    {/* Game type */}
-                    <section>
-                        <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">
-                            Game
-                        </h3>
-                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                            {GAME_TYPES.map((g) => (
+                {/* Language check */}
+                {!sourceLanguage && (
+                    <div className="rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700 p-6 text-center">
+                        <p className="text-gray-500 dark:text-gray-400 text-sm mb-3">
+                            Choose a source language to start playing
+                        </p>
+                        <div className="flex flex-wrap gap-2 justify-center">
+                            {languages.map((lang) => (
                                 <button
-                                    key={g.id}
+                                    key={lang.slug}
                                     type="button"
-                                    onClick={() => setSelectedGame(g.id)}
-                                    className="p-3 rounded-xl text-left border-2 transition-all"
-                                    style={
-                                        selectedGame === g.id
-                                            ? {
-                                                  background:
-                                                      'linear-gradient(135deg,#E91E8C,#7B3FA0)',
-                                                  borderColor: 'transparent',
-                                                  color: 'white',
-                                              }
-                                            : {
-                                                  borderColor: '#f3f4f6',
-                                                  background: 'white',
-                                              }
-                                    }
+                                    onClick={() => onSourceLanguage(lang.slug)}
+                                    className="px-4 py-2 rounded-full text-sm font-medium text-white transition-colors"
+                                    style={{ background: '#E91E8C' }}
                                 >
-                                    <span className="block text-xl mb-1" aria-hidden="true">
-                                        {g.emoji}
-                                    </span>
-                                    <span
-                                        className="block text-xs font-bold"
-                                        style={{
-                                            color: selectedGame === g.id ? 'white' : '#1f2937',
-                                        }}
-                                    >
-                                        {g.label}
-                                    </span>
-                                    <span
-                                        className="block text-xs mt-0.5 leading-snug"
-                                        style={{
-                                            color:
-                                                selectedGame === g.id
-                                                    ? 'rgba(255,255,255,0.8)'
-                                                    : '#9ca3af',
-                                        }}
-                                    >
-                                        {g.description}
-                                    </span>
+                                    {lang.name}
                                 </button>
                             ))}
                         </div>
-                    </section>
+                    </div>
+                )}
 
-                    {/* Level. Three, chosen by the player and changeable at any
-                     *  time — including mid-round from the strip below the game.
-                     *  What no level changes is that Skip, reveal and navigation
-                     *  stay available: a harder level is not a trap. */}
-                    <section>
-                        <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">
-                            Level
-                        </h3>
-                        <div className="flex gap-2">
-                            {Object.entries(LEVEL_PROFILE)
-                                .map(([id, p]) => ({
-                                    id,
-                                    label: p.label,
-                                    hint: p.blurb,
-                                }))
-                                .map((m) => (
+                {sourceLanguage && (
+                    <>
+                        {/* Domain selector */}
+                        <section>
+                            <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">
+                                Domain (optional)
+                            </h3>
+                            {domainsLoading ? (
+                                <p className="text-sm text-gray-400">Loading domains&hellip;</p>
+                            ) : (
+                                <div className="relative">
+                                    <select
+                                        value={selectedDomain}
+                                        onChange={(e) => setSelectedDomain(e.target.value)}
+                                        className="w-full appearance-none px-4 py-3 pr-10 rounded-xl bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:outline-none"
+                                    >
+                                        <option value="">All domains</option>
+                                        {domains.map((d) => (
+                                            <option key={d.slug} value={d.slug}>
+                                                {d.name}
+                                                {d.count > 0 ? ` (${d.count})` : ''}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <ChevronDown
+                                        size={16}
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
+                                        aria-hidden="true"
+                                    />
+                                </div>
+                            )}
+                        </section>
+
+                        {/* Game type */}
+                        <section>
+                            <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">
+                                Game
+                            </h3>
+                            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                                {GAME_TYPES.map((g) => (
                                     <button
-                                        key={m.id}
+                                        key={g.id}
                                         type="button"
-                                        onClick={() => setPlayerLevel(m.id)}
-                                        aria-pressed={playerLevel === m.id}
-                                        className="flex-1 rounded-xl border-2 px-3 py-2.5 text-left transition-colors"
+                                        onClick={() => setSelectedGame(g.id)}
+                                        className="p-3 rounded-xl text-left border-2 transition-all"
                                         style={
-                                            playerLevel === m.id
+                                            selectedGame === g.id
                                                 ? {
-                                                      background: '#7B3FA0',
+                                                      background:
+                                                          'linear-gradient(135deg,#E91E8C,#7B3FA0)',
+                                                      borderColor: 'transparent',
+                                                      color: 'white',
+                                                  }
+                                                : {
+                                                      borderColor: '#f3f4f6',
+                                                      background: 'white',
+                                                  }
+                                        }
+                                    >
+                                        <span className="block text-xl mb-1" aria-hidden="true">
+                                            {g.emoji}
+                                        </span>
+                                        <span
+                                            className="block text-xs font-bold"
+                                            style={{
+                                                color: selectedGame === g.id ? 'white' : '#1f2937',
+                                            }}
+                                        >
+                                            {g.label}
+                                        </span>
+                                        <span
+                                            className="block text-xs mt-0.5 leading-snug"
+                                            style={{
+                                                color:
+                                                    selectedGame === g.id
+                                                        ? 'rgba(255,255,255,0.8)'
+                                                        : '#9ca3af',
+                                            }}
+                                        >
+                                            {g.description}
+                                        </span>
+                                    </button>
+                                ))}
+                            </div>
+                        </section>
+
+                        {/* Level. Three, chosen by the player and changeable at any
+                         *  time — including mid-round from the strip below the game.
+                         *  What no level changes is that Skip, reveal and navigation
+                         *  stay available: a harder level is not a trap. */}
+                        <section>
+                            <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                                Level
+                            </h3>
+                            <div className="flex gap-2">
+                                {Object.entries(LEVEL_PROFILE)
+                                    .map(([id, p]) => ({
+                                        id,
+                                        label: p.label,
+                                        hint: p.blurb,
+                                    }))
+                                    .map((m) => (
+                                        <button
+                                            key={m.id}
+                                            type="button"
+                                            onClick={() => setPlayerLevel(m.id)}
+                                            aria-pressed={playerLevel === m.id}
+                                            className="flex-1 rounded-xl border-2 px-3 py-2.5 text-left transition-colors"
+                                            style={
+                                                playerLevel === m.id
+                                                    ? {
+                                                          background: '#7B3FA0',
+                                                          borderColor: 'transparent',
+                                                          color: 'white',
+                                                      }
+                                                    : { borderColor: '#f3f4f6', color: '#374151' }
+                                            }
+                                        >
+                                            <span className="block text-sm font-semibold">
+                                                {m.label}
+                                            </span>
+                                            <span className="block text-xs opacity-80">
+                                                {m.hint}
+                                            </span>
+                                        </button>
+                                    ))}
+                            </div>
+                        </section>
+
+                        {/* Word count */}
+                        <section>
+                            <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">
+                                Words per session
+                            </h3>
+                            <div className="flex gap-2">
+                                {WORD_COUNTS.map((n) => (
+                                    <button
+                                        key={n}
+                                        type="button"
+                                        onClick={() => setWordCount(n)}
+                                        className="flex-1 py-2.5 rounded-xl font-semibold text-sm transition-colors border-2"
+                                        style={
+                                            wordCount === n
+                                                ? {
+                                                      background: '#E91E8C',
                                                       borderColor: 'transparent',
                                                       color: 'white',
                                                   }
                                                 : { borderColor: '#f3f4f6', color: '#374151' }
                                         }
                                     >
-                                        <span className="block text-sm font-semibold">
-                                            {m.label}
-                                        </span>
-                                        <span className="block text-xs opacity-80">{m.hint}</span>
+                                        {n}
                                     </button>
                                 ))}
-                        </div>
-                    </section>
+                            </div>
+                        </section>
 
-                    {/* Word count */}
-                    <section>
-                        <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">
-                            Words per session
-                        </h3>
-                        <div className="flex gap-2">
-                            {WORD_COUNTS.map((n) => (
-                                <button
-                                    key={n}
-                                    type="button"
-                                    onClick={() => setWordCount(n)}
-                                    className="flex-1 py-2.5 rounded-xl font-semibold text-sm transition-colors border-2"
-                                    style={
-                                        wordCount === n
-                                            ? {
-                                                  background: '#E91E8C',
-                                                  borderColor: 'transparent',
-                                                  color: 'white',
-                                              }
-                                            : { borderColor: '#f3f4f6', color: '#374151' }
-                                    }
-                                >
-                                    {n}
-                                </button>
-                            ))}
-                        </div>
-                    </section>
-
-                    {/* Start button */}
-                    <button
-                        type="button"
-                        onClick={handleStart}
-                        className="w-full py-4 rounded-xl font-bold text-base text-white transition-colors mt-auto"
-                        style={{ background: 'linear-gradient(135deg,#E91E8C,#7B3FA0)' }}
-                    >
-                        Start
-                    </button>
-                </>
-            )}
+                        {/* Start button */}
+                        <button
+                            type="button"
+                            onClick={handleStart}
+                            className="w-full py-4 rounded-xl font-bold text-base text-white transition-colors mt-auto"
+                            style={{ background: 'linear-gradient(135deg,#E91E8C,#7B3FA0)' }}
+                        >
+                            Start
+                        </button>
+                    </>
+                )}
+            </div>
+            {leaveDialog}
         </div>
     );
 }
