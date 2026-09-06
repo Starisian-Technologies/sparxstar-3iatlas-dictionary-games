@@ -1,4 +1,4 @@
-# Platform Decisions — Auto-synced from registry@ea4e3d4
+# Platform Decisions — Auto-synced from registry@78a426f
 # DO NOT EDIT — this file is overwritten on every registry change
 
 - ADR-001: Relational canonical record; graph is derived projection only
@@ -34,3 +34,6 @@
 - ADR-031: Require a Terminal Validation Outcome Before an Audit Event Is Delivered
 - ADR-032: No repository ships a `key-vault` grant surface until its wire contract is recorded where every side can read it
 - ADR-033: Name the product-specification registry the canonical home for RLC-Spec-v4.0
+- ADR-034: Divide the spoken-audio stack by capture experience and platform audio lifecycle, not by language runtime
+- ADR-035: Set audio constraints from a named capture profile, never from a single platform-wide ceiling
+- ADR-036: Separate elicitation pacing from acoustic prosody; a paced reader measures nothing

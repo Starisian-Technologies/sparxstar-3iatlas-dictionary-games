@@ -1,4 +1,4 @@
-# Open Questions — Auto-synced from registry@ea4e3d4
+# Open Questions — Auto-synced from registry@78a426f
 # DO NOT EDIT
 
 # Open Questions
@@ -283,3 +283,25 @@ workflow pulls `aiwa-rwc-rsc`. One source document behind two product keys is
 either a duplication to collapse or two genuinely distinct products that need
 distinct specs. OQ-019's ruling makes the registry canonical but does not say
 how many products it should hold. Split out from OQ-019 on 2026-09-05.
+
+## OQ-021 — What are the numeric floors and permitted codecs for each capture profile? [OPEN]
+
+[ADR-035](decisions/ADR-035-capture-profiles-not-a-platform-audio-ceiling.md)
+establishes that audio constraints belong to a named capture
+profile — `conversation`, `documentation`, `import` — and that no numeric
+ceiling applies platform-wide. It deliberately sets no numbers.
+
+Still unanswered, and not an architecture call:
+
+1. The **sample rate, bit depth and channel floor for `documentation`** — the
+   quality below which material is not admissible as a source for acoustic
+   measurement, sound-to-IPA, or tone work.
+2. The **permitted container and codec set per profile**, including whether
+   `documentation` requires an uncompressed or lossless container.
+3. Whether `conversation` material is ever admissible for measurement, or is
+   categorically interaction-only.
+
+A floor set from architecture rather than from what the measurements require is
+how the platform-wide 16 kHz cap arose in the first place. Routes to AIWA +
+the acoustic-analysis owner. ADR-035's Consequences carry a starting point for
+them to react to; no repository may implement a value before it is ruled on.
