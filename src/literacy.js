@@ -76,15 +76,70 @@ export const UNIT_BANDS = [
  */
 export const RICH_SELECTION_FROM_BAND = 'b5';
 
+/**
+ * How much evidence the system has about this learner's SPELLING.
+ *
+ * Not a skill level and not a ranking — a statement about what is known. A
+ * learner is `UNCERTAIN` because nothing has been demonstrated yet, which is
+ * true of every new player regardless of how fluently they speak.
+ */
+export const LEARNER_STATE = {
+    /** New, or recently struggling. No harder words at all. */
+    UNCERTAIN: 'uncertain',
+    /** Holding their band. A small reach is now reasonable. */
+    DEVELOPING: 'developing',
+    /** Demonstrated unaided spelling. Full mix. */
+    ESTABLISHED: 'established',
+};
+
+/**
+ * One mix per learner state.
+ *
+ * The single 60/25/15 mix was right for an established learner and wrong as a
+ * constant: it put 15% of a brand-new learner's very first round into a band
+ * they had never been shown to handle. `next: 0` for an uncertain learner is
+ * the whole correction — a learner meets a harder word only once the system
+ * has seen them succeed unaided at the band below it.
+ *
+ * Product settings, not findings. Tune with AIWA against real play data.
+ */
+export const STATE_MIX = {
+    [LEARNER_STATE.UNCERTAIN]: { current: 0.8, review: 0.2, next: 0 },
+    [LEARNER_STATE.DEVELOPING]: { current: 0.7, review: 0.2, next: 0.1 },
+    [LEARNER_STATE.ESTABLISHED]: { current: 0.6, review: 0.25, next: 0.15 },
+};
+
 /** Defaults. Every one is a product decision and every one is overridable. */
 export const DEFAULT_POLICY = {
     /** Unique words that must be mastered before a band can be left. */
     masteryWords: 10,
     /** Share of those that must be first-attempt correct. */
     masteryAccuracy: 0.8,
-    /** Shares of a round drawn from each pool. */
-    mix: { current: 0.6, review: 0.25, next: 0.15 },
+    /**
+     * Shares of a round drawn from each pool.
+     *
+     * Retained as the ESTABLISHED mix so existing callers keep their behaviour.
+     * Callers that know the learner's state should use `mixForState`, which is
+     * what stops a new learner being handed the established mix.
+     */
+    mix: STATE_MIX[LEARNER_STATE.ESTABLISHED],
+    /**
+     * Independent, first-attempt, unaided successes needed at a band before
+     * words from the band above may appear at all.
+     */
+    unlockEvidence: 3,
+    /**
+     * Consecutive answers involving a retry, a hint or a skip that trigger a
+     * step down in difficulty or a step up in support.
+     */
+    struggleRun: 2,
 };
+
+/** The mix for a learner state, honouring any policy override. */
+export function mixForState(state, policy = DEFAULT_POLICY) {
+    const table = policy.stateMix ?? STATE_MIX;
+    return table[state] ?? table[LEARNER_STATE.ESTABLISHED] ?? DEFAULT_POLICY.mix;
+}
 
 export function progressionPolicy(overrides = {}) {
     return {
@@ -124,7 +179,7 @@ export function bandIndex(bandId) {
  * profile begins with no evidence at all and the supported band.
  */
 export function emptyLiteracy() {
-    return { band: UNIT_BANDS[0].id, mastered: {}, attempts: {} };
+    return { band: UNIT_BANDS[0].id, mastered: {}, attempts: {}, cleanRun: 0, struggleRun: 0 };
 }
 
 /** Progress is per language AND per skill; neither generalises to the other. */
@@ -151,12 +206,76 @@ export function recordWord(literacy, { wordUuid, outcome, attempts = 1, hintsUse
      * not yet evidence of readiness for longer words. */
     const clean = outcome === 'correct' && attempts <= 1 && hintsUsed <= 0;
 
+    /*
+     * Two consecutive runs, tracked because the brief asks for two different
+     * reactions on two different timescales:
+     *
+     *   `cleanRun`     first-attempt, unaided successes IN A ROW. Gates whether
+     *                  words from the band above may appear at all. Reset by
+     *                  any answer that needed help, so it means "right now,
+     *                  unaided", not "at some point, on average".
+     *   `struggleRun`  answers in a row that needed a retry, a hint or a skip.
+     *                  Drives the immediate step-down inside a round, which the
+     *                  rolling window cannot do because it will not act below
+     *                  `MIN_EVIDENCE` answers.
+     */
+    const needsHelp = outcome !== 'correct' || attempts > 1 || hintsUsed > 0;
+
     return {
         ...base,
         skill: skill ?? base.skill,
         attempts: { ...base.attempts, [wordUuid]: (base.attempts[wordUuid] ?? 0) + 1 },
         mastered: clean ? { ...base.mastered, [wordUuid]: true } : base.mastered,
+        cleanRun: clean ? (base.cleanRun ?? 0) + 1 : 0,
+        struggleRun: needsHelp ? (base.struggleRun ?? 0) + 1 : 0,
     };
+}
+
+/**
+ * What the system knows about this learner's spelling, right now.
+ *
+ * Deliberately evidence-shaped rather than score-shaped, and deliberately
+ * quick to fall back: a learner who starts struggling returns to `UNCERTAIN`
+ * and stops being shown harder words, without losing their band.
+ */
+export function learnerState(literacy, policy = DEFAULT_POLICY) {
+    const base = literacy ?? emptyLiteracy();
+
+    /* Struggling now outranks anything demonstrated earlier. */
+    if ((base.struggleRun ?? 0) >= policy.struggleRun) return LEARNER_STATE.UNCERTAIN;
+
+    const mastered = Object.keys(base.mastered ?? {}).length;
+    const clean = base.cleanRun ?? 0;
+
+    /* No unaided success at this band yet — nothing has been demonstrated. */
+    if (clean < policy.unlockEvidence && mastered < policy.unlockEvidence) {
+        return LEARNER_STATE.UNCERTAIN;
+    }
+
+    /*
+     * Established needs BREADTH, not a streak: enough unique words to rule out
+     * a learner who has memorised a handful. `masteryWords` is the same
+     * evidence bar that promotes a band.
+     */
+    if (mastered >= policy.masteryWords) return LEARNER_STATE.ESTABLISHED;
+
+    return LEARNER_STATE.DEVELOPING;
+}
+
+/**
+ * May words from the band above appear in this learner's round?
+ *
+ * Separate from `learnerState` because the mix already encodes the answer for
+ * the ordinary path; this is the explicit gate a caller can assert against,
+ * and the one a test can pin.
+ */
+export function mayReachUp(literacy, policy = DEFAULT_POLICY) {
+    return mixForState(learnerState(literacy, policy), policy).next > 0;
+}
+
+/** Is this learner struggling badly enough to need support NOW, mid-round? */
+export function needsImmediateSupport(literacy, policy = DEFAULT_POLICY) {
+    return (literacy?.struggleRun ?? 0) >= policy.struggleRun;
 }
 
 /** How close this learner is to leaving their current band. */

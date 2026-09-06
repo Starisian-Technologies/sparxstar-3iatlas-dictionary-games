@@ -343,6 +343,23 @@ export function selectForLevel(
         band = null,
         policy = DEFAULT_POLICY,
         needsReviewFor = null,
+        /*
+         * Restrict the whole round to the universal-word set.
+         *
+         * A HARD filter, used during first-session calibration. Unlike the
+         * recent-id memory below, this one never relaxes: a runway drawn from
+         * words the learner may not know is not a runway. If it cannot be
+         * filled, the caller gets a short round and must decide — the one
+         * thing that must not happen is silently substituting unfamiliar
+         * words and calling it a confidence runway.
+         */
+        universalOnly = false,
+        /*
+         * Rank universal words ahead of equally eligible others, without
+         * excluding anything. Used outside calibration, where familiar words
+         * are preferable but not required.
+         */
+        preferUniversal = false,
         /* Ids served in recent rounds, avoided but never a filter — see below. */
         recent = null,
         /* Injectable so tests assert distribution instead of hoping. */
@@ -365,7 +382,21 @@ export function selectForLevel(
         return units > 0 && units <= profile.maxUnits;
     };
 
-    const scored = (words ?? []).filter(withinLevel).map((word) => ({
+    /*
+     * Whether a word is universal is AIWA's classification, shipped by the
+     * Dictionary as `swadesh` on each pack word. Read, never recomputed: the
+     * software consumes linguistic classifications and does not redefine them.
+     * A pack compiled before the flag shipped has it undefined, which reads as
+     * "not known to be universal" — the safe direction for a hard filter and
+     * a no-op for a preference.
+     */
+    const isUniversal = (w) => w?.swadesh === true;
+
+    const eligible = (words ?? [])
+        .filter(withinLevel)
+        .filter((w) => !universalOnly || isUniversal(w));
+
+    const scored = eligible.map((word) => ({
         word,
         score: questionDifficulty(word, {
             languageCode,
@@ -377,7 +408,13 @@ export function selectForLevel(
 
     const inBand = (w) =>
         profile.bands.includes(String(w?.difficulty ?? '').toUpperCase()) ? 0 : 1;
-    scored.sort((a, b) => inBand(a.word) - inBand(b.word) || a.score - b.score);
+    const universalRank = (w) => (preferUniversal && !isUniversal(w) ? 1 : 0);
+    scored.sort(
+        (a, b) =>
+            universalRank(a.word) - universalRank(b.word) ||
+            inBand(a.word) - inBand(b.word) ||
+            a.score - b.score
+    );
 
     /*
      * Without a literacy band there is nothing to mix, so this keeps the old
@@ -434,11 +471,27 @@ export function selectForLevel(
      * the word, or because the approved corpus is genuinely small, and for no
      * other reason.
      */
-    const vary = (pool, exclude) =>
-        shuffle(
-            pool.filter((e) => !exclude.has(e.word?.uuid)),
+    const vary = (pool, exclude) => {
+        const live = pool.filter((e) => !exclude.has(e.word?.uuid));
+        if (!preferUniversal) return shuffle(live, rng);
+
+        /*
+         * A preference has to survive the shuffle to mean anything: shuffling
+         * the whole pool would rank universal words first and then immediately
+         * discard that ordering. Partition, shuffle each side independently,
+         * then concatenate — so familiar words are drawn first and the choice
+         * WITHIN each group still varies session to session.
+         */
+        const universal = shuffle(
+            live.filter((e) => isUniversal(e.word)),
             rng
         );
+        const rest = shuffle(
+            live.filter((e) => !isUniversal(e.word)),
+            rng
+        );
+        return [...universal, ...rest];
+    };
 
     /*
      * RELAX THE OLDEST MEMORY FIRST, AND ONLY THE MEMORY.

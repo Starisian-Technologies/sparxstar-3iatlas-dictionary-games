@@ -102,6 +102,21 @@ export function adaptGamePackWord(packWord) {
     carry('difficulty', 'difficulty');
 
     /*
+     * `swadesh` — is this word's concept on the verified universal list?
+     *
+     * The adapter is an ALLOWLIST, so a field the Dictionary ships but nothing
+     * carries is silently dropped. That is the failure mode this line exists
+     * to prevent: the first-session confidence runway filters on
+     * `word.swadesh`, and against a stripped field every word reads as
+     * not-universal, so the runway would quietly return nothing rather than
+     * fail loudly.
+     *
+     * Read, never recomputed. Which words are universal is AIWA's linguistic
+     * classification; the software consumes it and does not redefine it.
+     */
+    carry('swadesh', 'swadesh');
+
+    /*
      * Definitions. The adapter mapped `definition` — which is 0% populated in
      * the sampled corpus — and ignored `english_definition`, which is 62.3%.
      * So every game showed no definition while a definition existed for nearly

@@ -5,7 +5,17 @@ import { useGameSession } from '../hooks/useGameSession.js';
 import { useProgressSync } from '../hooks/useProgressSync.js';
 import { MODE, needsReview } from '../pedagogy.js';
 import GameNav from './GameNav.jsx';
-import { emptyLiteracy, literacyKey, promoteIfReady, recordWord, UNIT_BANDS } from '../literacy.js';
+import {
+    DEFAULT_POLICY,
+    LEARNER_STATE,
+    emptyLiteracy,
+    learnerState,
+    literacyKey,
+    mixForState,
+    promoteIfReady,
+    recordWord,
+    UNIT_BANDS,
+} from '../literacy.js';
 import { emptyRecent, remember } from '../recent.js';
 import LeaveGameDialog from './LeaveGameDialog.jsx';
 import {
@@ -21,6 +31,13 @@ import {
     recordOutcome,
     selectForLevel,
 } from '../difficulty.js';
+import {
+    STAGE,
+    emptyCalibration,
+    recordCalibrationAnswer,
+    requiresUniversalWords,
+    stageOf,
+} from '../calibration.js';
 import SessionComplete from './SessionComplete.jsx';
 import DomainFlash from './games/DomainFlash.jsx';
 import MeaningMatch from './games/MeaningMatch.jsx';
@@ -96,12 +113,23 @@ const LITERACY_KEY = 'aiwa-dict-literacy';
  */
 const RECENT_KEY = 'aiwa-dict-recent';
 
+/*
+ * First-session progress, per language+skill. Two integers and a flag — no
+ * dictionary content, in keeping with the rule that only bounded entry ids and
+ * learner outcomes are ever written to the device.
+ */
+const CALIBRATION_KEY = 'aiwa-dict-calibration';
+
 function readStoredRecent() {
     return readStoredMap(RECENT_KEY);
 }
 
 function readStoredLiteracy() {
     return readStoredMap(LITERACY_KEY);
+}
+
+function readStoredCalibration() {
+    return readStoredMap(CALIBRATION_KEY);
 }
 
 function readStoredMap(key) {
@@ -275,6 +303,17 @@ export default function GameShell({
     const [gameWords, setGameWords] = useState([]);
 
     /* ── Hooks ── */
+    /*
+     * Declared ahead of `useGameSet` because the REQUEST depends on it: a
+     * calibrating learner needs a pack of universal words, not a general pack
+     * that is later filtered down to however few it happens to contain.
+     */
+    const calibrationRef = useRef(readStoredCalibration());
+    const currentStage = stageOf(
+        calibrationRef.current[literacyKey(sourceLanguage ?? '', GAME_SKILL[selectedGame])] ??
+            emptyCalibration()
+    );
+
     const {
         words: fetchedWords,
         loading: gameSetLoading,
@@ -313,6 +352,17 @@ export default function GameShell({
          * recording is not a `listen_write` prompt.
          */
         audioVerifiedOnly: selectedGame === 'listen_write',
+        /*
+         * Ask the Dictionary for universal words while the learner is still
+         * calibrating.
+         *
+         * The client filters again during selection, so this is not the
+         * safety boundary — it is what makes the runway FILLABLE. A general
+         * pack that happens to contain two universal words cannot fill five
+         * runway questions, and the correct response to that is a narrower
+         * request, never a quiet substitution of unfamiliar words.
+         */
+        universalOnly: requiresUniversalWords(currentStage),
     });
 
     const { session, learnedCount, initSession, recordResult, completeSession, clearSession } =
@@ -505,6 +555,29 @@ export default function GameShell({
              */
             const litKey = literacyKey(sourceLanguage ?? '', skill);
             const literacy = literacyRef.current[litKey] ?? emptyLiteracy();
+
+            /*
+             * FIRST-SESSION CALIBRATION.
+             *
+             * Selection already refused to serve above the learner's ceiling.
+             * What it did not do was distinguish a learner it knows nothing
+             * about from one it knows a lot about: both got the same
+             * 60/25/15 mix, so 15% of a brand-new player's very first round
+             * came from a band they had never been shown to handle.
+             *
+             * Two corrections, both keyed off evidence rather than time:
+             *
+             *   stage   runway and placement draw ONLY from the universal-word
+             *           set, because a three-unit word can still be culturally
+             *           unfamiliar or awkward to write. Length is not
+             *           familiarity.
+             *   mix     80/20/0 while nothing has been demonstrated, then
+             *           70/20/10, then 60/25/15 — a harder band appears only
+             *           after unaided success at the band below.
+             */
+            const calibration = calibrationRef.current[litKey] ?? emptyCalibration();
+            const stage = stageOf(calibration);
+            const state = learnerState(literacy);
             const sliced = selectForLevel(fetchedWords, {
                 level: playerLevel,
                 languageCode: sourceLanguage ?? '',
@@ -523,6 +596,16 @@ export default function GameShell({
                  * reason to move on.
                  */
                 recent: recentRef.current[litKey] ?? emptyRecent(),
+                /* The mix follows the EVIDENCE, not a constant. */
+                policy: { ...DEFAULT_POLICY, mix: mixForState(state) },
+                /*
+                 * A hard filter during calibration, a preference afterwards.
+                 * It sits upstream of the recent-id memory and of the
+                 * backfill, so neither can relax it: a runway topped up with
+                 * words the learner may never have met is not a runway.
+                 */
+                universalOnly: requiresUniversalWords(stage),
+                preferUniversal: stage === STAGE.RANKED && state !== LEARNER_STATE.ESTABLISHED,
             });
 
             /* Remember what this round served, before it is played. Bounded ids
@@ -666,6 +749,19 @@ export default function GameShell({
                             skill: GAME_SKILL[selectedGame],
                         }
                     );
+                    setLocalStorageItem(LITERACY_KEY, JSON.stringify(literacyRef.current));
+
+                    /*
+                     * Advance the first-session counter on EVERY answer,
+                     * whatever the outcome. Advancing only on success would
+                     * strand a struggling learner inside the very stage built
+                     * to support them — they would never reach placement, and
+                     * the runway would stop being a runway and become a gate.
+                     */
+                    calibrationRef.current[litKey] = recordCalibrationAnswer(
+                        calibrationRef.current[litKey] ?? emptyCalibration()
+                    );
+                    setLocalStorageItem(CALIBRATION_KEY, JSON.stringify(calibrationRef.current));
 
                     await addEvent({
                         type: 'game_result',
