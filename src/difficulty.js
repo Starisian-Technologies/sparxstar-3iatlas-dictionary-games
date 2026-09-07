@@ -343,6 +343,23 @@ export function selectForLevel(
         band = null,
         policy = DEFAULT_POLICY,
         needsReviewFor = null,
+        /*
+         * Restrict the whole round to the universal-word set.
+         *
+         * A HARD filter, used during first-session calibration. Unlike the
+         * recent-id memory below, this one never relaxes: a runway drawn from
+         * words the learner may not know is not a runway. If it cannot be
+         * filled, the caller gets a short round and must decide — the one
+         * thing that must not happen is silently substituting unfamiliar
+         * words and calling it a confidence runway.
+         */
+        universalOnly = false,
+        /*
+         * Rank universal words ahead of equally eligible others, without
+         * excluding anything. Used outside calibration, where familiar words
+         * are preferable but not required.
+         */
+        preferUniversal = false,
         /* Ids served in recent rounds, avoided but never a filter — see below. */
         recent = null,
         /* Injectable so tests assert distribution instead of hoping. */
@@ -365,7 +382,21 @@ export function selectForLevel(
         return units > 0 && units <= profile.maxUnits;
     };
 
-    const scored = (words ?? []).filter(withinLevel).map((word) => ({
+    /*
+     * Whether a word is universal is AIWA's classification, shipped by the
+     * Dictionary as `swadesh` on each pack word. Read, never recomputed: the
+     * software consumes linguistic classifications and does not redefine them.
+     * A pack compiled before the flag shipped has it undefined, which reads as
+     * "not known to be universal" — the safe direction for a hard filter and
+     * a no-op for a preference.
+     */
+    const isUniversal = (w) => w?.swadesh === true;
+
+    const eligible = (words ?? [])
+        .filter(withinLevel)
+        .filter((w) => !universalOnly || isUniversal(w));
+
+    const scored = eligible.map((word) => ({
         word,
         score: questionDifficulty(word, {
             languageCode,
@@ -377,7 +408,13 @@ export function selectForLevel(
 
     const inBand = (w) =>
         profile.bands.includes(String(w?.difficulty ?? '').toUpperCase()) ? 0 : 1;
-    scored.sort((a, b) => inBand(a.word) - inBand(b.word) || a.score - b.score);
+    const universalRank = (w) => (preferUniversal && !isUniversal(w) ? 1 : 0);
+    scored.sort(
+        (a, b) =>
+            universalRank(a.word) - universalRank(b.word) ||
+            inBand(a.word) - inBand(b.word) ||
+            a.score - b.score
+    );
 
     /*
      * Without a literacy band there is nothing to mix, so this keeps the old
@@ -407,6 +444,27 @@ export function selectForLevel(
     const currentPool = scored.filter((e) => isCurrent(e) && !needsReviewFor?.(e.word));
     const nextPool = scored.filter(isNext);
 
+    /*
+     * A ZERO NEXT-BAND SHARE IS A GATE, NOT A TARGET.
+     *
+     * `mix.next` sizes the stretch pool. On its own that only controls the
+     * round's INTENDED shape: the backfill below then walked
+     * `[current, review, next, scored]` unconditionally, and `scored` holds
+     * every eligible word including harder bands. So an uncertain learner —
+     * whose whole mix is 80/20/0 precisely so they meet no harder word — still
+     * got them whenever their current band could not fill the round, which is
+     * exactly the small-corpus case the runway exists for.
+     *
+     * When reaching up is not permitted, the backfill may only draw from the
+     * current band and BELOW. Shorter or easier is always safe; harder is the
+     * thing being withheld.
+     */
+    const mayReachUp = policy.mix.next > 0;
+    const atOrBelowCurrent = scored.filter((e) => e.band && bandIndex(e.band.id) <= here);
+    const backfillPools = mayReachUp
+        ? [currentPool, reviewPool, nextPool, scored]
+        : [currentPool, reviewPool, atOrBelowCurrent];
+
     const take = (pool, n, used) => {
         const out = [];
         for (const entry of pool) {
@@ -434,11 +492,27 @@ export function selectForLevel(
      * the word, or because the approved corpus is genuinely small, and for no
      * other reason.
      */
-    const vary = (pool, exclude) =>
-        shuffle(
-            pool.filter((e) => !exclude.has(e.word?.uuid)),
+    const vary = (pool, exclude) => {
+        const live = pool.filter((e) => !exclude.has(e.word?.uuid));
+        if (!preferUniversal) return shuffle(live, rng);
+
+        /*
+         * A preference has to survive the shuffle to mean anything: shuffling
+         * the whole pool would rank universal words first and then immediately
+         * discard that ordering. Partition, shuffle each side independently,
+         * then concatenate — so familiar words are drawn first and the choice
+         * WITHIN each group still varies session to session.
+         */
+        const universal = shuffle(
+            live.filter((e) => isUniversal(e.word)),
             rng
         );
+        const rest = shuffle(
+            live.filter((e) => !isUniversal(e.word)),
+            rng
+        );
+        return [...universal, ...rest];
+    };
 
     /*
      * RELAX THE OLDEST MEMORY FIRST, AND ONLY THE MEMORY.
@@ -478,7 +552,7 @@ export function selectForLevel(
             ),
         ];
         if (out.length < wanted) {
-            for (const pool of [currentPool, reviewPool, nextPool, scored]) {
+            for (const pool of backfillPools) {
                 out.push(...take(vary(pool, exclude), wanted - out.length, used));
                 if (out.length >= wanted) break;
             }
@@ -506,6 +580,34 @@ export function selectForLevel(
      * permitted pools is reachable.
      */
     if (picked.length < wanted) picked = attempt(new Set());
+
+    /*
+     * A SHORT ROUND AND NO ROUND ARE DIFFERENT FAILURES.
+     *
+     * The gate above is right for the ordinary shortfall: the current band
+     * has SOME words but not enough, and padding the round with harder ones
+     * is the thing an uncertain learner must not meet. A short round is the
+     * correct answer there.
+     *
+     * It is the wrong answer when the current band and below have NOTHING —
+     * a first-time writer placed at three units in a language whose approved
+     * corpus starts at five. Then the band is unusable for this corpus, and
+     * withholding every word locks the learner out of the game entirely to
+     * protect them from it.
+     *
+     * So harder material is permitted only when there is no easier material
+     * at all, and it is taken EASIEST-FIRST rather than by the mix. This is a
+     * lockout guard, not a quota filler: one word at or below the band is
+     * enough to keep it closed.
+     */
+    if (picked.length === 0 && !mayReachUp && scored.length > 0) {
+        const easiestFirst = [...scored].sort(
+            (a, b) =>
+                (a.band ? bandIndex(a.band.id) : Infinity) -
+                    (b.band ? bandIndex(b.band.id) : Infinity) || a.score - b.score
+        );
+        picked = easiestFirst.slice(0, wanted);
+    }
 
     return picked.slice(0, wanted).map((e) => e.word);
 }

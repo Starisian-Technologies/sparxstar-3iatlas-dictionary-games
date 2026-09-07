@@ -140,6 +140,16 @@ export interface GameWord {
     french_definition: string;
     domain_code: string;
     difficulty: string;
+    /**
+     * Is this word's concept on the verified universal list?
+     *
+     * Optional because a pack compiled before the Dictionary shipped the field
+     * simply has no key. Absent must read as "not known to be universal", not
+     * as universal: the first-session runway uses it as a hard filter and
+     * failing open would put unfamiliar words in the one round that promises
+     * familiar ones.
+     */
+    swadesh?: boolean;
 }
 
 export interface SpellResult {

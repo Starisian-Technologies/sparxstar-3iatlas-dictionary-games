@@ -63,6 +63,11 @@ export const MAX_PACK_SIZE = 100;
  * @param {string} [opts.domain]     Domain code (optional)
  * @param {number} [opts.limit]      Max words, default 20
  * @param {boolean} [opts.audioVerifiedOnly] Only entries with verified audio
+ * @param {boolean} [opts.universalOnly] Only entries whose concept is on the
+ *   verified universal-word list. Used during first-session calibration: the
+ *   client can filter a mixed pack itself, but a pack that happens to contain
+ *   two universal words cannot fill a five-question runway, so the narrowing
+ *   belongs in the request.
  * @param {string} [opts.bffPath]    Override the BFF base (tests only)
  * @returns {{ words: Array, loading: boolean, error: string|null }}
  */
@@ -71,6 +76,7 @@ export function useGameSet({
     domain = '',
     limit = 20,
     audioVerifiedOnly = false,
+    universalOnly = false,
     bffPath = DICTIONARY_BFF_PATH,
 }) {
     const [words, setWords] = useState([]);
@@ -101,6 +107,7 @@ export function useGameSet({
                 });
                 if (domain) params.set('domain', domain);
                 if (audioVerifiedOnly) params.set('audio_verified', 'true');
+                if (universalOnly) params.set('swadesh', 'true');
 
                 /*
                  * `credentials: 'omit'`. Same-origin means the browser would
@@ -151,7 +158,7 @@ export function useGameSet({
             cancelled = true;
             controller.abort();
         };
-    }, [bffPath, language, domain, normalizedLimit, audioVerifiedOnly]);
+    }, [bffPath, language, domain, normalizedLimit, audioVerifiedOnly, universalOnly]);
 
     return { words, loading, error };
 }
