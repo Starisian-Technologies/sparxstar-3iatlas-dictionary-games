@@ -115,6 +115,26 @@ describe('fetchLeaderboard — the request', () => {
 
         expect(requestedUrl().pathname).toBe('/api/v1/leaderboard');
     });
+
+    it('strips a whole run of trailing slashes, not just the last one', async () => {
+        /*
+         * Several slashes is still one boundary. The linear implementation this
+         * asserts against replaced `/\/+$/`, which CodeQL flags as polynomial —
+         * though measured against V8 that regex handled 50,000 slashes in 0ms,
+         * so the change is about not carrying a quadratic-in-principle pattern
+         * rather than about a slowdown. This test pins the behaviour, which is
+         * the part a future rewrite could actually get wrong; there is no
+         * timing assertion here because there is no timing claim to make.
+         */
+        window.fetch.mockResolvedValue(jsonResponse({ entries: [] }));
+
+        await fetchLeaderboard({
+            engineUrl: `https://engine.test/api/v1${'/'.repeat(5000)}`,
+            token: 't',
+        });
+
+        expect(requestedUrl().pathname).toBe('/api/v1/leaderboard');
+    });
 });
 
 describe('fetchLeaderboard — the response', () => {

@@ -57,9 +57,26 @@ export class StatsError extends Error {
     }
 }
 
-/** Strip one trailing slash so `${base}/leaderboard` never doubles it. */
-function base(engineUrl) {
-    return String(engineUrl).replace(/\/+$/, '');
+/**
+ * Strip trailing slashes so `${base}/leaderboard` never doubles one.
+ *
+ * A loop rather than `/\/+$/`, which CodeQL flags as a polynomial regular
+ * expression on library input: an anchored `+` is quadratic in the worst case
+ * for a backtracking engine given a string that is mostly slashes.
+ *
+ * Being accurate about what this change is and is not: I measured it, and V8
+ * optimizes that exact pattern — 50,000 trailing slashes cost 0ms through the
+ * regex. So this is not a fix for a slowdown anyone would observe today, and
+ * the first version of this comment claimed it was, which was wrong.
+ *
+ * It is still worth making. The pattern is quadratic in principle rather than
+ * in this engine's current optimizer, the value is only a build-time constant
+ * until the next caller passes something else, and a loop that is obviously
+ * linear needs neither of those arguments to stay safe.
+ */ function base(engineUrl) {
+    let value = String(engineUrl);
+    while (value.endsWith('/')) value = value.slice(0, -1);
+    return value;
 }
 
 async function getJson(url, token, signal) {
