@@ -179,7 +179,7 @@ export function bandIndex(bandId) {
  * profile begins with no evidence at all and the supported band.
  */
 export function emptyLiteracy() {
-    return { band: UNIT_BANDS[0].id, mastered: {}, attempts: {}, cleanRun: 0, struggleRun: 0 };
+    return { band: UNIT_BANDS[0].id, mastered: {}, attempts: {}, struggleRun: 0 };
 }
 
 /** Progress is per language AND per skill; neither generalises to the other. */
@@ -207,13 +207,15 @@ export function recordWord(literacy, { wordUuid, outcome, attempts = 1, hintsUse
     const clean = outcome === 'correct' && attempts <= 1 && hintsUsed <= 0;
 
     /*
-     * Two consecutive runs, tracked because the brief asks for two different
-     * reactions on two different timescales:
+     * One consecutive run, tracked because the rolling window cannot do this
+     * job: `decideAdjustment` will not act below `MIN_EVIDENCE` answers, so a
+     * learner could struggle through most of a round before anything eased.
      *
-     *   `cleanRun`     first-attempt, unaided successes IN A ROW. Gates whether
-     *                  words from the band above may appear at all. Reset by
-     *                  any answer that needed help, so it means "right now,
-     *                  unaided", not "at some point, on average".
+     * There is deliberately NO clean-answer streak here. Unlocking the band
+     * above is gated on DISTINCT words mastered (see `learnerState`), because
+     * a streak counts repeats and repeats of one easy word are not evidence
+     * about longer words.
+     *
      *   `struggleRun`  answers in a row that needed a retry, a hint or a skip.
      *                  Drives the immediate step-down inside a round, which the
      *                  rolling window cannot do because it will not act below
@@ -226,7 +228,6 @@ export function recordWord(literacy, { wordUuid, outcome, attempts = 1, hintsUse
         skill: skill ?? base.skill,
         attempts: { ...base.attempts, [wordUuid]: (base.attempts[wordUuid] ?? 0) + 1 },
         mastered: clean ? { ...base.mastered, [wordUuid]: true } : base.mastered,
-        cleanRun: clean ? (base.cleanRun ?? 0) + 1 : 0,
         struggleRun: needsHelp ? (base.struggleRun ?? 0) + 1 : 0,
     };
 }
@@ -244,18 +245,25 @@ export function learnerState(literacy, policy = DEFAULT_POLICY) {
     /* Struggling now outranks anything demonstrated earlier. */
     if ((base.struggleRun ?? 0) >= policy.struggleRun) return LEARNER_STATE.UNCERTAIN;
 
+    /*
+     * `mastered` is keyed by word id, so its size is the count of DISTINCT
+     * words this learner got right first-attempt and unaided. That is exactly
+     * the "independent, first-attempt, unaided successes" the unlock requires,
+     * and counting distinct words is what makes them independent.
+     *
+     * This gate previously also accepted a `cleanRun` streak, which counted
+     * REPEATS: three clean answers on one easy word unlocked the band above,
+     * which is the opposite of the rule it was supposed to enforce. A streak
+     * is evidence about one word; a band is a claim about many.
+     */
     const mastered = Object.keys(base.mastered ?? {}).length;
-    const clean = base.cleanRun ?? 0;
 
-    /* No unaided success at this band yet — nothing has been demonstrated. */
-    if (clean < policy.unlockEvidence && mastered < policy.unlockEvidence) {
-        return LEARNER_STATE.UNCERTAIN;
-    }
+    if (mastered < policy.unlockEvidence) return LEARNER_STATE.UNCERTAIN;
 
     /*
-     * Established needs BREADTH, not a streak: enough unique words to rule out
-     * a learner who has memorised a handful. `masteryWords` is the same
-     * evidence bar that promotes a band.
+     * Established needs MORE breadth still: enough unique words to rule out a
+     * learner who has memorised a handful. `masteryWords` is the same evidence
+     * bar that promotes a band.
      */
     if (mastered >= policy.masteryWords) return LEARNER_STATE.ESTABLISHED;
 

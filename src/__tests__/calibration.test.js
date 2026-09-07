@@ -301,11 +301,29 @@ describe('harder words unlock on demonstrated unaided success, not on time serve
     });
 
     it('does not let repetition of ONE word substitute for breadth', () => {
+        /*
+         * THE ASSERTION THAT WAS TOO WEAK.
+         *
+         * This test asserted only `not ESTABLISHED`, so it passed while thirty
+         * clean repeats of one easy word quietly reached DEVELOPING and
+         * unlocked the band above — via a clean-answer STREAK that counted
+         * repeats. Copilot caught it. `not.toBe(X)` on a three-valued enum
+         * proves almost nothing; the state and the unlock are both pinned now.
+         */
         let lit = emptyLiteracy();
         for (let i = 0; i < 30; i += 1) lit = clean(lit, 'same-word');
 
-        /* Mastery is per UNIQUE word; thirty repeats is still one word. */
-        expect(learnerState(lit)).not.toBe(LEARNER_STATE.ESTABLISHED);
+        expect(learnerState(lit)).toBe(LEARNER_STATE.UNCERTAIN);
+        expect(mayReachUp(lit)).toBe(false);
+        expect(mixForState(learnerState(lit)).next).toBe(0);
+
+        /* Three DISTINCT words clear the same bar that thirty repeats did not. */
+        let distinct = emptyLiteracy();
+        distinct = clean(distinct, 'w1');
+        distinct = clean(distinct, 'w2');
+        distinct = clean(distinct, 'w3');
+        expect(learnerState(distinct)).toBe(LEARNER_STATE.DEVELOPING);
+        expect(mayReachUp(distinct)).toBe(true);
     });
 });
 
@@ -358,9 +376,20 @@ describe('recognition never unlocks spelling', () => {
          * word instantly and still be writing the language for the first time.
          */
         let spelling = emptyLiteracy();
-        for (let i = 0; i < 20; i += 1) {
-            /* Meaning answers are recorded under their OWN skill profile. */
-            recordWord(emptyLiteracy(), {
+
+        /*
+         * Build a recognition profile all the way to ESTABLISHED, and KEEP it.
+         *
+         * An earlier version of this test called `recordWord` in a loop and
+         * threw the result away, restarting from `emptyLiteracy()` each pass.
+         * `recordWord` is pure, so nothing accumulated — and a test that
+         * records no recognition evidence cannot show that recognition fails
+         * to leak into spelling. It would have passed even if the two profiles
+         * were accidentally merged.
+         */
+        let recognition = emptyLiteracy();
+        for (let i = 0; i < DEFAULT_POLICY.masteryWords * 2; i += 1) {
+            recognition = recordWord(recognition, {
                 wordUuid: `m${i}`,
                 outcome: 'correct',
                 attempts: 1,
@@ -369,6 +398,11 @@ describe('recognition never unlocks spelling', () => {
             });
         }
 
+        /* Non-vacuity: the recognition profile really is maxed out. */
+        expect(learnerState(recognition)).toBe(LEARNER_STATE.ESTABLISHED);
+        expect(mayReachUp(recognition)).toBe(true);
+
+        /* And the SPELLING profile has learned nothing from any of it. */
         expect(learnerState(spelling)).toBe(LEARNER_STATE.UNCERTAIN);
         expect(mayReachUp(spelling)).toBe(false);
         expect(mixForState(learnerState(spelling)).next).toBe(0);
