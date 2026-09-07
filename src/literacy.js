@@ -319,7 +319,21 @@ export function promoteIfReady(literacy, policy = DEFAULT_POLICY) {
     if (next >= UNIT_BANDS.length) return { literacy: base, promoted: false };
 
     return {
-        literacy: { ...base, band: UNIT_BANDS[next].id, mastered: {}, attempts: {} },
+        literacy: {
+            ...base,
+            band: UNIT_BANDS[next].id,
+            mastered: {},
+            attempts: {},
+            /*
+             * The struggle run is PER-BAND evidence, like `mastered` and
+             * `attempts` beside it. Spreading `base` carried it across a
+             * promotion, so a learner could arrive in a new band already
+             * carrying a run recorded against the old one. Reset with the
+             * rest: mastery of three-unit words says nothing about four-unit
+             * ones, and neither does having struggled with them.
+             */
+            struggleRun: 0,
+        },
         promoted: true,
         from: base.band,
         to: UNIT_BANDS[next].id,

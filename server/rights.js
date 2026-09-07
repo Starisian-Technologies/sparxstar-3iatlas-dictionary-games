@@ -63,6 +63,21 @@ const GAME_WORD_FIELDS = Object.freeze([
     'french_definition',
     'domain_code',
     'difficulty',
+    /*
+     * Is this word's concept on the verified universal list?
+     *
+     * THE THIRD ALLOWLIST. The flag has to survive three independent
+     * projections to reach a learner: the Dictionary's
+     * `src/domain/projections.ts`, this one, and the browser's
+     * `gamePackAdapter`. Each drops unknown fields silently, and a dropped
+     * `swadesh` does not fail loudly — every word reads as not-universal, so
+     * the first-session runway returns an EMPTY round.
+     *
+     * Not a rights question: the Dictionary already ships it on its own
+     * projection-safe allowlist. It is a classification of the concept, not
+     * anyone's expression.
+     */
+    'swadesh',
 ]);
 
 /** Pack-level fields. `signature` travels so a consumer could verify the pack

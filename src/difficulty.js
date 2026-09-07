@@ -444,6 +444,27 @@ export function selectForLevel(
     const currentPool = scored.filter((e) => isCurrent(e) && !needsReviewFor?.(e.word));
     const nextPool = scored.filter(isNext);
 
+    /*
+     * A ZERO NEXT-BAND SHARE IS A GATE, NOT A TARGET.
+     *
+     * `mix.next` sizes the stretch pool. On its own that only controls the
+     * round's INTENDED shape: the backfill below then walked
+     * `[current, review, next, scored]` unconditionally, and `scored` holds
+     * every eligible word including harder bands. So an uncertain learner —
+     * whose whole mix is 80/20/0 precisely so they meet no harder word — still
+     * got them whenever their current band could not fill the round, which is
+     * exactly the small-corpus case the runway exists for.
+     *
+     * When reaching up is not permitted, the backfill may only draw from the
+     * current band and BELOW. Shorter or easier is always safe; harder is the
+     * thing being withheld.
+     */
+    const mayReachUp = policy.mix.next > 0;
+    const atOrBelowCurrent = scored.filter((e) => e.band && bandIndex(e.band.id) <= here);
+    const backfillPools = mayReachUp
+        ? [currentPool, reviewPool, nextPool, scored]
+        : [currentPool, reviewPool, atOrBelowCurrent];
+
     const take = (pool, n, used) => {
         const out = [];
         for (const entry of pool) {
@@ -531,7 +552,7 @@ export function selectForLevel(
             ),
         ];
         if (out.length < wanted) {
-            for (const pool of [currentPool, reviewPool, nextPool, scored]) {
+            for (const pool of backfillPools) {
                 out.push(...take(vary(pool, exclude), wanted - out.length, used));
                 if (out.length >= wanted) break;
             }
@@ -559,6 +580,34 @@ export function selectForLevel(
      * permitted pools is reachable.
      */
     if (picked.length < wanted) picked = attempt(new Set());
+
+    /*
+     * A SHORT ROUND AND NO ROUND ARE DIFFERENT FAILURES.
+     *
+     * The gate above is right for the ordinary shortfall: the current band
+     * has SOME words but not enough, and padding the round with harder ones
+     * is the thing an uncertain learner must not meet. A short round is the
+     * correct answer there.
+     *
+     * It is the wrong answer when the current band and below have NOTHING —
+     * a first-time writer placed at three units in a language whose approved
+     * corpus starts at five. Then the band is unusable for this corpus, and
+     * withholding every word locks the learner out of the game entirely to
+     * protect them from it.
+     *
+     * So harder material is permitted only when there is no easier material
+     * at all, and it is taken EASIEST-FIRST rather than by the mix. This is a
+     * lockout guard, not a quota filler: one word at or below the band is
+     * enough to keep it closed.
+     */
+    if (picked.length === 0 && !mayReachUp && scored.length > 0) {
+        const easiestFirst = [...scored].sort(
+            (a, b) =>
+                (a.band ? bandIndex(a.band.id) : Infinity) -
+                    (b.band ? bandIndex(b.band.id) : Infinity) || a.score - b.score
+        );
+        picked = easiestFirst.slice(0, wanted);
+    }
 
     return picked.slice(0, wanted).map((e) => e.word);
 }

@@ -513,3 +513,69 @@ describe('the flag survives the trip from the Dictionary to selection', () => {
         expect(picked[0].headword).toBe('faŋ');
     });
 });
+
+describe('a zero next-band share is a gate, not a target', () => {
+    /*
+     * Qodo finding #1. `mix.next: 0` sized the stretch pool and nothing more:
+     * the backfill then walked current, review, next, and finally the whole
+     * eligible set. So an uncertain learner — whose mix is 80/20/0 precisely
+     * so they meet no harder word — got harder words whenever their own band
+     * could not fill the round. That is the small-corpus case the runway
+     * exists for, so the guarantee failed exactly when it mattered.
+     */
+    const uncertain = { ...DEFAULT_POLICY, mix: STATE_MIX[LEARNER_STATE.UNCERTAIN] };
+
+    it('pads a short round with NOTHING rather than with harder words', () => {
+        /* Two words at the band, five available one band up, round of six. */
+        const pool = [...universalB3.slice(0, 2), ...universalB4];
+
+        const picked = selectForLevel(pool, {
+            level: LEVEL.PRACTICE,
+            languageCode: 'mnk',
+            count: 6,
+            band: 'b3',
+            policy: uncertain,
+            needsReviewFor: () => false,
+        });
+
+        /* Short, and every word still at the learner's own band. */
+        expect(picked.length).toBeGreaterThan(0);
+        expect(picked.length).toBeLessThan(6);
+        for (const w of picked) expect(unitsOf(w)).toBe(3);
+
+        /* Non-vacuity: an ESTABLISHED learner, same pool, DOES reach up —
+         * so the absence above is the gate and not an empty next band. */
+        const established = selectForLevel(pool, {
+            level: LEVEL.PRACTICE,
+            languageCode: 'mnk',
+            count: 6,
+            band: 'b3',
+            policy: { ...DEFAULT_POLICY, mix: STATE_MIX[LEARNER_STATE.ESTABLISHED] },
+            needsReviewFor: () => false,
+        });
+        expect(established.some((w) => unitsOf(w) === 4)).toBe(true);
+    });
+
+    it('still deals a round when the band and below hold NOTHING', () => {
+        /*
+         * The other side of the same coin. A first-time writer placed at three
+         * units, in a language whose approved corpus starts at four: the gate
+         * would withhold every word and lock them out of the game to protect
+         * them from it. A short round is the right answer to a shortfall; no
+         * round is not. One word at or below the band keeps the gate closed —
+         * this is a lockout guard, not a quota filler.
+         */
+        const picked = selectForLevel(universalB4, {
+            level: LEVEL.PRACTICE,
+            languageCode: 'mnk',
+            count: 4,
+            band: 'b3',
+            policy: uncertain,
+            needsReviewFor: () => false,
+        });
+
+        expect(picked.length).toBeGreaterThan(0);
+        /* Easiest available, not the mix. */
+        for (const w of picked) expect(unitsOf(w)).toBe(4);
+    });
+});

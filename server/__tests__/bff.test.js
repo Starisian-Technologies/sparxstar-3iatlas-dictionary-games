@@ -123,6 +123,7 @@ function upstreamPack() {
                     french_definition: 'un cours d’eau',
                     domain_code: '1.3',
                     difficulty: 'A1',
+                    swadesh: true,
                 },
                 {
                     // Licensed material: the Dictionary withheld the source's
@@ -148,6 +149,7 @@ function upstreamPack() {
                     french_definition: '',
                     domain_code: '8.3',
                     difficulty: 'A2',
+                    swadesh: false,
                 },
             ],
             edges: [
@@ -653,6 +655,34 @@ describe('rights restrictions survive the passthrough', () => {
                 expect(GAME_WORD_FIELDS).toContain(field);
             }
         }
+    });
+
+    it('carries the swadesh flag through, in BOTH truth values', async () => {
+        /*
+         * The universal-word flag has to survive THREE independent
+         * projections to reach a learner: the Dictionary's own allowlist, this
+         * BFF's `GAME_WORD_FIELDS`, and the browser's `gamePackAdapter`. Each
+         * drops unknown fields silently.
+         *
+         * A dropped flag does not fail loudly. Every word reads as
+         * not-universal, so the first-session confidence runway — which
+         * filters on it hard — returns an EMPTY round. This projection was the
+         * one still stripping it.
+         *
+         * `false` is asserted alongside `true` because a verified negative and
+         * a missing field mean different things to the runway, and a `pick`
+         * that coerced one into the other would be just as wrong.
+         */
+        const { app } = stack();
+        const response = await call(app, '/api/dictionary/game-set?language=mnk');
+        const words = response.json.data.words;
+
+        const open = words.find((w) => w.entry_id === 'entry-open');
+        const restricted = words.find((w) => w.entry_id === 'entry-restricted');
+
+        expect(open.swadesh).toBe(true);
+        expect(restricted.swadesh).toBe(false);
+        expect('swadesh' in restricted).toBe(true);
     });
 
     it('narrows a widened example object', () => {

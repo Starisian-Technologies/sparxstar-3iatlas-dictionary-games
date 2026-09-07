@@ -12,6 +12,7 @@ import {
     learnerState,
     literacyKey,
     mixForState,
+    needsImmediateSupport,
     promoteIfReady,
     recordWord,
     UNIT_BANDS,
@@ -32,8 +33,13 @@ import {
     selectForLevel,
 } from '../difficulty.js';
 import {
+    CALIBRATION,
     STAGE,
+    countsTowardRanking,
     emptyCalibration,
+    mayAdjustLevel,
+    mayLowerLevel,
+    opensWithSupport,
     recordCalibrationAnswer,
     requiresUniversalWords,
     stageOf,
@@ -575,10 +581,11 @@ export default function GameShell({
              *           70/20/10, then 60/25/15 — a harder band appears only
              *           after unaided success at the band below.
              */
+            const litKeyForDeal = litKey;
             const calibration = calibrationRef.current[litKey] ?? emptyCalibration();
             const stage = stageOf(calibration);
             const state = learnerState(literacy);
-            const sliced = selectForLevel(fetchedWords, {
+            const selectionOptions = {
                 level: playerLevel,
                 languageCode: sourceLanguage ?? '',
                 gameId: selectedGame,
@@ -606,7 +613,104 @@ export default function GameShell({
                  */
                 universalOnly: requiresUniversalWords(stage),
                 preferUniversal: stage === STAGE.RANKED && state !== LEARNER_STATE.ESTABLISHED,
-            });
+            };
+
+            let sliced = selectForLevel(fetchedWords, selectionOptions);
+
+            /*
+             * WHEN THE CORPUS CANNOT SUPPLY A RUNWAY, PLAY WITHOUT ONE.
+             *
+             * `universalOnly` is a hard filter on purpose: a runway topped up
+             * with unfamiliar words is not a runway. But taken alone that
+             * turns a language with no universal-flagged entries into a
+             * language nobody can play at all — the learner is locked out of
+             * the whole game by a filter meant to protect their first five
+             * questions.
+             *
+             * So the fallback is at the SESSION level, not the word level:
+             * either the runway is drawn entirely from verified universal
+             * words, or there is no runway for this language yet and normal
+             * selection applies. What is never done is mixing unfamiliar words
+             * INTO a runway and still calling it one.
+             *
+             * This is the coverage question showing up in the product rather
+             * than in a report: `swadesh` is a concept-level flag, so a
+             * language's coverage is however many universal concepts have an
+             * approved entry in it. Until that is measured per language, some
+             * languages will land here — and the right behaviour for them is
+             * to play, not to wait.
+             */
+            if (sliced.length === 0 && selectionOptions.universalOnly) {
+                sliced = selectForLevel(fetchedWords, {
+                    ...selectionOptions,
+                    universalOnly: false,
+                    preferUniversal: true,
+                });
+            }
+
+            /*
+             * THE DECK OUTLIVES THE STAGE IT WAS DEALT FOR.
+             *
+             * Selection runs ONCE, when the deck is built. Calibration ends
+             * after thirteen answers, but the session length is the player's
+             * choice — the setup screen offers 10, 20 and 30, and defaults to
+             * 20. So a learner starting a 20-word session became RANKED at
+             * answer 13 and then played questions 14 to 20 out of a deck
+             * dealt under calibration rules: universal-only, no reach, chosen
+             * for a stage they had already left.
+             *
+             * Deal the deck in two segments instead. The calibration segment
+             * is exactly as long as calibration has left to run; the rest is
+             * dealt by ordinary ranked selection, excluding what the first
+             * segment already took so no word appears twice in one round.
+             */
+            const answeredSoFar = (calibrationRef.current[litKeyForDeal] ?? emptyCalibration())
+                .answered;
+            const calibrationLeft = Math.max(
+                0,
+                CALIBRATION.runwayQuestions + CALIBRATION.placementQuestions - answeredSoFar
+            );
+
+            if (selectionOptions.universalOnly && sliced.length > calibrationLeft) {
+                const head = sliced.slice(0, calibrationLeft);
+                const takenIds = new Set(head.map((w) => w?.uuid).filter(Boolean));
+                const tail = selectForLevel(
+                    fetchedWords.filter((w) => !takenIds.has(w?.uuid)),
+                    {
+                        ...selectionOptions,
+                        universalOnly: false,
+                        preferUniversal: true,
+                    }
+                ).slice(0, wordCount - head.length);
+                sliced = [...head, ...tail];
+            }
+
+            /*
+             * AN EMPTY DECK MUST NOT BECOME A SESSION.
+             *
+             * The fetch guard above rejects an empty PACK. It cannot catch an
+             * empty ROUND, and selection can now produce one: `universalOnly`
+             * is a hard filter, so a pack with no universal word at the
+             * learner's band yields nothing — correctly, because the
+             * alternative is serving unfamiliar words in the round that
+             * promises familiar ones.
+             *
+             * Without this guard the session starts anyway, and `DomainFlash`
+             * and `MeaningMatch` render null with no word to show and no way
+             * to reach their completion handlers. That is the player trapped in
+             * a blank game — the one invariant no game may break — arrived at
+             * from the opposite direction to the usual one.
+             *
+             * Same transition as an empty pack: back to setup with a message,
+             * and NO session created, so nothing resumable is left behind.
+             */
+            if (sliced.length === 0) {
+                setSetupError(
+                    'No words are ready for your level in this game yet. Try another game or domain.'
+                );
+                setPhase('setup');
+                return;
+            }
 
             /* Remember what this round served, before it is played. Bounded ids
              * only, and written per language+skill so one language's history
@@ -723,10 +827,45 @@ export default function GameShell({
                      * bad ten minutes should recover within the session.
                      */
                     const skillKey = progressKey(sourceLanguage ?? '', GAME_SKILL[selectedGame]);
-                    performanceRef.current[skillKey] = recordOutcome(
-                        performanceRef.current[skillKey] ?? emptyPerformance(),
-                        { outcome, attempts, hintsUsed, timeMs }
+                    const answerLitKey = literacyKey(
+                        sourceLanguage ?? '',
+                        GAME_SKILL[selectedGame]
                     );
+
+                    /*
+                     * WHICH STAGE IS THIS ANSWER IN?
+                     *
+                     * Read BEFORE the calibration counter advances, so the
+                     * answer is judged by the stage it was ASKED in rather
+                     * than the one it pushed the learner into. The fifth
+                     * runway answer is a runway answer.
+                     *
+                     * `calibration.js` declares that the runway counts toward
+                     * no ranking and cannot move the learner in either
+                     * direction. Those were policy functions nothing called:
+                     * every runway answer still fed the adaptation window, the
+                     * mastery map and the engine's scored result intake, so
+                     * five supported warm-up questions supplied half the ten
+                     * unique mastered words that promote a band. A stage
+                     * declared non-adjusting was adjusting.
+                     */
+                    const answerStage = stageOf(
+                        calibrationRef.current[answerLitKey] ?? emptyCalibration()
+                    );
+                    const ranked = countsTowardRanking(answerStage);
+
+                    /*
+                     * The rolling window drives `decideAdjustment`, including
+                     * the step DOWN. Runway answers must stay out of it, or a
+                     * learner who stumbles through a warm-up gets made easier
+                     * on the strength of questions that were never a measure.
+                     */
+                    if (ranked) {
+                        performanceRef.current[skillKey] = recordOutcome(
+                            performanceRef.current[skillKey] ?? emptyPerformance(),
+                            { outcome, attempts, hintsUsed, timeMs }
+                        );
+                    }
 
                     /*
                      * And to the literacy profile, which is a different
@@ -738,18 +877,26 @@ export default function GameShell({
                     if (needsReview(outcome)) missedRef.current.add(uuid);
                     else missedRef.current.delete(uuid);
 
-                    const litKey = literacyKey(sourceLanguage ?? '', GAME_SKILL[selectedGame]);
-                    literacyRef.current[litKey] = recordWord(
-                        literacyRef.current[litKey] ?? emptyLiteracy(),
-                        {
-                            wordUuid: uuid,
-                            outcome,
-                            attempts,
-                            hintsUsed,
-                            skill: GAME_SKILL[selectedGame],
-                        }
-                    );
-                    setLocalStorageItem(LITERACY_KEY, JSON.stringify(literacyRef.current));
+                    /*
+                     * The mastery map promotes BANDS, so a runway answer must
+                     * not write to it. Placement answers may — placement is
+                     * allowed to move a learner up, and that is the evidence
+                     * it moves them on.
+                     */
+                    const litKey = answerLitKey;
+                    if (mayAdjustLevel(answerStage)) {
+                        literacyRef.current[litKey] = recordWord(
+                            literacyRef.current[litKey] ?? emptyLiteracy(),
+                            {
+                                wordUuid: uuid,
+                                outcome,
+                                attempts,
+                                hintsUsed,
+                                skill: GAME_SKILL[selectedGame],
+                            }
+                        );
+                        setLocalStorageItem(LITERACY_KEY, JSON.stringify(literacyRef.current));
+                    }
 
                     /*
                      * Advance the first-session counter on EVERY answer,
@@ -763,15 +910,31 @@ export default function GameShell({
                     );
                     setLocalStorageItem(CALIBRATION_KEY, JSON.stringify(calibrationRef.current));
 
-                    await addEvent({
-                        type: 'game_result',
-                        run_id: updatedSession?.runId ?? '',
-                        word_uuid: uuid,
-                        game: selectedGame,
-                        outcome,
-                        attempts,
-                        time_ms: typeof timeMs === 'number' ? timeMs : 0,
-                    });
+                    /*
+                     * `game_result` is the ONE local event `syncNow()`
+                     * translates into the engine's scored `game.result`
+                     * intake. Sending it for a runway answer contradicts the
+                     * stage's own declaration that it counts toward no
+                     * ranking: the engine would settle XP against thirteen
+                     * questions the learner was told did not count.
+                     *
+                     * The local session still recorded the answer above
+                     * (`recordResult`), so the completion screen and the
+                     * learner's own progress display are unaffected — what is
+                     * withheld is the SETTLEMENT, which is the thing "unranked"
+                     * means.
+                     */
+                    if (ranked) {
+                        await addEvent({
+                            type: 'game_result',
+                            run_id: updatedSession?.runId ?? '',
+                            word_uuid: uuid,
+                            game: selectedGame,
+                            outcome,
+                            attempts,
+                            time_ms: typeof timeMs === 'number' ? timeMs : 0,
+                        });
+                    }
 
                     /* Queue MyCred events. */
                     if (outcome === 'correct') {
@@ -875,7 +1038,28 @@ export default function GameShell({
         }
         setLocalStorageItem(LITERACY_KEY, JSON.stringify(literacyRef.current));
 
-        const adjustment = decideAdjustment(performanceRef.current[skillKey], { adaptive });
+        /*
+         * LOWERING IS RESERVED FOR RANKED PLAY.
+         *
+         * `calibration.js` says placement may move a learner up and never
+         * down, and that the runway may not move them at all. Nothing enforced
+         * it here: `decideAdjustment` was applied to whatever the window held,
+         * so a learner who ended a ten-question session while still in
+         * placement could be made easier on the strength of the very questions
+         * the stage declared unmeasured.
+         *
+         * Gating the WINDOW (above) keeps runway answers out of it. This gates
+         * the DECISION, which is what covers placement: it may still be
+         * adjusted upward, and a downward step is held until ranking begins.
+         */
+        const completionStage = stageOf(
+            calibrationRef.current[literacyKey(sourceLanguage ?? '', GAME_SKILL[selectedGame])] ??
+                emptyCalibration()
+        );
+        const proposed = decideAdjustment(performanceRef.current[skillKey], { adaptive });
+        const adjustment =
+            proposed === ADJUST.EASIER && !mayLowerLevel(completionStage) ? ADJUST.HOLD : proposed;
+
         if (adjustment !== ADJUST.HOLD) {
             setOffsets((prev) => ({
                 ...prev,
@@ -1186,7 +1370,33 @@ export default function GameShell({
                      * help early, so both map to the loop's practice mode;
                      * Challenge holds it back. The level itself drives which
                      * words are dealt, above. */
-                    mode: playerLevel === LEVEL.CHALLENGE ? MODE.CHALLENGE : MODE.PRACTICE,
+                    /*
+                     * SUPPORT IS NOT PURELY THE PLAYER'S CHOICE.
+                     *
+                     * `opensWithSupport` and `needsImmediateSupport` were
+                     * written as policy and called by nothing, so the runway's
+                     * promise — meaning and audio offered BEFORE the answer,
+                     * not withheld as a penalty — did not reach a single game.
+                     * A learner who picked Challenge got Challenge on question
+                     * one of their first session, and two consecutive
+                     * struggling answers could not raise assistance until they
+                     * manually changed mode.
+                     *
+                     * Both override Challenge downward, never upward: the
+                     * player can always ask for less help than the policy
+                     * gives, and never less than it requires.
+                     */
+                    mode:
+                        opensWithSupport(currentStage) ||
+                        needsImmediateSupport(
+                            literacyRef.current[
+                                literacyKey(sourceLanguage ?? '', GAME_SKILL[selectedGame])
+                            ]
+                        )
+                            ? MODE.PRACTICE
+                            : playerLevel === LEVEL.CHALLENGE
+                              ? MODE.CHALLENGE
+                              : MODE.PRACTICE,
                     onResult: handleWordResult,
                     onComplete: handleComplete,
                     onEvent: addEvent,
