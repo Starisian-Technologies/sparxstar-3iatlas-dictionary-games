@@ -128,6 +128,15 @@ export default function App() {
                              * signs in, which is exactly what keeps guest play
                              * local without a second code path. */
                             getSuiteToken={getSuiteToken}
+                            /* Null while signed out. The engine's self-stats
+                             * route is owner-only and takes the account in the
+                             * path, so the id has to travel with the token —
+                             * it is not derivable from the token here, because
+                             * this app never parses one. It is an identifier
+                             * the signed-in player already knows, not a
+                             * secret, and it is the one value the leaderboard
+                             * itself is careful never to carry. */
+                            accountId={auth.account?.accountId ?? null}
                         />
                     </>
                 )}

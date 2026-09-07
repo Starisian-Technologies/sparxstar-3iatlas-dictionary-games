@@ -1,5 +1,5 @@
 import React from 'react';
-import { CheckCircle2, RotateCcw, List, Home, Grid3x3 } from 'lucide-react';
+import { BarChart3, CheckCircle2, RotateCcw, List, Home, Grid3x3 } from 'lucide-react';
 import { PRODUCTION_GAMES } from '../constants.js';
 import { needsReview } from '../pedagogy.js';
 import Celebration from './Celebration.jsx';
@@ -21,6 +21,12 @@ import { earnedBadges } from '../awards.js';
  *                               session. Display only — this screen cannot
  *                               decide that an award was earned, and an absent
  *                               list simply renders nothing.
+ *   onStats          {Function} OPTIONAL. Open the progress/leaderboard
+ *                               screen. Offered here because the moment a
+ *                               round ends is when "where does that put me?"
+ *                               is actually being asked; making the player
+ *                               navigate home first to find out is how a
+ *                               ranking goes unread. Omitted means no button.
  *   onBrowse         {Function} OPTIONAL. Switch to the host's Browse tab.
  *                               Rendered only when a host actually supplies one
  *                               — the games site passed an empty function, so
@@ -36,6 +42,7 @@ export default function SessionComplete({
     onHome,
     adjustNotice = null,
     awards = null,
+    onStats = null,
     onBrowse = null,
 }) {
     if (!session) return null;
@@ -205,6 +212,18 @@ export default function SessionComplete({
                     <Home size={16} aria-hidden="true" />
                     Return to Games Home
                 </button>
+
+                {/* Only when a host has wired the surface — see the prop doc. */}
+                {onStats && (
+                    <button
+                        type="button"
+                        onClick={onStats}
+                        className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl bg-gray-100 py-3 text-sm font-semibold text-gray-700 transition-colors dark:bg-gray-800 dark:text-gray-200"
+                    >
+                        <BarChart3 size={16} aria-hidden="true" />
+                        See your progress and ranking
+                    </button>
+                )}
 
                 {/* Only when a host actually implements it — see the prop doc. */}
                 {onBrowse && (

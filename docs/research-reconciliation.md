@@ -24,7 +24,7 @@ reports that Smith says X" are different claims.
 | **Mastery before advancement**                 | Kyriakova & Angelova (2014), reported in the book: games "may provide difficulty progression on an individual basis, **keeping players at a particular level until they have demonstrated that they are able to pass that level and progress to the next one**".                                                                                                         | `src/literacy.js` — a learner stays in a unit band until ten unique words are mastered first-attempt and unaided. Points never promote.                                                                                                 |
 | **Challenge within reach**                     | On progression designs: "at a particular level, players are only given challenges they have a good chance of meeting. In effect, this **scaffolds players and provides shelter for mastery learning**."                                                                                                                                                                  | The 60 / 25 / 15 pool mix — mostly current band, some review, a deliberately small stretch share.                                                                                                                                       |
 | **Support that fades**                         | Bruner's scaffolding via Beed, Hawkins & Roller (1991) and Wood & Wood (1996): the essential features include an "**adjustable level of support** … taking the learner's zone of proximal development into account" and "temporal support and guidance that **dwindle away to nothing** depending on the learner's progress towards self-reliance".                      | `src/hints.js` ladders and the unit-reveal ladder; help is requested, escalates, and is not given unasked in Challenge.                                                                                                                 |
-| **Do not teach that learning needs a prize**   | Lee & Hammer (2011: 4), quoted directly: a gamified curriculum "might absorb resources, or **teach students that they should learn only when provided with external rewards**".                                                                                                                                                                                          | XP marks real outcomes only; celebration is bounded and never blocks; no leaderboard.                                                                                                                                                   |
+| **Do not teach that learning needs a prize**   | Lee & Hammer (2011: 4), quoted directly: a gamified curriculum "might absorb resources, or **teach students that they should learn only when provided with external rewards**".                                                                                                                                                                                          | XP marks real outcomes only; celebration is bounded and never blocks; no rank or reward is ever computed in the browser (see §5, superseded).                                                                                           |
 
 ## Where the implementation DIVERGES from the source
 
@@ -80,13 +80,26 @@ for **both** extrinsic and intrinsic motivation promoting performance gains.
 Our conservative implementation is defensible and I am not proposing to loosen
 it. But the caution is ours, sharpened beyond the source.
 
-### 5. The no-leaderboard rule is a product decision, not a finding
+### 5. The no-leaderboard rule was a product decision — and the owner has since reversed it
 
 The book treats leaderboards neutrally to positively — they "encourage
 competition and participation as well as offering a visual representation of
-progress" (Hamari 2017). The reason to omit one here is that competition may
-discourage adults developing literacy, which is a judgement about **our**
-learners, not something the source says. Labelled accordingly.
+progress" (Hamari 2017). The reason this repository omitted one was that
+competition may discourage adults developing literacy, which is a judgement
+about **our** learners, not something the source says.
+
+**SUPERSEDED, 2026-09.** The owner has ruled that the RLC node-engine owns
+scores and leaderboards across 3iAtlas games, and that this client shows them.
+The section is kept rather than deleted because the reasoning above was sound
+and is worth reading beside the decision that overrode it: the caution was
+ours, it was never a finding, and a product decision is exactly the kind of
+thing an owner may reverse. What the ruling does **not** touch is the
+separation this repository was careful about — progression is still mastery,
+never points (`src/literacy.js`), and no rank promotes anyone.
+
+Where the leaderboard lives now: `src/api/statsClient.js` and
+`src/components/StatsScreen.jsx` in this repository, and the engine's
+`NODE-ADR-011` for the ranking rules themselves. Nothing here computes a rank.
 
 ### 6. Numbers the source does not supply
 

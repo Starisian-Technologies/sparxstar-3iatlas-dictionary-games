@@ -381,6 +381,80 @@ whenever the request fails — reinstating exactly the unbounded growth the
 screening exists to prevent. Covered by
 `src/hooks/__tests__/useProgressSync.test.js`.
 
+### 6d. Consumed stats and leaderboard endpoints (added 2026-09-07)
+
+The read side of the same engine, and the counterpart to §6c: results settle
+through `/events/batch`, and these two routes are how the player is shown what
+that settlement produced. Both live in `src/api/statsClient.js`; the screen that
+uses them is `src/components/StatsScreen.jsx`.
+
+| Route                    | Auth               | Returns                                                                         |
+| :----------------------- | :----------------- | :------------------------------------------------------------------------------ |
+| `GET /account/:id/stats` | bearer, OWNER-ONLY | The caller's own XP, games played, accuracy, rank, stars, badges — both windows |
+| `GET /leaderboard`       | bearer             | A page of a pseudonymous board                                                  |
+
+Leaderboard query parameters this client sends, and what each is for:
+
+| Parameter   | Value                                             | Note                                                                                                                                |
+| :---------- | :------------------------------------------------ | :---------------------------------------------------------------------------------------------------------------------------------- |
+| `window`    | `weekly` \| `all_time`                            | The player's choice. Both windows also arrive together from the self-stats route, so the personal card switches without a request.  |
+| `scope`     | `game` (Dictionary Games) \| `all_games`          | `game` carries `game_type`; `all_games` must not, and sending one is refused rather than ignored.                                   |
+| `game_type` | `dictionary_quiz`, on the Dictionary board only   | The same constant §6c settles under. Duplicated across the two modules and pinned by `src/__tests__/gameType.parity.test.js`.       |
+| `language`  | the source language, on the Dictionary board only | All-games spans languages by definition, so the filter belongs to the per-game board rather than following the player between them. |
+| `cursor`    | the previous response's `next_cursor`, verbatim   | Keyset, not offset. Ranks move while a page is being read, and an offset page repeats or skips rows across the boundary.            |
+| `limit`     | 25                                                | —                                                                                                                                   |
+
+**No account id, class id or school id is ever sent.** The board's population is
+derived from the caller's own account on the server (the engine's `BoardAudience`,
+NODE-ADR-011). A class id in a query string is a class id the client can change.
+
+**No `account_id` comes back either.** A row carries `screen_name`, `rank`, `xp`,
+`tied`, `movement` and `is_self`, and nothing else that names a person — a board
+that carried account ids would double as a screen-name-to-account-id lookup
+table for everyone who can read it.
+
+#### Nothing on this screen is calculated here
+
+Every rank, total, tie and movement direction is rendered exactly as received.
+There is no `index + 1`, no re-sort, no local tally, and no placeholder that
+fills a gap with a plausible number. Three consequences worth stating, because
+each is a thing a well-meaning change would break:
+
+- **Equal XP shares a rank.** The engine ranks 1, 2, 2, 4 and reports `tied`, so
+  the screen can say "Joint 2" without counting duplicate numbers — the other
+  rows sharing a rank are frequently on a page this client never sees.
+- **A learner outside the first page still sees where they are.** The engine
+  returns `self_context` — their row plus its immediate neighbours — whenever
+  they are ranked and off the page, and the screen renders it as its own block.
+  A leaders-only board tells someone ranked 47th nothing except that they are
+  not on it.
+- **A guest gets no rank at all.** With no token there is no account, nothing
+  has settled, and there is nothing to rank against. Rather than an empty board
+  or a zero, a guest sees the honest device-local counts from
+  `src/localProgress.js`: rounds played, words answered, words answered
+  correctly — observations, not awards. **No XP figure appears there**, because
+  arriving at one would mean computing a reward in a browser, and the player
+  would have no way to tell it from a settled one.
+
+Covered by `src/api/__tests__/statsClient.test.js`,
+`src/components/__tests__/StatsScreen.test.jsx`,
+`src/components/__tests__/statsEntry.test.jsx`,
+`src/__tests__/localProgress.test.js` and
+`src/__tests__/gameType.parity.test.js`.
+
+#### Where the player reaches it
+
+Two entry points, both optional props so a host that has not wired the surface
+gets no control rather than a dead one (the rule `onBrowse` established):
+`GameNav`'s **Progress** button, and **See your progress and ranking** on the
+completion screen — offered there because the end of a round is when "where does
+that put me?" is actually being asked.
+
+The control is offered from the setup and completion screens and **not during
+play**. Rendering the stats view over a round in progress would unmount the game
+in front of the player, discarding the attempt counter, tile state and clock of
+the question they are part-way through.
+
 ## 7. Seams
 
 - **REST seam:** all server interaction goes through `createDictionaryApiClient`
@@ -1050,19 +1124,19 @@ same, and port it there if not.
 > citation. **Reconciling these rows against the source is an open task**, and
 > until it is done no row here should be quoted as what the book says.
 
-| Research principle                | SPARXSTAR rule                                              | Implementation                                                                                | Test or pilot measure                                                              |
-| :-------------------------------- | :---------------------------------------------------------- | :-------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------- |
-| Freedom to fail                   | No penalty; retry, help, Skip and reveal always available   | `src/pedagogy.js` (`OUTCOME`, `XP_BY_OUTCOME`, `skip`, `revealAnswer`); shared `AnswerReveal` | `games.notrapped.test.jsx` — every game, every state, has a resolution and an exit |
-| Rapid feedback                    | Immediate instructional response to the exact action        | Per-game handlers resolve synchronously; `AnswerReveal` shows meaning, IPA, example           | `AnswerReveal.test.jsx`; `hint.chain.test.jsx`                                     |
-| Individual progression            | Mastery before advancement; never points                    | `src/literacy.js` — ten unique words, first attempt, unaided                                  | `literacy.test.js` — XP cannot promote; hinted words do not count                  |
-| Adjustable scaffolding            | Assistance escalates on request and fades with success      | `src/hints.js` per-game ladders; unit reveal in the written-spelling games                    | `hints.test.js`; `pedagogy.test.js`                                                |
-| Challenge–reward balance          | Reachable next-band words, in a controlled proportion       | `selectForLevel` 60 / 25 / 15 pools with deterministic backfill                               | `selection.mix.test.js`                                                            |
-| Learner autonomy                  | Mode choice and navigation never taken away                 | `GameNav` in every phase; level control; `LeaveGameDialog`                                    | `GameShell.escape.test.jsx`; `navigation.escape.test.jsx`                          |
-| Visible progress                  | XP, and progress the player can see and check               | `SessionComplete` reconciliation; live points in `GameNav`                                    | `navigation.escape.test.jsx` — categories sum to answered                          |
-| Pedagogy-first design             | Every game has a written teaching sequence                  | `docs/pedagogy-records.md`                                                                    | Six records, one per game                                                          |
-| Separate progression from rewards | Five systems, never collapsed                               | `literacy.js` header; `difficulty.js` header                                                  | `literacy.test.js` — skills cannot promote one another                             |
-| No external-reward overuse        | Rewards mark real accomplishment; no leaderboard this phase | `Celebration` bounded and reduced-motion aware; no leaderboard                                | `celebration.test.jsx`                                                             |
-| Iterative evidence                | Thresholds configurable, not locked                         | `progressionPolicy()`; `docs/gameplay-telemetry.md`                                           | `literacy.test.js` — policy override works                                         |
+| Research principle                | SPARXSTAR rule                                                                                | Implementation                                                                                     | Test or pilot measure                                                              |
+| :-------------------------------- | :-------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------- |
+| Freedom to fail                   | No penalty; retry, help, Skip and reveal always available                                     | `src/pedagogy.js` (`OUTCOME`, `XP_BY_OUTCOME`, `skip`, `revealAnswer`); shared `AnswerReveal`      | `games.notrapped.test.jsx` — every game, every state, has a resolution and an exit |
+| Rapid feedback                    | Immediate instructional response to the exact action                                          | Per-game handlers resolve synchronously; `AnswerReveal` shows meaning, IPA, example                | `AnswerReveal.test.jsx`; `hint.chain.test.jsx`                                     |
+| Individual progression            | Mastery before advancement; never points                                                      | `src/literacy.js` — ten unique words, first attempt, unaided                                       | `literacy.test.js` — XP cannot promote; hinted words do not count                  |
+| Adjustable scaffolding            | Assistance escalates on request and fades with success                                        | `src/hints.js` per-game ladders; unit reveal in the written-spelling games                         | `hints.test.js`; `pedagogy.test.js`                                                |
+| Challenge–reward balance          | Reachable next-band words, in a controlled proportion                                         | `selectForLevel` 60 / 25 / 15 pools with deterministic backfill                                    | `selection.mix.test.js`                                                            |
+| Learner autonomy                  | Mode choice and navigation never taken away                                                   | `GameNav` in every phase; level control; `LeaveGameDialog`                                         | `GameShell.escape.test.jsx`; `navigation.escape.test.jsx`                          |
+| Visible progress                  | XP, and progress the player can see and check                                                 | `SessionComplete` reconciliation; live points in `GameNav`                                         | `navigation.escape.test.jsx` — categories sum to answered                          |
+| Pedagogy-first design             | Every game has a written teaching sequence                                                    | `docs/pedagogy-records.md`                                                                         | Six records, one per game                                                          |
+| Separate progression from rewards | Five systems, never collapsed                                                                 | `literacy.js` header; `difficulty.js` header                                                       | `literacy.test.js` — skills cannot promote one another                             |
+| No external-reward overuse        | Rewards mark real accomplishment; every reward is settled by the engine, never by this client | `Celebration` bounded and reduced-motion aware; `StatsScreen` renders server-supplied numbers only | `celebration.test.jsx`; `StatsScreen.test.jsx`; `localProgress.test.js`            |
+| Iterative evidence                | Thresholds configurable, not locked                                                           | `progressionPolicy()`; `docs/gameplay-telemetry.md`                                                | `literacy.test.js` — policy override works                                         |
 
 ### Pilot questions this cannot yet answer
 

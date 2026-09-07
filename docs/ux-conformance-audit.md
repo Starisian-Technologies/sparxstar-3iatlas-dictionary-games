@@ -118,9 +118,21 @@ Plus a **fourth reward type, Gold**, alongside XP and Stars, and the rule
 Three conflicts, each with the brief rather than with taste:
 
 1. **Three of the ten are placement awards** — first, second, third — and the
-   gameplay screens are built around a leaderboard. The brief is explicit:
-   _"Do not add a public leaderboard in this phase. Competition could discourage
-   adults developing literacy."_
+   gameplay screens are built around a leaderboard.
+
+    > **Updated 2026-09.** The leaderboard half of this objection is gone: the
+    > owner has ruled that the engine owns leaderboards across 3iAtlas games and
+    > this client now renders one (`src/components/StatsScreen.jsx`). The
+    > earlier brief line — _"Do not add a public leaderboard in this phase.
+    > Competition could discourage adults developing literacy."_ — no longer
+    > holds and is quoted here only as the reason the badges were originally
+    > declined.
+    >
+    > The **badges** are still not adopted, and for a reason the ruling does not
+    > touch: nothing in this platform awards a badge yet. The engine reports a
+    > badge count of the zero it actually is, and a placement badge minted in a
+    > browser would be exactly the client-side reward the whole design forbids.
+
 2. **Gold is a currency nobody has specified for these games.** Adopting the
    table wholesale would introduce a reward type by accident.
 3. **Four badges need RLC capabilities these games do not have** — peer QC

@@ -4,6 +4,7 @@ import { MAX_PACK_SIZE, useGameSet } from '../hooks/useGameSet.js';
 import { useGameSession } from '../hooks/useGameSession.js';
 import { useProgressSync } from '../hooks/useProgressSync.js';
 import { MODE, needsReview } from '../pedagogy.js';
+import StatsScreen from './StatsScreen.jsx';
 import GameNav from './GameNav.jsx';
 import {
     DEFAULT_POLICY,
@@ -227,6 +228,7 @@ export default function GameShell({
     onBrowse,
     engineUrl,
     getSuiteToken,
+    accountId,
 }) {
     /* ── Setup state ── */
     /*
@@ -304,6 +306,23 @@ export default function GameShell({
      * question is pending.
      */
     const [confirmLeave, setConfirmLeave] = useState(null);
+
+    /*
+     * The progress/leaderboard view.
+     *
+     * A SEPARATE FLAG, not a fifth value of `phase`, and the distinction is
+     * load-bearing. `phase` is the round's lifecycle — `leaveToHome` drives it
+     * back to `setup` and clears the session with it — so a stats value living
+     * there would make opening the leaderboard part of the same state machine
+     * that decides whether a round survives.
+     *
+     * It is also why the control is offered only from `setup` and `complete`
+     * (see `nav` below). Rendering it over `playing` would unmount the game in
+     * front of the player, discarding the attempt counter, the tile state and
+     * the clock of the question they are part-way through — the same defect the
+     * level control was fixed for, arriving by a different door.
+     */
+    const [showStats, setShowStats] = useState(false);
 
     /* ── Active game words (sliced + filtered for the chosen game) ── */
     const [gameWords, setGameWords] = useState([]);
@@ -1263,6 +1282,12 @@ export default function GameShell({
             points={session?.xpEarned ?? 0}
             onHome={handleHome}
             onRestart={phase === 'playing' || phase === 'complete' ? handleRestart : null}
+            /* Between rounds only — see the note on `showStats`. */
+            onStats={
+                !showStats && (phase === 'setup' || phase === 'complete')
+                    ? () => setShowStats(true)
+                    : null
+            }
         />
     );
 
@@ -1272,6 +1297,39 @@ export default function GameShell({
     );
 
     /* ── Render ── */
+
+    /*
+     * Progress and ranking. Rendered ahead of the phase branches because it is
+     * a view over the whole account rather than a stage of a round: `Back`
+     * returns to whichever phase the player left, with the round intact.
+     *
+     * `engineUrl`, `getSuiteToken` and `accountId` are forwarded, not
+     * defaulted. A host that supplies none of them still gets a working screen
+     * — the guest branch — rather than a broken one.
+     */
+    if (showStats) {
+        return (
+            <div className="flex-1 flex flex-col overflow-y-auto bg-white dark:bg-gray-900">
+                {nav}
+                <div className="px-4 pt-4">
+                    <button
+                        type="button"
+                        onClick={() => setShowStats(false)}
+                        className="min-h-[44px] rounded-lg border border-gray-300 px-4 text-sm font-medium text-gray-700 dark:border-gray-600 dark:text-gray-200"
+                    >
+                        Back
+                    </button>
+                </div>
+                <StatsScreen
+                    engineUrl={engineUrl}
+                    getSuiteToken={getSuiteToken}
+                    accountId={accountId}
+                    sourceLanguage={sourceLanguage}
+                />
+                {leaveDialog}
+            </div>
+        );
+    }
 
     if (phase === 'loading') {
         return (
@@ -1421,6 +1479,7 @@ export default function GameShell({
                     /* Forwarded, not defaulted: a host that implements a
                      * Browse tab gets the control, and a host that does not
                      * gets no dead button. */
+                    onStats={() => setShowStats(true)}
                     onBrowse={onBrowse}
                 />
                 {leaveDialog}
