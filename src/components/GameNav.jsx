@@ -1,5 +1,5 @@
 import React from 'react';
-import { Home, RotateCcw } from 'lucide-react';
+import { BarChart3, Home, RotateCcw } from 'lucide-react';
 
 /**
  * GameNav — the escape hatch that must exist in every gameplay state.
@@ -26,6 +26,10 @@ import { Home, RotateCcw } from 'lucide-react';
  *   points     {number}    XP earned so far this session
  *   onHome     {Function}  REQUIRED — leave the game and return to the menu
  *   onRestart  {Function}  Restart this game; omitted outside gameplay
+ *   onStats    {Function}  Open the progress/leaderboard screen. OPTIONAL, and
+ *                          omitted means no button — the same rule `onBrowse`
+ *                          taught: a host that has not wired this surface gets
+ *                          no control, rather than a control that does nothing.
  *   identity   {node}      Sign-in state supplied by the host app
  */
 export default function GameNav({
@@ -35,6 +39,7 @@ export default function GameNav({
     points = 0,
     onHome,
     onRestart = null,
+    onStats = null,
     identity = null,
 }) {
     const showProgress =
@@ -62,6 +67,17 @@ export default function GameNav({
                 >
                     <RotateCcw size={16} aria-hidden="true" />
                     Restart
+                </button>
+            )}
+
+            {onStats && (
+                <button
+                    type="button"
+                    onClick={onStats}
+                    className="flex min-h-[44px] items-center gap-1.5 rounded-lg border border-gray-300 px-3 text-sm font-medium text-gray-700 dark:border-gray-600 dark:text-gray-200"
+                >
+                    <BarChart3 size={16} aria-hidden="true" />
+                    Progress
                 </button>
             )}
 

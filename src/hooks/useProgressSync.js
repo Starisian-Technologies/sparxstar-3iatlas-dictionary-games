@@ -48,7 +48,16 @@ import { useCallback, useEffect, useRef } from 'react';
 import { getRecord, putRecord } from './idbUtils.js';
 import { newEventId } from '../ids.js';
 
-const OUTBOX_KEY = 'progress-outbox:pending';
+/**
+ * The single outbox record's key.
+ *
+ * EXPORTED because the guest stats view reads the same record: for a player
+ * with no token the outbox never drains, so it is that player's complete
+ * device-local play record rather than a queue (see `src/localProgress.js`).
+ * Exporting the key is what stops that reader from hard-coding a copy of the
+ * string, which would keep working until the day this one changed.
+ */
+export const OUTBOX_KEY = 'progress-outbox:pending';
 const BATCH_MAX = 200; // matches the engine's `batch_too_large` cap (spec §3.10)
 
 /**
