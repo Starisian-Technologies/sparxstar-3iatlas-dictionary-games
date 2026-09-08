@@ -1,4 +1,4 @@
-# Platform Decisions — Auto-synced from registry@78a426f
+# Platform Decisions — Auto-synced from registry@5c87042
 # DO NOT EDIT — this file is overwritten on every registry change
 
 - ADR-001: Relational canonical record; graph is derived projection only
@@ -37,3 +37,4 @@
 - ADR-034: Divide the spoken-audio stack by capture experience and platform audio lifecycle, not by language runtime
 - ADR-035: Set audio constraints from a named capture profile, never from a single platform-wide ceiling
 - ADR-036: Separate elicitation pacing from acoustic prosody; a paced reader measures nothing
+- ADR-037: A Pull Request Merges on Green CI *and* Zero Open Review Threads
