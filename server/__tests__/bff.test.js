@@ -723,7 +723,17 @@ describe('rights restrictions survive the passthrough', () => {
         await call(app, '/api/dictionary/game-set?language=mnk&public_domain=false');
 
         expect(seen).toHaveLength(1);
-        expect(seen[0]).toContain('public_domain=true');
+
+        /*
+         * Parsed, not substring-matched. `toContain('public_domain=true')`
+         * passes just as well on `?public_domain=false&public_domain=true` —
+         * an implementation that FORWARDED the browser's value and appended
+         * its own would satisfy it, which is the exact regression this test
+         * exists to catch. What matters is that the parameter appears once and
+         * that its one value is `true`.
+         */
+        const forwarded = new URL(seen[0]).searchParams.getAll('public_domain');
+        expect(forwarded).toEqual(['true']);
     });
 
     it('carries the swadesh flag through, in BOTH truth values', async () => {
