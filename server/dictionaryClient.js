@@ -273,7 +273,8 @@ function createDictionaryClient({ config, identity, fetch: fetchImpl = fetch, lo
      * empty word list that reads like an empty corpus.
      *
      * @param {{ language: string, domain?: string, level?: string, size?: number,
-     *           swadesh?: boolean, audioVerified?: boolean, seed?: string }} query
+     *           swadesh?: boolean, audioVerified?: boolean, publicDomain?: boolean,
+     *           seed?: string }} query
      * @param {string} correlationId
      */
     async function gamePack(query, correlationId) {
@@ -283,6 +284,9 @@ function createDictionaryClient({ config, identity, fetch: fetchImpl = fetch, lo
         if (query.size !== undefined) params.set('size', String(query.size));
         if (query.swadesh) params.set('swadesh', 'true');
         if (query.audioVerified) params.set('audio_verified', 'true');
+        /* The Peace Corps corpus restriction. Decided by the route from the
+         * language, never taken from the browser. */
+        if (query.publicDomain) params.set('public_domain', 'true');
         // A seed makes a pack reproducible: the same seed and corpus version
         // yield a byte-identical pack, which is what makes "today's game" the
         // same game for every player.

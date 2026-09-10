@@ -657,6 +657,75 @@ describe('rights restrictions survive the passthrough', () => {
         }
     });
 
+    it('restricts Mandinka to the Peace Corps corpus, from the language alone', async () => {
+        /*
+         * Dictionary Games serves Mandinka from the Peace Corps material only.
+         *
+         * The flag is derived from the LANGUAGE here in the BFF, never read
+         * from the query — a corpus restriction a client can ask for is one a
+         * client can decline. The games client could not enforce it in any
+         * case: `source` and `source_batch`, the fields that identify a Peace
+         * Corps entry, are on the Dictionary's GAME_PACK_FORBIDDEN list and
+         * never reach the browser.
+         */
+        const seen = [];
+        const { app } = stack({
+            dictionaryFetch: async (url, init) => {
+                seen.push(String(url));
+                return jsonResponse(upstreamPack(), 200, init);
+            },
+        });
+
+        await call(app, '/api/dictionary/game-set?language=mnk');
+
+        expect(seen).toHaveLength(1);
+        expect(seen[0]).toContain('public_domain=true');
+    });
+
+    it('does not narrow other languages', async () => {
+        /*
+         * Non-vacuity, and the scope of the rule: the restriction is Mandinka's
+         * alone. A different language must reach the Dictionary unnarrowed, or
+         * the assertion above would pass for a filter that was simply always on.
+         */
+        const seen = [];
+        const { app } = stack({
+            /* A second offered language — the default deployment offers only
+             * Mandinka, and an unoffered code is refused before it reaches the
+             * Dictionary at all. */
+            configOverrides: { GAMES_DICTIONARY_LANGUAGES: 'mnk:Mandinka,wol:Wolof' },
+            dictionaryFetch: async (url, init) => {
+                seen.push(String(url));
+                return jsonResponse(upstreamPack(), 200, init);
+            },
+        });
+
+        await call(app, '/api/dictionary/game-set?language=wol');
+
+        expect(seen).toHaveLength(1);
+        expect(seen[0]).not.toContain('public_domain');
+    });
+
+    it('cannot be switched OFF by the browser', async () => {
+        /*
+         * The point of deriving it server-side. A client asking for
+         * `public_domain=false` — or for anything else — changes nothing:
+         * the parameter is not read from the query at all.
+         */
+        const seen = [];
+        const { app } = stack({
+            dictionaryFetch: async (url, init) => {
+                seen.push(String(url));
+                return jsonResponse(upstreamPack(), 200, init);
+            },
+        });
+
+        await call(app, '/api/dictionary/game-set?language=mnk&public_domain=false');
+
+        expect(seen).toHaveLength(1);
+        expect(seen[0]).toContain('public_domain=true');
+    });
+
     it('carries the swadesh flag through, in BOTH truth values', async () => {
         /*
          * The universal-word flag has to survive THREE independent

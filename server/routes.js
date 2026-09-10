@@ -28,6 +28,15 @@
  *  one. The same shape the Dictionary's own release importer enforces. */
 const LANGUAGE_PATTERN = /^[a-z]{3}$/;
 
+/**
+ * Languages Dictionary Games serves from public-domain material only.
+ *
+ * `mnk` (Mandinka) is restricted to the Peace Corps corpus. A set rather than
+ * a comparison so the next language is a data change, and so the rule reads as
+ * a policy list rather than as a special case buried in a handler.
+ */
+const PEACE_CORPS_ONLY_LANGUAGES = new Set(['mnk']);
+
 /** Domain codes and levels are short opaque labels from the corpus. Bounded to
  *  a conservative character set so neither can carry a separator, a space, or
  *  anything that would change how the upstream parses its own query string. */
@@ -205,6 +214,31 @@ function createRoutes({ config, dictionary }) {
             swadesh: readBoolean(params, 'swadesh'),
             audioVerified: readBoolean(params, 'audio_verified'),
             seed: readString(params, 'seed', SEED_PATTERN),
+            /*
+             * MANDINKA IS SERVED FROM THE PEACE CORPS MATERIAL ONLY.
+             *
+             * Set HERE, from the language, and never read from the query.
+             * A corpus restriction a client can ask for is a corpus
+             * restriction a client can decline: the browser is not a place to
+             * enforce which material a product may serve, and the games client
+             * could not enforce it even if it wanted to, because the fields
+             * that identify a Peace Corps entry (`source`, `source_batch`) are
+             * on the Dictionary's GAME_PACK_FORBIDDEN list and never reach it.
+             *
+             * `public_domain` is the property the Dictionary filters on. For
+             * the release-1 corpus that is exactly "cites Peace Corps and
+             * nothing more restrictive", so the ~1,004 entries citing both
+             * Peace Corps and Gamble — licensed third-party material — are
+             * excluded. The Dictionary drift-guards that equivalence.
+             *
+             * Scoped to this product and this language deliberately: no other
+             * consumer of the Dictionary is affected, and no other language is
+             * narrowed. Widening or lifting it is an owner/AIWA decision, not
+             * a client one.
+             */
+            publicDomain: PEACE_CORPS_ONLY_LANGUAGES.has(
+                readString(params, 'language', LANGUAGE_PATTERN, { required: true })
+            ),
         };
 
         /*
