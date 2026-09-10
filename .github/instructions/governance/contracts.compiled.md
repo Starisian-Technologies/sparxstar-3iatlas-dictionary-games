@@ -1,4 +1,4 @@
-# Cross-Repo Contracts — Auto-synced from registry@5c87042
+# Cross-Repo Contracts — Auto-synced from registry@b6aafc3
 # DO NOT EDIT — this file is overwritten on every registry change
 
 
@@ -8,7 +8,7 @@
 > **Disclosure:** Internal. Adjacent to Patent Family A (community-weighted intelligence / extraction layers) and Family C (provenance + governed-record mechanism). Do not route externally; clear with patent strategy before any public posting. Reference by registry ID only once assigned.
 
 **Status:** Accepted (2026-06-16, platform-standards owner). **Invariant 7 is normative.** Registry ID assignment remains an operational follow-up — not self-minted; assigned by the registry owner.
-**Home:** `sparxstar-platform-standards`.
+**Home:** `sparxstar-architecture-governance-registry`.
 **Concretizes:** GAL clauses 4–5 (the "one shared model, serialization specified elsewhere" that GAL deliberately deferred) and the language-event fields the LRPL-IC will carry.
 **Dependency status:** the ADR-012 amendment (ADR-017, identity vocabulary) is **Accepted** as of 2026-06-16. LRPL-IC remains open and continues to apply as a sovereignty decision (Muhammed) — the language-event fields below are reserved by name; their canonicity semantics finalize when LRPL-IC is Accepted.
 **Consumers (project into this shape; none mints a local variant):** WordPad, Prosody Reader, DVE, ESU/Yahura, Helios, Dictionary, Mḗh₁n̥s, the Librarian (ADR-009), Anansi (ADR-010), and any future capture, extraction, or governance surface.
@@ -198,7 +198,7 @@ something this contract does not promise.
 > **Publication control:** this draft may contain disclosure-sensitive material adjacent to patent strategy. Do NOT publish externally — including into a public standards repo — until patent counsel approves.
 
 **Status:** Proposed — **approved for internal standards routing**; do NOT publish externally; legal, sovereignty, retention, and patent-publication clauses pending ratification. **Not Accepted.**
-**Home:** `sparxstar-platform-standards` (cross-repo source of truth, this repo). Repos reference this invariant by ID; they do not copy it.
+**Home:** `sparxstar-architecture-governance-registry` (cross-repo source of truth, this repo). Repos reference this invariant by ID; they do not copy it.
 **Invariant ID:** `INV-012` (stable working reference — append-only registry; this number does not change).
 **Ratifying ADR:** assigned on acceptance — *not* self-minted (collision discipline).
 **Applies to:** every repo that creates, edits, suggests on, reviews, promotes, publishes, stores, exports, or **trains on** a governed artifact — WordPad, DVE, ESU, Helios, Mḗh₁n̥s, Dictionary, model-training pipelines, and any future authoring surface.
@@ -281,7 +281,7 @@ Developed across the WordPad ↔ DVE governance review session and hardened agai
 # Platform Invariant — Language Relationship & Influence Context (LRPL-IC)
 
 **Status:** Proposed — approved for internal standards routing. **Not Accepted.** Registry ID assigned on acceptance — *not* self-minted.
-**Home:** `sparxstar-platform-standards` (this repo).
+**Home:** `sparxstar-architecture-governance-registry` (this repo).
 **Extends:** [Governed Artifact Lineage (GAL)](./governed-artifact-lineage.md) — adds required fields to the governed node (clause 4 capture floor) and conditions the canonicity axis (clause 3). Subject to GAL's identity split (clause 8), suggestion-layer rule (clause 11), and policy gate (clause 13).
 **Applies to:** every repo that captures, stores, analyzes, governs, or projects a language event — WordPad, Prosody Reader, RLC, Dictionary, ESU/Yahura, Helios, Mḗh₁n̥s, and any future authoring or capture surface.
 
