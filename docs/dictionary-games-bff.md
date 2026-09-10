@@ -152,6 +152,45 @@ returned to the browser as a 503.
 Dictionary's real compiled output, so this class of drift fails a test rather
 than a deploy.
 
+### 4c. Corpus restriction — Mandinka is Peace Corps only
+
+**Invariant.** For `mnk`, this BFF sends `public_domain=true` upstream on every
+`game-set` request. It is derived from the requested LANGUAGE and is never read
+from the query string, so a browser sending `public_domain=false` — or
+`public_domain` at all — changes nothing. A corpus restriction a client can ask
+for is a corpus restriction a client can decline.
+
+`PEACE_CORPS_ONLY_LANGUAGES` in `server/routes.js` holds the set, so a second
+language is a data change rather than a special case in a handler.
+
+**Why it cannot be a client-side filter** the way `swadesh` is: `source` and
+`source_batch`, the columns that identify a Peace Corps entry, are on the
+Dictionary's `GAME_PACK_FORBIDDEN` list and never reach the browser. The
+restriction has to be decided upstream and the answer returned as words.
+
+This table is a pointer, not a second source:
+
+| Fact                           | Value                                                 | Owner        |
+| :----------------------------- | :---------------------------------------------------- | :----------- |
+| Parameter sent upstream        | `public_domain=true`                                  | Dictionary   |
+| Languages restricted           | `mnk`                                                 | owner / AIWA |
+| What `public_domain` selects   | `provenance_class = 'public_domain'`                  | Dictionary   |
+| Peace-Corps-and-Gamble entries | **excluded** (`licensed_third_party`, ~1,004 entries) | Dictionary   |
+| Accepted from the browser      | **never**                                             | this BFF     |
+
+**What "Peace Corps only" means.** The Dictionary filters on
+`provenance_class = 'public_domain'`, which for the release-1 corpus is exactly
+_"cites Peace Corps and nothing more restrictive"_ — a mixed record takes the
+most restrictive of its sources. The canonical definition, and its drift guard,
+live in the Dictionary repository (`src/domain/provenance.ts`, and the
+`public_domain` parameter in its `docs/dictionary-openapi.yaml`). Nothing here
+re-derives it.
+
+**Who may change it.** Widening or lifting the restriction — including whether
+the Peace-Corps-and-Gamble entries should be admitted — is an owner/AIWA
+decision, not a client one. Peace Corps material is marked `public_domain`
+PENDING VERIFICATION upstream; that rights audit is open.
+
 ## 5. Rights
 
 Authenticated application access does not remove copyright or consent
