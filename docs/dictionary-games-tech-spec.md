@@ -174,6 +174,13 @@ neither route. The BFF answers both locally and says so in the payload
 (`source: "games-bff-configuration"`). Closing that gap is the dictionary
 repository's decision.
 
+**Mandinka corpus restriction.** `GET /api/dictionary/game-set` derives
+`public_domain=true` upstream whenever `language=mnk`. The browser does not get
+to choose this: a caller-supplied `public_domain` query parameter is ignored,
+so release-1 Mandinka stays Peace Corps only unless the owner / AIWA changes
+the policy upstream. The detailed contract and ownership pointers live in
+`docs/dictionary-games-bff.md` §4c.
+
 **One-way dependency, unchanged.** `src/hooks/` and `src/components/` still must
 not import from `src/site/`. The BFF's default base path therefore lives in the
 neutral `src/constants.js` (`DICTIONARY_BFF_PATH`), which `src/site/config.js`
@@ -938,6 +945,11 @@ same, and port it there if not.
   `game-set?language=mnk&limit=5` because `limit` was not an accepted name and
   the allowlist drops what it does not recognise, so no bound reached the
   Dictionary — whose own default for an absent size was its maximum.
+- **Mandinka release-1 corpus is Peace Corps only.** For `language=mnk`, the
+  BFF derives `public_domain=true` and ignores any browser-supplied
+  `public_domain`, so the restriction is not caller-selectable. Detailed
+  upstream contract and owner / AIWA references live in
+  `docs/dictionary-games-bff.md` §4c.
 - **The domain filter is scoped to its language.** Domain codes are per
   language, so `GameShell` stores the selection as `{ language, code }` and
   DERIVES the effective filter (`domainChoice.language === sourceLanguage`).
