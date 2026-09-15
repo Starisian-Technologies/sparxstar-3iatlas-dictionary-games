@@ -158,6 +158,19 @@ export function bandForWord(word, languageCode) {
 }
 
 export function bandForUnits(units) {
+    if (!(units > 0)) return null;
+    /*
+     * A word SHORTER than the lowest band belongs to the lowest band.
+     *
+     * It used to fall through to `null`, and a null band is not "no opinion" —
+     * downstream it means unreachable. `selectForLevel` puts banded words into
+     * the current/next/at-or-below pools by band index, so a two-unit word sat
+     * outside every pool and could never be dealt, however easy it was and
+     * however empty the round. The bands are a FLOOR on difficulty, not a
+     * window: easier than the easiest band is still easier, and withholding it
+     * withholds the one thing a struggling learner can definitely do.
+     */
+    if (units < UNIT_BANDS[0].min) return UNIT_BANDS[0];
     return UNIT_BANDS.find((b) => units >= b.min && units <= b.max) ?? null;
 }
 

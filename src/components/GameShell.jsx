@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Loader2, ChevronDown } from 'lucide-react';
 import { MAX_PACK_SIZE, useGameSet } from '../hooks/useGameSet.js';
 import { useGameSession } from '../hooks/useGameSession.js';
@@ -29,10 +29,11 @@ import {
     applyAdjustment,
     decideAdjustment,
     emptyPerformance,
+    planRound,
     progressKey,
     recordOutcome,
-    selectForLevel,
 } from '../difficulty.js';
+import { SHORTAGE_MESSAGE, availabilityFor, partitionForGame } from '../playability.js';
 import {
     CALIBRATION,
     STAGE,
@@ -326,6 +327,18 @@ export default function GameShell({
 
     /* ── Active game words (sliced + filtered for the chosen game) ── */
     const [gameWords, setGameWords] = useState([]);
+    /*
+     * A dealt round that is SHORTER than the player asked for, waiting on them.
+     *
+     * `{ delivered, requested }` while the notice is up, null otherwise. The
+     * deck itself is held in a ref rather than in state because it must not
+     * re-render anything and must survive until the player answers.
+     */
+    const [shortRound, setShortRound] = useState(null);
+    const pendingDeckRef = useRef(null);
+    /* Set the moment the player taps a game card. After that the selection is
+     * theirs and nothing may move it — see the auto-select effect below. */
+    const gameChosenByPlayerRef = useRef(false);
 
     /* ── Hooks ── */
     /*
@@ -389,6 +402,81 @@ export default function GameShell({
          */
         universalOnly: requiresUniversalWords(currentStage),
     });
+
+    /*
+     * A GAME-NEUTRAL PACK, for answering "can this game be played at all?"
+     *
+     * The pack above is narrowed for the SELECTED game — `listen_write` asks
+     * for audio-verified entries, calibration asks for universal ones — which
+     * makes it the wrong evidence for judging the other five. Judging
+     * `complete_sentence` by an audio-only pack would disable a game that is
+     * perfectly playable.
+     *
+     * Fetched only WHEN the primary pack is narrowed: an empty `language`
+     * makes the hook a no-op, so the ordinary case still issues one request
+     * and this costs nothing.
+     */
+    const packIsNarrowed = selectedGame === 'listen_write' || requiresUniversalWords(currentStage);
+    const { words: neutralWords, loading: neutralLoading } = useGameSet({
+        bffPath,
+        language: packIsNarrowed ? sourceLanguage : '',
+        domain: selectedDomain,
+        limit: Math.min(MAX_PACK_SIZE, Math.max(wordCount * 6, 40)),
+    });
+    const previewPack = packIsNarrowed ? neutralWords : fetchedWords;
+    const previewLoading = packIsNarrowed ? neutralLoading : gameSetLoading;
+
+    /*
+     * WHETHER A GAME CAN BE OFFERED IS KNOWABLE BEFORE IT IS OFFERED.
+     *
+     * "No words are available for this game yet" used to appear AFTER the
+     * player chose a game, chose a length and pressed Start — the answer to a
+     * question they had already committed to, with no way back but to leave
+     * the round. Every input to that answer is present here, at setup, so it
+     * is answered here: an unplayable game is disabled and says what it needs.
+     */
+    const availability = useMemo(() => {
+        const out = {};
+        for (const game of GAME_TYPES) {
+            out[game.id] = availabilityFor(previewPack, {
+                gameId: game.id,
+                languageCode: sourceLanguage ?? '',
+            });
+        }
+        return out;
+    }, [previewPack, sourceLanguage]);
+
+    /*
+     * Nothing is disabled while the evidence is still arriving. A game greyed
+     * out because a fetch has not landed is a game the player believes is
+     * broken.
+     */
+    const availabilityKnown = !previewLoading && previewPack.length > 0;
+    const selectedAvailability = availability[selectedGame] ?? null;
+    const selectedUnplayable =
+        availabilityKnown && selectedAvailability ? !selectedAvailability.playable : false;
+
+    /*
+     * NEVER OPEN ON A GAME THAT CANNOT BE PLAYED.
+     *
+     * The default selection is the first game in the list, chosen before
+     * anything is known about the corpus. In Mandinka today that is
+     * `listen_write` and no entry has consented audio, so the screen the
+     * player lands on is a disabled game above a disabled Start — which reads
+     * as the whole product being broken rather than as one game being
+     * unavailable.
+     *
+     * Only ever moves off a game the PLAYER has not chosen. Once they pick one
+     * themselves the choice is theirs, disabled or not: it stays selected, its
+     * reason stays on screen, and nothing is silently swapped underneath them.
+     */
+    useEffect(() => {
+        if (!availabilityKnown) return;
+        if (gameChosenByPlayerRef.current) return;
+        if (availability[selectedGame]?.playable) return;
+        const firstPlayable = GAME_TYPES.find((g) => availability[g.id]?.playable);
+        if (firstPlayable) setSelectedGame(firstPlayable.id);
+    }, [availabilityKnown, availability, selectedGame]);
 
     const { session, learnedCount, initSession, recordResult, completeSession, clearSession } =
         useGameSession();
@@ -539,6 +627,95 @@ export default function GameShell({
         }
     }, [session, phase, onSourceLanguage]); // resume once session loads asynchronously; phase guard prevents re-entry
 
+    /*
+     * Commit a dealt deck and enter the game.
+     *
+     * Shared by the ordinary path and by the shortfall notice: a player who
+     * accepts a shorter round must get exactly the same session — the same
+     * recent-word memory write, the same run id, the same return-visit event —
+     * and not a second, subtly different start path. Two ways to begin a game
+     * is two places for a start to go wrong.
+     */
+    const startWithDeck = useCallback(
+        async (deck, token) => {
+            const litKey = literacyKey(sourceLanguage ?? '', GAME_SKILL[selectedGame]);
+
+            /* Remember what this round served, before it is played. Bounded ids
+             * only, and written per language+skill so one language's history
+             * never suppresses another's words. */
+            recentRef.current[litKey] = remember(
+                recentRef.current[litKey] ?? emptyRecent(),
+                deck.map((w) => w?.uuid).filter(Boolean)
+            );
+            setLocalStorageItem(RECENT_KEY, JSON.stringify(recentRef.current));
+            setSetupError(null);
+            setShortRound(null);
+            pendingDeckRef.current = null;
+
+            try {
+                await initSession({
+                    gameType: selectedGame,
+                    langSource: sourceLanguage ?? '',
+                    domain: selectedDomain,
+                    level: playerLevel,
+                    words: deck,
+                });
+            } catch (error) {
+                if (runTokenRef.current !== token) return;
+                setSetupError(error?.message ?? 'Unable to start the game session.');
+                setPhase('setup');
+                return;
+            }
+
+            /* The player left while this was initialising. Do not put them back
+             * into a game they walked away from. */
+            if (runTokenRef.current !== token) return;
+
+            setGameWords(deck);
+            setPhase('playing');
+
+            /* Fire return-visit event. */
+            const today = new Date().toDateString();
+            const lastVisit = getLocalStorageItem('aiwa-dict-last-play');
+            if (lastVisit.available && lastVisit.value !== today) {
+                const didPersistVisit = setLocalStorageItem('aiwa-dict-last-play', today);
+                if (didPersistVisit) {
+                    await addEvent({ type: 'aiwa_game_return_visit' });
+                }
+            }
+        },
+        [addEvent, initSession, playerLevel, selectedDomain, selectedGame, sourceLanguage]
+    );
+
+    /** The player accepted the shorter round the corpus can actually fill. */
+    const acceptShortRound = useCallback(() => {
+        const deck = pendingDeckRef.current;
+        if (!deck || deck.length === 0) {
+            setShortRound(null);
+            return;
+        }
+        runTokenRef.current += 1;
+        startWithDeck(deck, runTokenRef.current);
+    }, [startWithDeck]);
+
+    /*
+     * A shortfall notice belongs to ONE dealt deck. Change the game, the
+     * domain, the level or the length and that deck is no longer the answer to
+     * the question being asked, so the notice and the deck it held both go.
+     * Leaving them would let "Play 2 words" start a round for a game the
+     * player has since navigated away from.
+     */
+    useEffect(() => {
+        pendingDeckRef.current = null;
+        setShortRound(null);
+    }, [selectedGame, selectedDomain, playerLevel, wordCount, sourceLanguage]);
+
+    /** The player would rather pick something else. Keep every other choice. */
+    const dismissShortRound = useCallback(() => {
+        pendingDeckRef.current = null;
+        setShortRound(null);
+    }, []);
+
     /* ── When game-set loads (after Start is tapped), kick off the session ── */
     useEffect(() => {
         const load = async () => {
@@ -553,7 +730,29 @@ export default function GameShell({
                 return;
             }
             if (fetchedWords.length === 0) {
-                setSetupError('No words are available for this game yet.');
+                setSetupError(SHORTAGE_MESSAGE.empty);
+                setPhase('setup');
+                return;
+            }
+
+            /*
+             * THE GAME'S OWN RULES, BEFORE THE DEAL.
+             *
+             * Each game used to filter the deck itself, after Start. So a
+             * ten-word round became however many words survived that filter,
+             * and a game with nothing to play rendered "No words are available
+             * for this game yet" as the answer to a question the player had
+             * already committed to. Both are decided here now, while there is
+             * still something the player can do about it.
+             */
+            const { playable: playableWords, reasons } = partitionForGame(
+                fetchedWords,
+                selectedGame,
+                sourceLanguage ?? ''
+            );
+            if (playableWords.length === 0) {
+                const dominant = Object.entries(reasons).sort((a, b) => b[1] - a[1])[0]?.[0];
+                setSetupError(SHORTAGE_MESSAGE[dominant] ?? SHORTAGE_MESSAGE.empty);
                 setPhase('setup');
                 return;
             }
@@ -632,9 +831,23 @@ export default function GameShell({
                  */
                 universalOnly: requiresUniversalWords(stage),
                 preferUniversal: stage === STAGE.RANKED && state !== LEARNER_STATE.ESTABLISHED,
+                /*
+                 * The selector's own guarantee is the stricter one — an
+                 * uncertain learner's round comes back SHORT rather than
+                 * reaching past their band. That is right for a library and
+                 * wrong for a player who chose ten questions and was handed
+                 * two without being told.
+                 *
+                 * The shell is the caller that can speak to the player, so it
+                 * is the caller allowed to make this trade: reach one honest
+                 * step further, easiest words first, and SAY SO below. What is
+                 * never acceptable is the silent two-word round.
+                 */
+                widen: true,
             };
 
-            let sliced = selectForLevel(fetchedWords, selectionOptions);
+            let plan = planRound(playableWords, selectionOptions);
+            let sliced = plan.words;
 
             /*
              * WHEN THE CORPUS CANNOT SUPPLY A RUNWAY, PLAY WITHOUT ONE.
@@ -660,11 +873,12 @@ export default function GameShell({
              * to play, not to wait.
              */
             if (sliced.length === 0 && selectionOptions.universalOnly) {
-                sliced = selectForLevel(fetchedWords, {
+                plan = planRound(playableWords, {
                     ...selectionOptions,
                     universalOnly: false,
                     preferUniversal: true,
                 });
+                sliced = plan.words;
             }
 
             /*
@@ -693,14 +907,15 @@ export default function GameShell({
             if (selectionOptions.universalOnly && sliced.length > calibrationLeft) {
                 const head = sliced.slice(0, calibrationLeft);
                 const takenIds = new Set(head.map((w) => w?.uuid).filter(Boolean));
-                const tail = selectForLevel(
-                    fetchedWords.filter((w) => !takenIds.has(w?.uuid)),
+                const tail = planRound(
+                    playableWords.filter((w) => !takenIds.has(w?.uuid)),
                     {
                         ...selectionOptions,
                         universalOnly: false,
                         preferUniversal: true,
+                        count: wordCount - head.length,
                     }
-                ).slice(0, wordCount - head.length);
+                ).words;
                 sliced = [...head, ...tail];
             }
 
@@ -731,51 +946,35 @@ export default function GameShell({
                 return;
             }
 
-            /* Remember what this round served, before it is played. Bounded ids
-             * only, and written per language+skill so one language's history
-             * never suppresses another's words. */
-            recentRef.current[litKey] = remember(
-                recentRef.current[litKey] ?? emptyRecent(),
-                sliced.map((w) => w?.uuid).filter(Boolean)
-            );
-            setLocalStorageItem(RECENT_KEY, JSON.stringify(recentRef.current));
-            setSetupError(null);
-
-            try {
-                await initSession({
-                    gameType: selectedGame,
-                    langSource: sourceLanguage ?? '',
-                    domain: selectedDomain,
-                    level: playerLevel,
-                    words: sliced,
-                });
-            } catch (error) {
+            /*
+             * A SHORTER ROUND IS THE PLAYER'S TO ACCEPT, NOT OURS TO IMPOSE.
+             *
+             * The corpus genuinely cannot always fill the round that was asked
+             * for — `listen_write` needs consented audio, `complete_sentence`
+             * needs example sentences, and a narrow domain at a low band may
+             * hold a handful of words. That is a legitimate short round and it
+             * is the ONLY legitimate one.
+             *
+             * What it must never be is a surprise. The deck is already dealt
+             * here, so its real length is known before a single question is
+             * shown: hold it, say how long the round actually is, and let the
+             * player start it or pick something else with every other choice
+             * they made still in place.
+             */
+            if (sliced.length < wordCount) {
                 if (runTokenRef.current !== token) return;
-                setSetupError(error?.message ?? 'Unable to start the game session.');
+                pendingDeckRef.current = sliced;
+                setShortRound({ delivered: sliced.length, requested: wordCount });
                 setPhase('setup');
                 return;
             }
 
-            /* The player left while this was initialising. Do not put them back
-             * into a game they walked away from. */
-            if (runTokenRef.current !== token) return;
-
-            setGameWords(sliced);
-            setPhase('playing');
-
-            /* Fire return-visit event. */
-            const today = new Date().toDateString();
-            const lastVisit = getLocalStorageItem('aiwa-dict-last-play');
-            if (lastVisit.available && lastVisit.value !== today) {
-                const didPersistVisit = setLocalStorageItem('aiwa-dict-last-play', today);
-                if (didPersistVisit) {
-                    await addEvent({ type: 'aiwa_game_return_visit' });
-                }
-            }
+            await startWithDeck(sliced, token);
         };
 
         load();
     }, [
+        startWithDeck,
         /* `playerLevel` and `offsets` belong here: they choose WHICH words the
          * round gets, so a stale pair would deal the previous level's deck.
          * The effect is gated on `phase === 'loading'`, so listing them cannot
@@ -1502,6 +1701,51 @@ export default function GameShell({
                     </div>
                 )}
 
+                {/*
+                 * THE SHORT ROUND, BEFORE IT STARTS.
+                 *
+                 * The deck is already dealt when this shows, so the number is
+                 * the real one and not an estimate. Two actions, and the
+                 * player's game, domain, level and length choices all survive
+                 * either of them.
+                 */}
+                {shortRound && (
+                    <div
+                        className="rounded-xl border px-4 py-3"
+                        style={{ borderColor: '#7B3FA0', background: 'rgba(123,63,160,0.08)' }}
+                        role="status"
+                    >
+                        <p className="text-sm font-bold text-gray-900 dark:text-gray-100">
+                            This round will be {shortRound.delivered}{' '}
+                            {shortRound.delivered === 1 ? 'word' : 'words'}, not{' '}
+                            {shortRound.requested}.
+                        </p>
+                        <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">
+                            That is every word this game can use right now for your level and
+                            domain. Play these, or pick another game or domain.
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                            <button
+                                type="button"
+                                onClick={acceptShortRound}
+                                className="rounded-xl px-4 py-2 text-sm font-bold text-white"
+                                style={{ background: 'linear-gradient(135deg,#E91E8C,#7B3FA0)' }}
+                            >
+                                Play {shortRound.delivered}{' '}
+                                {shortRound.delivered === 1 ? 'word' : 'words'}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={dismissShortRound}
+                                className="rounded-xl border-2 px-4 py-2 text-sm font-bold text-gray-700 dark:text-gray-200"
+                                style={{ borderColor: '#d1d5db' }}
+                            >
+                                Choose something else
+                            </button>
+                        </div>
+                    </div>
+                )}
+
                 {/* Language check */}
                 {!sourceLanguage && (
                     <div className="rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700 p-6 text-center">
@@ -1563,50 +1807,78 @@ export default function GameShell({
                                 Game
                             </h3>
                             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                                {GAME_TYPES.map((g) => (
-                                    <button
-                                        key={g.id}
-                                        type="button"
-                                        onClick={() => setSelectedGame(g.id)}
-                                        className="p-3 rounded-xl text-left border-2 transition-all"
-                                        style={
-                                            selectedGame === g.id
-                                                ? {
-                                                      background:
-                                                          'linear-gradient(135deg,#E91E8C,#7B3FA0)',
-                                                      borderColor: 'transparent',
-                                                      color: 'white',
-                                                  }
-                                                : {
-                                                      borderColor: '#f3f4f6',
-                                                      background: 'white',
-                                                  }
-                                        }
-                                    >
-                                        <span className="block text-xl mb-1" aria-hidden="true">
-                                            {g.emoji}
-                                        </span>
-                                        <span
-                                            className="block text-xs font-bold"
-                                            style={{
-                                                color: selectedGame === g.id ? 'white' : '#1f2937',
+                                {GAME_TYPES.map((g) => {
+                                    const status = availability[g.id];
+                                    /* Only a KNOWN refusal disables a card. An
+                                     * unanswered question is not a "no". */
+                                    const blocked = availabilityKnown && status && !status.playable;
+                                    const active = selectedGame === g.id;
+                                    return (
+                                        <button
+                                            key={g.id}
+                                            type="button"
+                                            onClick={() => {
+                                                gameChosenByPlayerRef.current = true;
+                                                setSelectedGame(g.id);
                                             }}
+                                            disabled={blocked}
+                                            aria-disabled={blocked || undefined}
+                                            title={blocked ? status.message : undefined}
+                                            className="p-3 rounded-xl text-left border-2 transition-all"
+                                            style={
+                                                active
+                                                    ? {
+                                                          background:
+                                                              'linear-gradient(135deg,#E91E8C,#7B3FA0)',
+                                                          borderColor: 'transparent',
+                                                          color: 'white',
+                                                      }
+                                                    : blocked
+                                                      ? {
+                                                            borderColor: '#e5e7eb',
+                                                            background: '#f9fafb',
+                                                            cursor: 'not-allowed',
+                                                        }
+                                                      : {
+                                                            borderColor: '#f3f4f6',
+                                                            background: 'white',
+                                                        }
+                                            }
                                         >
-                                            {g.label}
-                                        </span>
-                                        <span
-                                            className="block text-xs mt-0.5 leading-snug"
-                                            style={{
-                                                color:
-                                                    selectedGame === g.id
+                                            <span className="block text-xl mb-1" aria-hidden="true">
+                                                {g.emoji}
+                                            </span>
+                                            <span
+                                                className="block text-xs font-bold"
+                                                style={{
+                                                    color:
+                                                        selectedGame === g.id ? 'white' : '#1f2937',
+                                                }}
+                                            >
+                                                {g.label}
+                                            </span>
+                                            <span
+                                                className="block text-xs mt-0.5 leading-snug"
+                                                style={{
+                                                    color: active
                                                         ? 'rgba(255,255,255,0.8)'
-                                                        : '#9ca3af',
-                                            }}
-                                        >
-                                            {g.description}
-                                        </span>
-                                    </button>
-                                ))}
+                                                        : '#6b7280',
+                                                }}
+                                            >
+                                                {g.description}
+                                            </span>
+                                            {/* The specific missing thing, never
+                                             * "unavailable" on its own — a player
+                                             * can act on "needs example sentences"
+                                             * and cannot act on a grey card. */}
+                                            {blocked && (
+                                                <span className="mt-1 block text-xs font-semibold leading-snug text-gray-600">
+                                                    {status.message}
+                                                </span>
+                                            )}
+                                        </button>
+                                    );
+                                })}
                             </div>
                         </section>
 
@@ -1681,12 +1953,26 @@ export default function GameShell({
                             </div>
                         </section>
 
-                        {/* Start button */}
+                        {/* Start button. Disabled rather than allowed to fail:
+                         *  starting a game that cannot deal a question is the
+                         *  defect, and the reason sits beside the control that
+                         *  would have triggered it. */}
+                        {selectedUnplayable && (
+                            <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                                {selectedAvailability?.message}
+                            </p>
+                        )}
                         <button
                             type="button"
                             onClick={handleStart}
+                            disabled={selectedUnplayable}
+                            aria-disabled={selectedUnplayable || undefined}
                             className="w-full py-4 rounded-xl font-bold text-base text-white transition-colors mt-auto"
-                            style={{ background: 'linear-gradient(135deg,#E91E8C,#7B3FA0)' }}
+                            style={
+                                selectedUnplayable
+                                    ? { background: '#9ca3af', cursor: 'not-allowed' }
+                                    : { background: 'linear-gradient(135deg,#E91E8C,#7B3FA0)' }
+                            }
                         >
                             Start
                         </button>

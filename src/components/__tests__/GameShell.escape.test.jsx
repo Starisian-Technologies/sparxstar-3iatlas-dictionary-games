@@ -37,6 +37,16 @@ const WORDS = Array.from({ length: 4 }, (_, i) => ({
     difficulty: 'A1',
     domain_code: '1.1',
     part_of_speech: 'n',
+    /*
+     * Consented audio, because the default game is `listen_write` and these
+     * tests are about the ESCAPE HATCHES, not about eligibility.
+     *
+     * Without it the shell now refuses to start — correctly: a listening game
+     * with no recording is the "No words are available for this game yet"
+     * screen players were shown after committing to a round. Leaving it out
+     * would make every test here depend on that refusal not existing.
+     */
+    audio_url: 'https://audio.example.test/w.mp3',
 }));
 
 /*
@@ -50,6 +60,7 @@ const STORED_WORDS = WORDS.map((w, i) => ({
     ipa: w.ipa_pronunciation,
     difficulty: w.difficulty,
     domain: w.domain_code,
+    audio_url: w.audio_url,
 }));
 
 function routeFetch() {
@@ -90,6 +101,29 @@ const findButton = (container, text) =>
         b.textContent.trim().includes(text)
     );
 
+/**
+ * Press Start, and accept the shorter round if the shell offers one.
+ *
+ * This fixture holds four words and the default session length is twenty, so
+ * the shell now stops before playing and says the round will be four words —
+ * which is the point of that notice and not an obstacle to route around. These
+ * tests are about the exits, so they take the offer and carry on; the notice
+ * itself is pinned in `GameShell.session.test.jsx`.
+ */
+async function startRound(container) {
+    await act(async () => {
+        findButton(container, 'Start').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await settle();
+    const accept = findButton(container, 'Play 4 words');
+    if (accept) {
+        await act(async () => {
+            accept.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        });
+        await settle();
+    }
+}
+
 function baseProps(overrides = {}) {
     return {
         bffPath: BFF,
@@ -120,12 +154,8 @@ describe('every phase offers Games Home', () => {
         const { container, unmount } = mount(baseProps());
         await settle();
 
-        const start = findButton(container, 'Start');
-        expect(start).toBeDefined();
-        await act(async () => {
-            start.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-        });
-        await settle();
+        expect(findButton(container, 'Start')).toBeDefined();
+        await startRound(container);
 
         /* The regression: this phase rendered Level and Adaptive and no exit. */
         expect(findButton(container, 'Games Home')).toBeDefined();
@@ -191,12 +221,7 @@ describe('the exit cannot itself become a trap (Qodo review, #23)', () => {
         const { container, unmount } = mount(baseProps());
         await settle();
 
-        await act(async () => {
-            findButton(container, 'Start').dispatchEvent(
-                new MouseEvent('click', { bubbles: true })
-            );
-        });
-        await settle();
+        await startRound(container);
         expect(findButton(container, 'Restart')).toBeDefined(); /* we are playing */
 
         await act(async () => {
