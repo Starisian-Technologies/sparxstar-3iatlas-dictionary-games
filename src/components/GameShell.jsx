@@ -1573,6 +1573,40 @@ export default function GameShell({
         leaveToHome();
     }, [phase, session, leaveToHome]);
 
+    /*
+     * THE MODE A QUESTION IS PLAYED AT IS FIXED WHEN THE QUESTION STARTS.
+     *
+     * The strip under the nav says "Hints change now. Difficulty changes next
+     * game." — and it was not true. `mode` was computed inline in the render
+     * from the live `playerLevel`, and `ListenWrite`, `CompleteSentence` and
+     * `LetterReveal` read that prop while resolving the CURRENT word. So
+     * tapping Challenge halfway through a question cut the retry and reveal
+     * budget of the question already on screen, which is both a promise broken
+     * and a difficulty change nobody asked for mid-answer.
+     *
+     * `ArrangeWord` already captured mode at question start; this makes every
+     * game behave the way that one does, in one place, rather than four.
+     *
+     * The key is the question's identity, not the level: a new deal or the next
+     * word takes the latest level, and nothing in between does. Adjusting state
+     * during render on a changed key is React's documented pattern for exactly
+     * this — it re-renders before the children see the stale value, with no
+     * effect and no flash of the wrong mode.
+     */
+    const requestedMode =
+        opensWithSupport(currentStage) ||
+        needsImmediateSupport(
+            literacyRef.current[literacyKey(sourceLanguage ?? '', GAME_SKILL[selectedGame])]
+        )
+            ? MODE.PRACTICE
+            : playerLevel === LEVEL.CHALLENGE
+              ? MODE.CHALLENGE
+              : MODE.PRACTICE;
+    const questionKey = `${selectedGame}|${session?.startedAt ?? ''}|${session?.currentIndex ?? 0}`;
+    const [heldMode, setHeldMode] = useState({ key: questionKey, mode: requestedMode });
+    if (heldMode.key !== questionKey) setHeldMode({ key: questionKey, mode: requestedMode });
+    const questionMode = heldMode.key === questionKey ? heldMode.mode : requestedMode;
+
     /* Restart deals a fresh round of the same game rather than resuming. */
     const handleRestart = useCallback(async () => {
         setConfirmLeave(null);
@@ -1830,17 +1864,7 @@ export default function GameShell({
                      * player can always ask for less help than the policy
                      * gives, and never less than it requires.
                      */
-                    mode:
-                        opensWithSupport(currentStage) ||
-                        needsImmediateSupport(
-                            literacyRef.current[
-                                literacyKey(sourceLanguage ?? '', GAME_SKILL[selectedGame])
-                            ]
-                        )
-                            ? MODE.PRACTICE
-                            : playerLevel === LEVEL.CHALLENGE
-                              ? MODE.CHALLENGE
-                              : MODE.PRACTICE,
+                    mode: questionMode,
                     onResult: handleWordResult,
                     onComplete: handleComplete,
                     onEvent: addEvent,

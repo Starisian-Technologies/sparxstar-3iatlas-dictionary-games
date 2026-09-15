@@ -225,6 +225,20 @@ describe('the client never reports an award it invented', () => {
         unmount();
     });
 
+    it('carries no points figure in the grade itself, not just on screen', () => {
+        /*
+         * Removing the display is not enough. A grade that still CARRIES the
+         * number is a loaded gun — the next screen wanting a figure finds one
+         * already computed. `gradeSession` returns counts and accuracy; the
+         * award is the engine's to state.
+         */
+        const grade = gradeSession(perfect);
+        expect(grade).not.toHaveProperty('xp');
+        for (const value of Object.values(grade)) {
+            expect(value).not.toBe(perfect.xpEarned);
+        }
+    });
+
     it('still reports what it legitimately watched happen', () => {
         /* Counts of answers are facts about the round, not awards. */
         const { text, unmount } = render(partial);

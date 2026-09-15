@@ -76,7 +76,7 @@ export function longestStreak(results) {
  * @returns {{
  *   tier: string, total: number, answered: number, correct: number,
  *   learning: number, incorrect: number, skipped: number, reviewing: number,
- *   xp: number, accuracy: number, streak: number,
+ *   accuracy: number, streak: number,
  * }}
  */
 export function gradeSession(session, policy = RESULT_POLICY) {
@@ -93,7 +93,22 @@ export function gradeSession(session, policy = RESULT_POLICY) {
      * category. It is never added into a total.
      */
     const reviewing = learning + incorrect + skipped;
-    const xp = session?.xpEarned ?? 0;
+    /*
+     * THERE IS DELIBERATELY NO `xp` IN THIS GRADE.
+     *
+     * It used to return `session.xpEarned` — accumulated on this device from
+     * the local `xpFor(outcome)` table, with no ledger row and no settlement
+     * identifier behind it — and `SessionComplete` rendered it as "Points
+     * earned". INV-016 (Accepted 2026-09-05, binding platform-wide): "No client
+     * may originate, compute, or infer earned value… It may never derive the
+     * award itself from round performance… or answer counts."
+     *
+     * Removing the display was not enough. A grade that still CARRIES a points
+     * figure is a loaded gun: the next screen that wants a number finds one
+     * already computed and reaches for it. The figure is gone from the model,
+     * so there is nothing to reach for. Awards come from a settlement response
+     * or they are not shown.
+     */
     const accuracy = answered === 0 ? 0 : correct / answered;
     const streak = longestStreak(results);
 
@@ -113,7 +128,6 @@ export function gradeSession(session, policy = RESULT_POLICY) {
         incorrect,
         skipped,
         reviewing,
-        xp,
         accuracy,
         streak,
     };
