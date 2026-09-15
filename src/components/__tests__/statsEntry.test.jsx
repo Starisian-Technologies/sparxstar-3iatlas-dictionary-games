@@ -66,7 +66,11 @@ describe('reaching the progress screen', () => {
             />
         );
         act(() =>
-            findButton(container, 'See your progress and ranking').dispatchEvent(
+            /* "Your progress" — a quiet link now, not a full-width button
+             * competing with the action the player should actually take. The
+             * guarantee under test is unchanged: it is offered here, where the
+             * question is asked, and it calls the host's handler. */
+            findButton(container, 'Your progress').dispatchEvent(
                 new MouseEvent('click', { bubbles: true })
             )
         );

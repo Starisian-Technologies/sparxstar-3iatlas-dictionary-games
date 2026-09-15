@@ -20,6 +20,8 @@ import {
 } from '../literacy.js';
 import { emptyRecent, remember } from '../recent.js';
 import LeaveGameDialog from './LeaveGameDialog.jsx';
+import PointsBurst from './PointsBurst.jsx';
+import { playCorrect, playIncorrect, playStreak, soundEnabled, setSoundEnabled } from '../sound.js';
 import {
     ADJUST,
     ADJUST_MESSAGE,
@@ -34,6 +36,7 @@ import {
     recordOutcome,
 } from '../difficulty.js';
 import { SHORTAGE_MESSAGE, availabilityFor, partitionForGame } from '../playability.js';
+import { COLOR, GRADIENT, accentFor } from '../theme.js';
 import {
     CALIBRATION,
     STAGE,
@@ -336,6 +339,16 @@ export default function GameShell({
      */
     const [shortRound, setShortRound] = useState(null);
     const pendingDeckRef = useRef(null);
+    /*
+     * The reward moment for the answer just given.
+     *
+     * `token` increments per answer so two identical scores in a row are two
+     * separate bursts rather than one that never re-fires. `points` is what
+     * the session RECORDED — never a number computed for display, which is how
+     * a celebration ends up congratulating a player for XP they did not get.
+     */
+    const [burst, setBurst] = useState({ points: 0, streak: 0, token: 0 });
+    const [soundOn, setSoundOn] = useState(() => soundEnabled());
     /* Set the moment the player taps a game card. After that the selection is
      * theirs and nothing may move it — see the auto-select effect below. */
     const gameChosenByPlayerRef = useRef(false);
@@ -1020,6 +1033,43 @@ export default function GameShell({
                 .then(async () => {
                     const updatedSession = await recordResult(uuid, outcome, attempts, xp, timeMs);
 
+                    /*
+                     * THE REWARD, FROM THE RECORDED RESULT.
+                     *
+                     * Read off `updatedSession` rather than off the arguments,
+                     * so what the player is congratulated for is exactly what
+                     * the session stored. A duplicate result returns the
+                     * session unchanged, which means a double-tap replays no
+                     * burst and awards no second streak — the display cannot
+                     * drift from the ledger because it is reading the ledger.
+                     */
+                    if (updatedSession) {
+                        const recorded = updatedSession.results.at(-1);
+                        const isNewResult = recorded?.wordUuid === uuid;
+                        if (isNewResult) {
+                            /* The streak is the trailing run of correct
+                             * answers in THIS session — a real count, not a
+                             * guess, so no bonus is ever announced that the
+                             * results do not show. */
+                            let streak = 0;
+                            for (let i = updatedSession.results.length - 1; i >= 0; i -= 1) {
+                                if (updatedSession.results[i].outcome !== 'correct') break;
+                                streak += 1;
+                            }
+                            if (recorded.outcome === 'correct') {
+                                setBurst((b) => ({
+                                    points: recorded.xp,
+                                    streak,
+                                    token: b.token + 1,
+                                }));
+                                if (streak >= 3) playStreak(streak);
+                                else playCorrect();
+                            } else if (recorded.outcome === 'incorrect') {
+                                playIncorrect();
+                            }
+                        }
+                    }
+
                     /* Report every outcome (not just correct) toward the engine's
                      * game.result intake (GAME-SERVICE-INTAKE-SPEC-v1.0 OQ-3) — the
                      * dictionaryQuizManifest scores correct/incorrect/learning, so
@@ -1502,6 +1552,8 @@ export default function GameShell({
             questionAt={phase === 'playing' ? questionNumber : null}
             questionOf={phase === 'playing' ? questionTotal : null}
             points={session?.xpEarned ?? 0}
+            soundOn={soundOn}
+            onToggleSound={() => setSoundOn(setSoundEnabled(!soundOn))}
             onHome={handleHome}
             onRestart={phase === 'playing' || phase === 'complete' ? handleRestart : null}
             /* Between rounds only — see the note on `showStats`. */
@@ -1531,7 +1583,7 @@ export default function GameShell({
      */
     if (showStats) {
         return (
-            <div className="flex-1 flex flex-col overflow-y-auto bg-white dark:bg-gray-900">
+            <div className="flex-1 flex flex-col overflow-y-auto bg-white dark:bg-slate-900">
                 {nav}
                 <div className="px-4 pt-4">
                     <button
@@ -1555,11 +1607,13 @@ export default function GameShell({
 
     if (phase === 'loading') {
         return (
-            <div className="flex-1 flex flex-col overflow-hidden bg-white dark:bg-gray-900">
+            <div className="flex-1 flex flex-col overflow-hidden bg-white dark:bg-slate-900">
                 {nav}
                 <div className="flex flex-1 flex-col items-center justify-center gap-4">
                     <Loader2 className="animate-spin" style={{ color: '#E91E8C' }} size={40} />
-                    <p className="text-gray-400 text-sm">Loading game set&hellip;</p>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">
+                        Loading game set&hellip;
+                    </p>
                     {gameSetError && <p className="text-red-500 text-sm">{gameSetError}</p>}
                 </div>
                 {leaveDialog}
@@ -1569,7 +1623,10 @@ export default function GameShell({
 
     if (phase === 'playing') {
         return (
-            <div className="flex-1 flex flex-col overflow-hidden bg-white dark:bg-gray-900">
+            /* `relative`, because the reward burst is positioned over the whole
+             * play area. It is `pointer-events: none` and takes no layout
+             * space, so nothing below it moves or becomes unreachable. */
+            <div className="relative flex flex-1 flex-col overflow-hidden bg-white dark:bg-slate-900">
                 {nav}
                 {/*
                  * Transparency strip. The current level is always visible and
@@ -1590,7 +1647,7 @@ export default function GameShell({
                  * round. Play again is one tap from the summary.
                  */}
                 <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-gray-100 px-3 py-2 text-xs dark:border-gray-800">
-                    <span className="text-gray-400">Level</span>
+                    <span className="text-slate-500 dark:text-slate-400">Level</span>
                     {Object.entries(LEVEL_PROFILE).map(([id, p]) => (
                         <button
                             key={id}
@@ -1621,24 +1678,31 @@ export default function GameShell({
                      * re-deal it; the code comments admitted this while the
                      * label told the player otherwise.
                      */}
-                    <span className="w-full text-[11px] text-gray-400">
-                        Help changes next question; new word level begins next game
+                    <span className="w-full text-[11px] text-slate-500 dark:text-slate-400">
+                        Hints change now. Difficulty changes next game.
                     </span>
                     <button
                         type="button"
                         onClick={() => setAdaptive((a) => !a)}
                         aria-pressed={adaptive}
-                        className="ml-auto min-h-[32px] rounded-lg border border-gray-200 px-2 font-medium text-gray-500 dark:border-gray-700 dark:text-gray-400"
+                        className="ml-auto min-h-[32px] rounded-lg border border-slate-300 px-2 font-medium text-slate-600 dark:border-slate-600 dark:text-slate-300"
                     >
-                        Adaptive: {adaptive ? 'on' : 'off'}
+                        {adaptive ? 'Adjusts as you learn' : 'Stays the same'}
                     </button>
                 </div>
 
                 {adjustNotice && (
-                    <p className="shrink-0 px-3 py-1.5 text-center text-xs text-gray-500 dark:text-gray-400">
+                    <p className="shrink-0 px-3 py-1.5 text-center text-xs text-slate-600 dark:text-slate-300">
                         {adjustNotice}
                     </p>
                 )}
+
+                <PointsBurst
+                    points={burst.points}
+                    streak={burst.streak}
+                    token={burst.token}
+                    gameId={selectedGame}
+                />
 
                 {renderGame({
                     gameType: selectedGame,
@@ -1688,7 +1752,7 @@ export default function GameShell({
 
     if (phase === 'complete') {
         return (
-            <div className="flex-1 flex flex-col overflow-y-auto bg-white dark:bg-gray-900">
+            <div className="flex-1 flex flex-col overflow-y-auto bg-white dark:bg-slate-900">
                 {nav}
                 <SessionComplete
                     session={session}
@@ -1711,7 +1775,7 @@ export default function GameShell({
 
     /* ── Setup screen ── */
     return (
-        <div className="flex-1 flex flex-col overflow-y-auto bg-white dark:bg-gray-900">
+        <div className="flex-1 flex flex-col overflow-y-auto bg-white dark:bg-slate-900">
             {nav}
             <div className="flex flex-1 flex-col gap-5 p-4">
                 <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 shrink-0">
@@ -1771,8 +1835,8 @@ export default function GameShell({
 
                 {/* Language check */}
                 {!sourceLanguage && (
-                    <div className="rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700 p-6 text-center">
-                        <p className="text-gray-500 dark:text-gray-400 text-sm mb-3">
+                    <div className="rounded-xl border-2 border-dashed border-slate-300 p-6 text-center dark:border-slate-600">
+                        <p className="mb-3 text-sm text-slate-600 dark:text-slate-300">
                             Choose a source language to start playing
                         </p>
                         <div className="flex flex-wrap gap-2 justify-center">
@@ -1795,11 +1859,13 @@ export default function GameShell({
                     <>
                         {/* Domain selector */}
                         <section>
-                            <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">
+                            <h3 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
                                 Domain (optional)
                             </h3>
                             {domainsLoading ? (
-                                <p className="text-sm text-gray-400">Loading domains&hellip;</p>
+                                <p className="text-sm text-slate-500 dark:text-slate-400">
+                                    Loading domains&hellip;
+                                </p>
                             ) : (
                                 <div className="relative">
                                     <select
@@ -1817,7 +1883,7 @@ export default function GameShell({
                                     </select>
                                     <ChevronDown
                                         size={16}
-                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
+                                        className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-slate-400"
                                         aria-hidden="true"
                                     />
                                 </div>
@@ -1826,16 +1892,17 @@ export default function GameShell({
 
                         {/* Game type */}
                         <section>
-                            <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">
+                            <h3 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
                                 Game
                             </h3>
-                            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
                                 {GAME_TYPES.map((g) => {
                                     const status = availability[g.id];
                                     /* Only a KNOWN refusal disables a card. An
                                      * unanswered question is not a "no". */
                                     const blocked = availabilityKnown && status && !status.playable;
                                     const active = selectedGame === g.id;
+                                    const accent = accentFor(g.id);
                                     return (
                                         <button
                                             key={g.id}
@@ -1846,47 +1913,78 @@ export default function GameShell({
                                             }}
                                             disabled={blocked}
                                             aria-disabled={blocked || undefined}
+                                            aria-pressed={active}
                                             title={blocked ? status.message : undefined}
-                                            className="p-3 rounded-xl text-left border-2 transition-all"
+                                            className={[
+                                                'relative overflow-hidden rounded-xl border-2 p-3 text-left transition-all',
+                                                /* The play area is the playful
+                                                 * part: a selected card lifts.
+                                                 * The shell around it does not
+                                                 * move — see src/theme.js. */
+                                                active ? 'scale-[1.02] shadow-lg' : '',
+                                                blocked
+                                                    ? 'cursor-not-allowed border-slate-200 bg-slate-100 dark:border-slate-700 dark:bg-slate-800/60'
+                                                    : active
+                                                      ? 'border-transparent text-white'
+                                                      : 'border-slate-200 bg-white hover:border-slate-300 dark:border-slate-700 dark:bg-slate-800 dark:hover:border-slate-500',
+                                            ]
+                                                .filter(Boolean)
+                                                .join(' ')}
                                             style={
                                                 active
                                                     ? {
-                                                          background:
-                                                              'linear-gradient(135deg,#E91E8C,#7B3FA0)',
-                                                          borderColor: 'transparent',
-                                                          color: 'white',
+                                                          background: `linear-gradient(135deg, ${accent}, ${COLOR.purple})`,
                                                       }
-                                                    : blocked
-                                                      ? {
-                                                            borderColor: '#e5e7eb',
-                                                            background: '#f9fafb',
-                                                            cursor: 'not-allowed',
-                                                        }
-                                                      : {
-                                                            borderColor: '#f3f4f6',
-                                                            background: 'white',
-                                                        }
+                                                    : undefined
                                             }
                                         >
-                                            <span className="block text-xl mb-1" aria-hidden="true">
+                                            {/*
+                                             * SELECTION IS NOT SAID IN COLOUR ALONE.
+                                             *
+                                             * The gradient reads as "chosen" only
+                                             * to someone who can see it. The tick,
+                                             * the left accent bar and `aria-pressed`
+                                             * each say the same thing another way.
+                                             */}
+                                            {active && (
+                                                <span
+                                                    className="absolute right-2 top-2 text-sm font-black"
+                                                    aria-hidden="true"
+                                                >
+                                                    ✓
+                                                </span>
+                                            )}
+                                            {!active && !blocked && (
+                                                <span
+                                                    className="absolute inset-y-0 left-0 w-1"
+                                                    style={{ background: accent }}
+                                                    aria-hidden="true"
+                                                />
+                                            )}
+
+                                            <span
+                                                className="mb-1 block text-2xl"
+                                                aria-hidden="true"
+                                            >
                                                 {g.emoji}
                                             </span>
                                             <span
-                                                className="block text-xs font-bold"
-                                                style={{
-                                                    color:
-                                                        selectedGame === g.id ? 'white' : '#1f2937',
-                                                }}
+                                                className={`block text-sm font-bold leading-tight ${
+                                                    active
+                                                        ? 'text-white'
+                                                        : blocked
+                                                          ? 'text-slate-500 dark:text-slate-400'
+                                                          : 'text-slate-900 dark:text-slate-100'
+                                                }`}
                                             >
                                                 {g.label}
                                             </span>
                                             <span
-                                                className="block text-xs mt-0.5 leading-snug"
-                                                style={{
-                                                    color: active
-                                                        ? 'rgba(255,255,255,0.8)'
-                                                        : '#6b7280',
-                                                }}
+                                                className={`mt-0.5 block text-xs leading-snug ${
+                                                    active
+                                                        ? 'text-white/85'
+                                                        : 'text-slate-600 dark:text-slate-300'
+                                                }`}
                                             >
                                                 {g.description}
                                             </span>
@@ -1895,7 +1993,7 @@ export default function GameShell({
                                              * can act on "needs example sentences"
                                              * and cannot act on a grey card. */}
                                             {blocked && (
-                                                <span className="mt-1 block text-xs font-semibold leading-snug text-gray-600">
+                                                <span className="mt-1.5 block text-xs font-semibold leading-snug text-amber-700 dark:text-amber-400">
                                                     {status.message}
                                                 </span>
                                             )}
@@ -1910,7 +2008,7 @@ export default function GameShell({
                          *  What no level changes is that Skip, reveal and navigation
                          *  stay available: a harder level is not a trap. */}
                         <section>
-                            <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                            <h3 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
                                 Level
                             </h3>
                             <div className="flex gap-2">
@@ -1926,21 +2024,28 @@ export default function GameShell({
                                             type="button"
                                             onClick={() => setPlayerLevel(m.id)}
                                             aria-pressed={playerLevel === m.id}
-                                            className="flex-1 rounded-xl border-2 px-3 py-2.5 text-left transition-colors"
                                             style={
                                                 playerLevel === m.id
-                                                    ? {
-                                                          background: '#7B3FA0',
-                                                          borderColor: 'transparent',
-                                                          color: 'white',
-                                                      }
-                                                    : { borderColor: '#f3f4f6', color: '#374151' }
+                                                    ? { background: GRADIENT.deep }
+                                                    : {}
                                             }
+                                            className={`flex-1 rounded-xl border-2 px-3 py-2.5 text-left transition-colors ${
+                                                playerLevel === m.id
+                                                    ? 'border-transparent text-white'
+                                                    : 'border-slate-200 text-slate-800 hover:border-slate-300 dark:border-slate-700 dark:text-slate-100 dark:hover:border-slate-500'
+                                            }`}
                                         >
-                                            <span className="block text-sm font-semibold">
+                                            <span className="block text-sm font-bold">
+                                                {playerLevel === m.id ? '✓ ' : ''}
                                                 {m.label}
                                             </span>
-                                            <span className="block text-xs opacity-80">
+                                            <span
+                                                className={`block text-xs ${
+                                                    playerLevel === m.id
+                                                        ? 'text-white/85'
+                                                        : 'text-slate-600 dark:text-slate-300'
+                                                }`}
+                                            >
                                                 {m.hint}
                                             </span>
                                         </button>
@@ -1950,7 +2055,7 @@ export default function GameShell({
 
                         {/* Word count */}
                         <section>
-                            <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">
+                            <h3 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
                                 Words per session
                             </h3>
                             <div className="flex gap-2">
@@ -1959,18 +2064,15 @@ export default function GameShell({
                                         key={n}
                                         type="button"
                                         onClick={() => setWordCount(n)}
-                                        className="flex-1 py-2.5 rounded-xl font-semibold text-sm transition-colors border-2"
-                                        style={
+                                        aria-pressed={wordCount === n}
+                                        className={`min-h-[48px] flex-1 rounded-xl border-2 text-base font-bold transition-colors ${
                                             wordCount === n
-                                                ? {
-                                                      background: '#E91E8C',
-                                                      borderColor: 'transparent',
-                                                      color: 'white',
-                                                  }
-                                                : { borderColor: '#f3f4f6', color: '#374151' }
-                                        }
+                                                ? 'border-transparent text-white'
+                                                : 'border-slate-200 text-slate-800 hover:border-slate-300 dark:border-slate-700 dark:text-slate-100 dark:hover:border-slate-500'
+                                        }`}
+                                        style={wordCount === n ? { background: COLOR.magenta } : {}}
                                     >
-                                        {n}
+                                        {wordCount === n ? `✓ ${n}` : n}
                                     </button>
                                 ))}
                             </div>
@@ -1990,11 +2092,13 @@ export default function GameShell({
                             onClick={handleStart}
                             disabled={selectedUnplayable}
                             aria-disabled={selectedUnplayable || undefined}
-                            className="w-full py-4 rounded-xl font-bold text-base text-white transition-colors mt-auto"
+                            className={`mt-auto w-full rounded-xl py-4 text-base font-bold text-white transition-transform ${
+                                selectedUnplayable ? 'cursor-not-allowed' : 'active:scale-[0.99]'
+                            }`}
                             style={
                                 selectedUnplayable
-                                    ? { background: '#9ca3af', cursor: 'not-allowed' }
-                                    : { background: 'linear-gradient(135deg,#E91E8C,#7B3FA0)' }
+                                    ? { background: COLOR.panelRaised }
+                                    : { background: GRADIENT.primary }
                             }
                         >
                             Start

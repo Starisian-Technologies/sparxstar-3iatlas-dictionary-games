@@ -45,27 +45,41 @@ import { segmentHeadword } from '../orthography.js';
  * bug as a button that does not exist.
  */
 
-/** What the player is told happened, per outcome. */
+/**
+ * What the player is told happened, per outcome.
+ *
+ * Written for a child or a new reader, and written as SPEECH rather than as a
+ * label on a form. "The answer" is a filing heading — it states the category of
+ * the thing below it and says nothing to the person reading it. "Not quite"
+ * says what happened, in two words anyone can read, without calling the answer
+ * wrong or the player anything at all.
+ *
+ * "Got there" went for the same reason in the other direction: it is idiomatic
+ * English that a learner of English may not parse, and it undersells what it is
+ * reporting. That outcome is the player reaching the right answer after working
+ * for it, which is the moment this whole app exists for — "You found it!" says
+ * so.
+ */
 const VERDICT = {
     [OUTCOME.CORRECT]: {
-        label: 'Correct',
+        label: 'Correct!',
         Icon: Check,
         tone: 'text-emerald-600 dark:text-emerald-400',
     },
     [OUTCOME.LEARNING]: {
-        label: 'Got there',
+        label: 'You found it!',
         Icon: Check,
         tone: 'text-sky-600 dark:text-sky-400',
     },
     [OUTCOME.INCORRECT]: {
-        label: 'The answer',
+        label: 'Not quite',
         Icon: X,
         tone: 'text-amber-600 dark:text-amber-400',
     },
     [OUTCOME.SKIPPED]: {
-        label: 'Skipped',
+        label: "Here's the answer",
         Icon: SkipForward,
-        tone: 'text-gray-500 dark:text-gray-400',
+        tone: 'text-slate-500 dark:text-slate-400',
     },
 };
 

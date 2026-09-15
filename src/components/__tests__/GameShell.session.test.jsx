@@ -87,9 +87,17 @@ const findButton = (container, text) =>
         b.textContent.trim().includes(text)
     );
 
-/** The exact-label variant, for the 10/20/30 chips where "10" is in "100". */
+/**
+ * The 10/20/30 chips.
+ *
+ * Matched on the trailing number rather than on the whole label: a selected
+ * chip also carries a tick, because selection must not be communicated by
+ * colour alone. Anchored at the end so "10" never matches "100".
+ */
 const findChip = (container, label) =>
-    Array.from(container.querySelectorAll('button')).find((b) => b.textContent.trim() === label);
+    Array.from(container.querySelectorAll('button')).find((b) =>
+        new RegExp(`(^|\\s)${label}$`).test(b.textContent.trim())
+    );
 
 function baseProps(overrides = {}) {
     return {
@@ -180,8 +188,9 @@ describe('a round the corpus cannot fill is explained, not started', () => {
 
         expect(container.textContent).not.toContain('This round will be');
         expect(persistedDeck()).toBeNull();
-        /* The length they picked is still picked. */
-        expect(findChip(container, '30').getAttribute('style')).toContain('rgb(233, 30, 140)');
+        /* The length they picked is still picked — asserted on the state the
+         * control reports, not on its colour. */
+        expect(findChip(container, '30').getAttribute('aria-pressed')).toBe('true');
         unmount();
     });
 });
