@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import GameShell from '../components/GameShell.jsx';
+import { COLOR, GRADIENT } from '../theme.js';
 import { DICTIONARY_BFF_PATH, ENGINE_URL, IDENTITY_URL, UI_LANGUAGE } from './config.js';
 import { useIdentityAuth } from './auth/useIdentityAuth.js';
 import { getSuiteToken } from './auth/suiteToken.js';
@@ -73,9 +74,25 @@ export default function App() {
 
     return (
         <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-900 dark:text-slate-50">
-            <header className="border-b border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
+            <header className="border-b border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
                 <div className="mx-auto flex max-w-4xl items-center justify-between gap-4 px-4 py-3">
-                    <h1 className="text-lg font-semibold">Dictionary Games</h1>
+                    {/*
+                     * The product header, as WordPad's TopBar has it: the cyan
+                     * "3i" badge and the product name. The games' own nav bar
+                     * carries the badge only when it is mounted WITHOUT a host
+                     * header — here there is one, so the name is not printed
+                     * twice.
+                     */}
+                    <h1 className="flex items-center gap-2 text-lg font-bold">
+                        <span
+                            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-bold text-white"
+                            style={{ background: COLOR.badge }}
+                            aria-hidden="true"
+                        >
+                            3i
+                        </span>
+                        Dictionary Games
+                    </h1>
                     {auth.signedIn ? (
                         <div className="flex items-center gap-3 text-sm">
                             <span className="text-slate-600 dark:text-slate-300">
@@ -93,7 +110,8 @@ export default function App() {
                         <button
                             type="button"
                             onClick={() => setShowSignIn(true)}
-                            className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white"
+                            className="min-h-[44px] rounded-lg px-4 text-sm font-bold text-white"
+                            style={{ background: GRADIENT.primary }}
                         >
                             Sign in
                         </button>

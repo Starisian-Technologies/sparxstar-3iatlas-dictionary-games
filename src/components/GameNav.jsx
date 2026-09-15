@@ -44,6 +44,10 @@ import { prefersReducedMotion } from './Celebration.jsx';
  *                          `onToggleSound` removes the control entirely.
  *   onToggleSound {Function} OPTIONAL.
  *   identity   {node}      Sign-in state supplied by the host app
+ *   showBrand  {boolean}   Render the 3i badge and product name. OFF by
+ *                          default: a host with its own 3iAtlas header would
+ *                          otherwise show the product name twice. A bare mount
+ *                          turns it on.
  */
 
 /**
@@ -103,6 +107,7 @@ export default function GameNav({
     soundOn = true,
     onToggleSound = null,
     identity = null,
+    showBrand = false,
 }) {
     const showProgress =
         Number.isFinite(questionAt) && Number.isFinite(questionOf) && questionOf > 0;
@@ -121,19 +126,27 @@ export default function GameNav({
             aria-label="Game navigation"
             className={`flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2 ${SHELL.border} ${SHELL.surface}`}
         >
-            {/* The family mark. Cyan "3i" + product name, as WordPad's TopBar. */}
-            <span className="mr-1 flex items-center gap-2">
-                <span
-                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-bold text-white"
-                    style={{ background: COLOR.badge }}
-                    aria-hidden="true"
-                >
-                    3i
+            {/*
+             * The family mark, and ONLY when the host has not already shown
+             * one. The games site renders its own 3iAtlas header above this
+             * bar, so printing the badge and the product name again put
+             * "Dictionary Games" on screen twice, six pixels apart. A host
+             * that mounts `GameShell` bare still gets the mark.
+             */}
+            {showBrand && (
+                <span className="mr-1 flex items-center gap-2">
+                    <span
+                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-bold text-white"
+                        style={{ background: COLOR.badge }}
+                        aria-hidden="true"
+                    >
+                        3i
+                    </span>
+                    <span className="hidden text-xs font-bold leading-none text-slate-800 dark:text-slate-100 sm:block">
+                        Dictionary Games
+                    </span>
                 </span>
-                <span className="hidden text-xs font-bold leading-none text-slate-800 dark:text-slate-100 sm:block">
-                    Dictionary Games
-                </span>
-            </span>
+            )}
 
             <button type="button" onClick={onHome} className={control}>
                 <Home size={16} aria-hidden="true" />

@@ -263,9 +263,18 @@ export const ADJUST = {
 /**
  * Player-facing wording for an adjustment. Simple, and never a judgement.
  */
+/*
+ * One spelling of the verb across the whole product: "practise".
+ *
+ * The completion screen, the review button and this notice all say it to the
+ * same learner within a few seconds of each other, and two spellings of one
+ * word is exactly the kind of wobble a new reader notices and an experienced
+ * reader does not. The LEVEL is still called "Practice" — that is its name, not
+ * the verb.
+ */
 export const ADJUST_MESSAGE = {
     [ADJUST.HARDER]: 'Ready for a little more challenge?',
-    [ADJUST.EASIER]: "Let's practice this pattern again.",
+    [ADJUST.EASIER]: "Let's practise these words again.",
     [ADJUST.HOLD]: null,
 };
 
