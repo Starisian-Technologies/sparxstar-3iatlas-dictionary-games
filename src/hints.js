@@ -44,13 +44,18 @@ const rung = (id, label, text) => (text ? { id, label, text } : null);
  */
 export function hintLadder(gameId, word, { language = 'en' } = {}) {
     if (!word) return [];
+    /*
+     * The approved gloss, then the entry's own definition. NEVER
+     * `english_definition` / `french_definition`.
+     *
+     * Those describe the English or French LEMMA, not this entry — `kaw`
+     * (water) carries "A hamlet in Manaton parish, Devon". As a hint that is
+     * worse than no hint: it is offered at the moment a learner has already
+     * struggled, and it sends them somewhere else entirely. See the note in
+     * `AnswerReveal.jsx` for the measured examples.
+     */
     const meaning =
-        (language === 'fr' && word.translation_fr) ||
-        word.translation_en ||
-        word.french_definition ||
-        word.english_definition ||
-        word.definition ||
-        '';
+        (language === 'fr' && word.translation_fr) || word.translation_en || word.definition || '';
     const example = word.example_sentences?.[0]?.sentence ?? '';
     const ipa = word.ipa ?? '';
     const pos = word.part_of_speech ?? '';

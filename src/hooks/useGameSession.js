@@ -176,6 +176,35 @@ export function useGameSession() {
             const current = sessionRef.current;
             if (!current) return null;
 
+            /*
+             * ONE RESULT PER QUESTION. NOT ONE PER CALL.
+             *
+             * Nothing stopped a word being recorded twice, and several paths
+             * do it: a double-tap on an answer, the reveal's Finish landing on
+             * top of an auto-advance, or the final `onResult` + `onComplete`
+             * pair arriving together. Each duplicate pushed another result,
+             * advanced `currentIndex` again and added its XP again — which is
+             * how a two-word round displayed "3 / 2" and paid for three
+             * answers.
+             *
+             * Keyed on the word because a round never repeats one (the
+             * selector guarantees distinct words, and its tests hold it), so
+             * "already recorded" and "already answered" are the same question.
+             * The serialisation in the shell orders these calls; it cannot
+             * make a second one harmless, and only this can.
+             */
+            const already = current.results.some((r) => r.wordUuid === wordUuid);
+            if (already) return current;
+
+            /*
+             * And a hard stop at the end of the deck, whatever the word. A
+             * result arriving for a question the round does not contain is a
+             * bug upstream; recording it would put the counter past the end
+             * and the XP past what was earned.
+             */
+            const deckLength = Array.isArray(current.words) ? current.words.length : null;
+            if (deckLength !== null && current.currentIndex >= deckLength) return current;
+
             const result = {
                 wordUuid,
                 outcome,

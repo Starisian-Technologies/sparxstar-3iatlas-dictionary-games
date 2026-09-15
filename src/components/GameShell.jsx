@@ -1473,11 +1473,34 @@ export default function GameShell({
      * forgotten by one of them.
      */
     const gameLabel = GAME_TYPES.find((g) => g.id === selectedGame)?.label ?? null;
+
+    /*
+     * ONE SOURCE FOR THE COUNTER, AND IT CANNOT OVERRUN.
+     *
+     * This read `session.currentIndex + 1` out of `gameWords.length` and
+     * printed "3 / 2" on screen. Both halves were wrong:
+     *
+     *   the total   `gameWords` is the deck currently being PLAYED, and a
+     *               resumed session is handed only the words that remain
+     *               (`session.words.slice(currentIndex)`). The nav then
+     *               divided an absolute position by a relative length.
+     *   the number  `currentIndex` counts answers RECORDED, so after the last
+     *               one it equals the deck length — and +1 put the counter one
+     *               past the end for the frame between the final answer and
+     *               the completion screen.
+     *
+     * The session is the authority for both: its `words` are the whole round
+     * and its `currentIndex` the position within it. Clamped, so no ordering
+     * of state updates can print a question that does not exist.
+     */
+    const questionTotal = session?.words?.length ?? gameWords.length;
+    const questionNumber = Math.min((session?.currentIndex ?? 0) + 1, Math.max(questionTotal, 1));
+
     const nav = (
         <GameNav
             gameName={phase === 'setup' ? null : gameLabel}
-            questionAt={phase === 'playing' ? (session?.currentIndex ?? 0) + 1 : null}
-            questionOf={phase === 'playing' ? gameWords.length : null}
+            questionAt={phase === 'playing' ? questionNumber : null}
+            questionOf={phase === 'playing' ? questionTotal : null}
             points={session?.xpEarned ?? 0}
             onHome={handleHome}
             onRestart={phase === 'playing' || phase === 'complete' ? handleRestart : null}
