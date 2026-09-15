@@ -98,7 +98,24 @@ export const SHELL = {
  *
  * Each game gets its own, because "light up the answer area in the game's
  * colour" needs a game to have one. Chosen inside the family — no new hues,
- * just the family's own spread — and dark enough to carry white text.
+ * just the family's own spread.
+ *
+ * TWO SETS, BECAUSE ONE COLOUR CANNOT DO BOTH JOBS.
+ *
+ * The first cut claimed these were "dark enough to carry white text". Measured
+ * against #ffffff, most are not:
+ *
+ *   #E91E8C  4.18:1     #0284c7  4.10:1     #10b981  2.54:1
+ *   #f59e0b  2.15:1      #8b5cf6  4.23:1     #7B3FA0  6.86:1  ← the only pass
+ *
+ * They were the background of selected game cards and of the streak badge, so
+ * the newest and loudest feedback in the product was also the least readable
+ * part of it. `#10b981` and `#f59e0b` are not close.
+ *
+ * `GAME_ACCENT` is for decoration where nothing sits on top: a 4px rule, a
+ * glow, a gradient edge. `GAME_ACCENT_ON_WHITE` is the darkened variant used
+ * wherever white text sits on the colour. Keeping them apart means a future
+ * accent cannot quietly become unreadable by being used one row further down.
  */
 export const GAME_ACCENT = {
     listen_write: '#E91E8C',
@@ -109,7 +126,37 @@ export const GAME_ACCENT = {
     domain_flash: '#8b5cf6',
 };
 
-/** The accent for a game, defaulting to the family magenta. */
+/**
+ * The same accents, darkened until white text on them clears 4.5:1.
+ *
+ * Computed against #ffffff with the WCAG relative-luminance formula, not
+ * estimated:
+ *
+ *   #A8105F  7.23:1     #6A3490  8.38:1     #01558F  7.79:1
+ *   #05704E  6.12:1     #8A5A00  5.93:1     #6D3BD4  6.51:1
+ *
+ * All clear AA for normal text, so they are safe at any size a label uses.
+ */
+export const GAME_ACCENT_ON_WHITE = {
+    listen_write: '#A8105F',
+    arrange_word: '#6A3490',
+    meaning_match: '#01558F',
+    complete_sentence: '#05704E',
+    letter_reveal: '#8A5A00',
+    domain_flash: '#6D3BD4',
+};
+
+/** The accent for a game, for DECORATION. Defaults to the family magenta. */
 export function accentFor(gameId) {
     return GAME_ACCENT[gameId] ?? COLOR.magenta;
+}
+
+/**
+ * The accent for a game WHERE WHITE TEXT SITS ON IT.
+ *
+ * Use this and not `accentFor` for any filled button, badge or card that
+ * carries a label — see the note on the two maps above.
+ */
+export function accentOnWhiteFor(gameId) {
+    return GAME_ACCENT_ON_WHITE[gameId] ?? '#A8105F';
 }

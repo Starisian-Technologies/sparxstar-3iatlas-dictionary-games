@@ -1,7 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React from 'react';
 import { BarChart3, Home, RotateCcw, Volume2, VolumeX } from 'lucide-react';
 import { COLOR, SHELL } from '../theme.js';
-import { prefersReducedMotion } from './Celebration.jsx';
 
 /**
  * GameNav — the 3iAtlas header, and the escape hatch that must exist in every
@@ -35,7 +34,6 @@ import { prefersReducedMotion } from './Celebration.jsx';
  *   gameName   {string}    Current game's display name, or null outside play
  *   questionAt {number}    1-based index of the current question, or null
  *   questionOf {number}    Length of the current deck, or null
- *   points     {number}    XP earned so far this session
  *   onHome     {Function}  REQUIRED — leave the game and return to the menu
  *   onRestart  {Function}  Restart this game; omitted outside gameplay
  *   onStats    {Function}  Open the progress screen. OPTIONAL, and omitted
@@ -50,57 +48,10 @@ import { prefersReducedMotion } from './Celebration.jsx';
  *                          turns it on.
  */
 
-/**
- * Count a number up to its new value.
- *
- * The score used to jump, which is the one moment it should not: the whole
- * point of a running total is watching it move. Bounded at ~420ms so it has
- * always finished before the next question, and it lands on the exact target
- * rather than drifting — a counter that settles on the wrong number is worse
- * than one that jumps.
- */
-function useCountUp(value, { enabled = true } = {}) {
-    const [shown, setShown] = useState(value);
-    const fromRef = useRef(value);
-    const frameRef = useRef(null);
-
-    useEffect(() => {
-        if (!enabled || typeof requestAnimationFrame !== 'function') {
-            setShown(value);
-            fromRef.current = value;
-            return undefined;
-        }
-        const from = fromRef.current;
-        if (from === value) return undefined;
-
-        const started = Date.now();
-        const duration = 420;
-        const tick = () => {
-            const progress = Math.min(1, (Date.now() - started) / duration);
-            /* Ease-out: fast at first, settling into the final number. */
-            const eased = 1 - (1 - progress) ** 3;
-            setShown(Math.round(from + (value - from) * eased));
-            if (progress < 1) frameRef.current = requestAnimationFrame(tick);
-            else fromRef.current = value;
-        };
-        frameRef.current = requestAnimationFrame(tick);
-        return () => {
-            if (frameRef.current) cancelAnimationFrame(frameRef.current);
-            /* Interrupted mid-count: the next run starts from the last number
-             * actually shown, not from a value nobody saw. */
-            fromRef.current = value;
-            setShown(value);
-        };
-    }, [value, enabled]);
-
-    return shown;
-}
-
 export default function GameNav({
     gameName = null,
     questionAt = null,
     questionOf = null,
-    points = 0,
     onHome,
     onRestart = null,
     onStats = null,
@@ -111,8 +62,6 @@ export default function GameNav({
 }) {
     const showProgress =
         Number.isFinite(questionAt) && Number.isFinite(questionOf) && questionOf > 0;
-    const [reduced] = useState(() => prefersReducedMotion());
-    const shownPoints = useCountUp(points, { enabled: !reduced });
 
     /* One button shape for the whole bar. 44px is the floor for a child's
      * fingertip on a tablet, and it is a floor rather than a target. */
@@ -197,24 +146,25 @@ export default function GameNav({
                     </button>
                 )}
                 {/*
-                 * Points, live and counting. Stars would sit beside this — the
-                 * brief asks for them — but no canonical star rule exists for
-                 * the dictionary games and RLC spec v4.0 §1.6 places stars with
-                 * myCred, not with this client. Rendering an invented number
-                 * here would be worse than rendering none, so the slot stays
-                 * empty until the rule is decided.
+                 * NO POINTS TOTAL HERE.
                  *
-                 * `aria-label` carries the SETTLED total, not the animating
-                 * one: a screen reader should be told the score, not read a
-                 * count-up frame by frame.
+                 * This read `session.xpEarned`, accumulated on this device from
+                 * `xpFor(outcome)`. INV-016 (Accepted, binding platform-wide)
+                 * says a client renders SETTLED awards and never infers one, so
+                 * a running total assembled from local answer counts cannot be
+                 * shown as points earned — it has no ledger row and would
+                 * disagree with the same player's totals on another device.
+                 *
+                 * The slot stays empty rather than showing a zero: absence of a
+                 * settlement is not evidence of no awards. This is the same
+                 * reason stars were already withheld here, and the note that
+                 * used to sit in this spot said so about stars while the points
+                 * beside it did exactly what it warned against.
+                 *
+                 * Settled awards render on the completion screen, through
+                 * `earnedBadges(awards)`, which is where the engine's response
+                 * already arrives.
                  */}
-                <span
-                    className="text-sm font-bold tabular-nums"
-                    style={{ color: COLOR.success }}
-                    aria-label={`${points} points this session`}
-                >
-                    <span aria-hidden="true">{shownPoints}</span> pts
-                </span>
                 {identity}
             </span>
         </nav>

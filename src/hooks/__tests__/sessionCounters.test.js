@@ -181,3 +181,51 @@ describe('completing a session does not change its arithmetic', () => {
         expectReconciled(session);
     });
 });
+
+describe('a result the session refuses says so', () => {
+    /*
+     * The shell could not previously tell a rejected duplicate from an accepted
+     * result: a duplicate of the LAST word returned a session whose final
+     * result matched the uuid just submitted, which looks exactly like success.
+     * So every duplicate carried on into queueing another `game_result`,
+     * advancing calibration and firing the reward signals a second time.
+     */
+    it('reports accepted for a genuinely new result', async () => {
+        const hook = await startedSession();
+        let outcome;
+        await act(async () => {
+            outcome = await hook.result.current.recordResult('w1', 'correct', 1, 10, 100);
+        });
+        expect(outcome.accepted).toBe(true);
+        expect(outcome.session.results).toHaveLength(1);
+    });
+
+    it('reports NOT accepted for a duplicate of the last word', async () => {
+        const hook = await startedSession();
+        await act(async () => {
+            await hook.result.current.recordResult('w1', 'correct', 1, 10, 100);
+        });
+        let outcome;
+        await act(async () => {
+            outcome = await hook.result.current.recordResult('w1', 'correct', 1, 10, 100);
+        });
+        expect(outcome.accepted).toBe(false);
+        expect(outcome.session.results).toHaveLength(1);
+    });
+
+    it('refuses a word that is not in this round at all', async () => {
+        /*
+         * A stale callback from a previous round, or from a component that
+         * unmounted mid-answer, can supply a uuid this deck never contained.
+         * Checking only the index would accept it as the next question.
+         */
+        const hook = await startedSession();
+        let outcome;
+        await act(async () => {
+            outcome = await hook.result.current.recordResult('not-in-deck', 'correct', 1, 10, 100);
+        });
+        expect(outcome.accepted).toBe(false);
+        expect(outcome.session.currentIndex).toBe(0);
+        expect(outcome.session.xpEarned).toBe(0);
+    });
+});

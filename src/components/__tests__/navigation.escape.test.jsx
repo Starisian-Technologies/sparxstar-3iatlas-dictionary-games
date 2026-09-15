@@ -74,19 +74,40 @@ describe('GameNav — the escape hatch', () => {
         unmount();
     });
 
-    it('shows the game name, position and points while playing', () => {
+    it('shows the game name and position while playing', () => {
         const { container, unmount } = mount(
             <GameNav
                 onHome={jest.fn()}
                 gameName="Arrange the Word"
                 questionAt={3}
                 questionOf={10}
-                points={25}
             />
         );
         expect(container.textContent).toContain('Arrange the Word');
         expect(container.textContent).toContain('3 / 10');
-        expect(container.textContent).toContain('25 pts');
+        unmount();
+    });
+
+    it('shows no points total, because this client cannot know one', () => {
+        /*
+         * The nav used to render `session.xpEarned` as "N pts" — a figure
+         * accumulated on this device from `xpFor(outcome)`. INV-016 (Accepted,
+         * binding platform-wide) says a client renders SETTLED awards and never
+         * infers one, so that total had no ledger row behind it.
+         *
+         * And no zero in its place: the same invariant says absence of a
+         * settlement is not evidence of no awards.
+         */
+        const { container, unmount } = mount(
+            <GameNav
+                onHome={jest.fn()}
+                gameName="Arrange the Word"
+                questionAt={3}
+                questionOf={10}
+            />
+        );
+        expect(container.textContent).not.toMatch(/\bpts\b/);
+        expect(container.textContent).not.toMatch(/\bpoints\b/i);
         unmount();
     });
 

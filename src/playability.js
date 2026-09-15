@@ -61,9 +61,23 @@ export function hasUsableSentence(word) {
     return new RegExp(escapeRegex(headword), 'i').test(example.sentence);
 }
 
-/** Is there a meaning to match against — the gloss, not a definition? */
-export function hasMeaning(word) {
-    return typeof word?.translation_en === 'string' && word.translation_en.trim().length > 0;
+/**
+ * Is there a meaning to match against — the gloss, not a definition?
+ *
+ * Asked IN THE UI LANGUAGE, with the same fallback the games themselves use:
+ * `MeaningMatch` and `DomainFlash` both render
+ * `language === 'fr' && word.translation_fr ? translation_fr : translation_en`.
+ *
+ * Checking `translation_en` alone made this predicate stricter than the games
+ * it gates: on a French interface, a word carrying only `translation_fr` has a
+ * perfectly good prompt to show and was being refused as `no-meaning` — and if
+ * enough of the pack looked like that, the game was disabled for having nothing
+ * to play while its own renderer would have played it.
+ */
+export function hasMeaning(word, language = 'en') {
+    const preferred = language === 'fr' ? word?.translation_fr : null;
+    const gloss = preferred ?? word?.translation_en;
+    return typeof gloss === 'string' && gloss.trim().length > 0;
 }
 
 /** Is there a consented, playable recording? */
@@ -78,7 +92,7 @@ export function hasAudio(word) {
  * needs example sentences" instead of "no words available" — the player can act
  * on the first and not on the second.
  */
-export function unplayableReason(word, gameId, languageCode) {
+export function unplayableReason(word, gameId, languageCode, uiLanguage = 'en') {
     switch (gameId) {
         case 'listen_write':
             if (!hasAudio(word)) return 'no-audio';
@@ -93,7 +107,7 @@ export function unplayableReason(word, gameId, languageCode) {
             return hasUsableSentence(word) ? null : 'no-sentence';
 
         case 'meaning_match':
-            return hasMeaning(word) ? null : 'no-meaning';
+            return hasMeaning(word, uiLanguage) ? null : 'no-meaning';
 
         case 'domain_flash':
             /*
@@ -102,7 +116,7 @@ export function unplayableReason(word, gameId, languageCode) {
              * self-graded equivalent of an unanswerable question.
              */
             if (!(word?.headword ?? '').trim()) return 'no-headword';
-            return hasMeaning(word) ? null : 'no-meaning';
+            return hasMeaning(word, uiLanguage) ? null : 'no-meaning';
 
         default:
             return (word?.headword ?? '').trim() ? null : 'no-headword';
@@ -110,8 +124,8 @@ export function unplayableReason(word, gameId, languageCode) {
 }
 
 /** Can this game deal this word? */
-export function isPlayableFor(word, gameId, languageCode) {
-    return unplayableReason(word, gameId, languageCode) === null;
+export function isPlayableFor(word, gameId, languageCode, uiLanguage = 'en') {
+    return unplayableReason(word, gameId, languageCode, uiLanguage) === null;
 }
 
 /**
@@ -120,12 +134,12 @@ export function isPlayableFor(word, gameId, languageCode) {
  * @returns {{playable: Array, rejected: Array<{word: object, reason: string}>,
  *   reasons: Record<string, number>}}
  */
-export function partitionForGame(words, gameId, languageCode) {
+export function partitionForGame(words, gameId, languageCode, uiLanguage = 'en') {
     const playable = [];
     const rejected = [];
     const reasons = {};
     for (const word of words ?? []) {
-        const reason = unplayableReason(word, gameId, languageCode);
+        const reason = unplayableReason(word, gameId, languageCode, uiLanguage);
         if (reason === null) playable.push(word);
         else {
             rejected.push({ word, reason });
@@ -160,13 +174,13 @@ export const SHORTAGE_MESSAGE = {
  *
  * @returns {{playable: boolean, count: number, reason: string|null, message: string|null}}
  */
-export function availabilityFor(words, { gameId, languageCode }) {
+export function availabilityFor(words, { gameId, languageCode, uiLanguage = 'en' }) {
     const pack = words ?? [];
     if (pack.length === 0) {
         return { playable: false, count: 0, reason: 'empty', message: SHORTAGE_MESSAGE.empty };
     }
 
-    const { playable, reasons } = partitionForGame(pack, gameId, languageCode);
+    const { playable, reasons } = partitionForGame(pack, gameId, languageCode, uiLanguage);
     if (playable.length > 0) {
         return { playable: true, count: playable.length, reason: null, message: null };
     }

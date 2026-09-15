@@ -36,7 +36,7 @@ import {
     recordOutcome,
 } from '../difficulty.js';
 import { SHORTAGE_MESSAGE, availabilityFor, partitionForGame } from '../playability.js';
-import { COLOR, GRADIENT, accentFor } from '../theme.js';
+import { COLOR, GRADIENT, accentFor, accentOnWhiteFor } from '../theme.js';
 import {
     CALIBRATION,
     STAGE,
@@ -342,12 +342,13 @@ export default function GameShell({
     /*
      * The reward moment for the answer just given.
      *
-     * `token` increments per answer so two identical scores in a row are two
-     * separate bursts rather than one that never re-fires. `points` is what
-     * the session RECORDED — never a number computed for display, which is how
-     * a celebration ends up congratulating a player for XP they did not get.
+     * `token` increments per answer so two identical results in a row are two
+     * separate bursts rather than one that never re-fires. It carries whether
+     * the answer was CORRECT and the streak length — facts about the round —
+     * and deliberately no award value: see INV-016 and the note in
+     * `PointsBurst.jsx`.
      */
-    const [burst, setBurst] = useState({ points: 0, streak: 0, token: 0 });
+    const [burst, setBurst] = useState({ correct: false, streak: 0, token: 0 });
     const [soundOn, setSoundOn] = useState(() => soundEnabled());
     /* Set the moment the player taps a game card. After that the selection is
      * theirs and nothing may move it — see the auto-select effect below. */
@@ -430,7 +431,11 @@ export default function GameShell({
      * and this costs nothing.
      */
     const packIsNarrowed = selectedGame === 'listen_write' || requiresUniversalWords(currentStage);
-    const { words: neutralWords, loading: neutralLoading } = useGameSet({
+    const {
+        words: neutralWords,
+        loading: neutralLoading,
+        error: neutralError,
+    } = useGameSet({
         bffPath,
         language: packIsNarrowed ? sourceLanguage : '',
         domain: selectedDomain,
@@ -438,6 +443,7 @@ export default function GameShell({
     });
     const previewPack = packIsNarrowed ? neutralWords : fetchedWords;
     const previewLoading = packIsNarrowed ? neutralLoading : gameSetLoading;
+    const previewError = packIsNarrowed ? neutralError : gameSetError;
 
     /*
      * WHETHER A GAME CAN BE OFFERED IS KNOWABLE BEFORE IT IS OFFERED.
@@ -454,17 +460,33 @@ export default function GameShell({
             out[game.id] = availabilityFor(previewPack, {
                 gameId: game.id,
                 languageCode: sourceLanguage ?? '',
+                /* The gloss the games will actually render depends on the UI
+                 * language, so availability must ask the same question. */
+                uiLanguage: language,
             });
         }
         return out;
-    }, [previewPack, sourceLanguage]);
+    }, [previewPack, sourceLanguage, language]);
 
     /*
      * Nothing is disabled while the evidence is still arriving. A game greyed
      * out because a fetch has not landed is a game the player believes is
      * broken.
      */
-    const availabilityKnown = !previewLoading && previewPack.length > 0;
+    /*
+     * A SUCCESSFUL EMPTY PACK IS AN ANSWER.
+     *
+     * This required `previewPack.length > 0`, so a language or domain with no
+     * entries at all left `availabilityKnown` false forever: nothing was
+     * disabled, Start stayed enabled, and the player discovered the empty
+     * corpus only after committing to a round — the exact defect the preview
+     * exists to prevent, surviving in the case where the corpus is emptiest.
+     *
+     * Completion is now tracked apart from contents. An error is NOT completion:
+     * a failed fetch means the answer is unknown, and an unknown answer must not
+     * disable a game the corpus may well be able to play.
+     */
+    const availabilityKnown = !previewLoading && !previewError;
     const selectedAvailability = availability[selectedGame] ?? null;
     const selectedUnplayable =
         availabilityKnown && selectedAvailability ? !selectedAvailability.playable : false;
@@ -761,7 +783,8 @@ export default function GameShell({
             const { playable: playableWords, reasons } = partitionForGame(
                 fetchedWords,
                 selectedGame,
-                sourceLanguage ?? ''
+                sourceLanguage ?? '',
+                language
             );
             if (playableWords.length === 0) {
                 const dominant = Object.entries(reasons).sort((a, b) => b[1] - a[1])[0]?.[0];
@@ -1031,7 +1054,29 @@ export default function GameShell({
              */
             pendingResultRef.current = pendingResultRef.current
                 .then(async () => {
-                    const updatedSession = await recordResult(uuid, outcome, attempts, xp, timeMs);
+                    const { session: updatedSession, accepted } = await recordResult(
+                        uuid,
+                        outcome,
+                        attempts,
+                        xp,
+                        timeMs
+                    );
+
+                    /*
+                     * A REJECTED RESULT STOPS THE WHOLE HANDLER.
+                     *
+                     * The guard used to be "does the last recorded result match
+                     * the uuid I just submitted?", which a double-tap on the
+                     * LAST word passes — the last result does match, because the
+                     * first tap wrote it. So every duplicate carried on into the
+                     * code below: a second `game_result` queued for the engine,
+                     * calibration and adaptation advanced again, and the reward
+                     * signals fired twice for one answer.
+                     *
+                     * `recordResult` now says `accepted` outright. Nothing after
+                     * this line runs for a result the session refused.
+                     */
+                    if (!accepted || !updatedSession) return;
 
                     /*
                      * THE REWARD, FROM THE RECORDED RESULT.
@@ -1043,31 +1088,29 @@ export default function GameShell({
                      * burst and awards no second streak — the display cannot
                      * drift from the ledger because it is reading the ledger.
                      */
-                    if (updatedSession) {
-                        const recorded = updatedSession.results.at(-1);
-                        const isNewResult = recorded?.wordUuid === uuid;
-                        if (isNewResult) {
-                            /* The streak is the trailing run of correct
-                             * answers in THIS session — a real count, not a
-                             * guess, so no bonus is ever announced that the
-                             * results do not show. */
-                            let streak = 0;
-                            for (let i = updatedSession.results.length - 1; i >= 0; i -= 1) {
-                                if (updatedSession.results[i].outcome !== 'correct') break;
-                                streak += 1;
-                            }
-                            if (recorded.outcome === 'correct') {
-                                setBurst((b) => ({
-                                    points: recorded.xp,
-                                    streak,
-                                    token: b.token + 1,
-                                }));
-                                if (streak >= 3) playStreak(streak);
-                                else playCorrect();
-                            } else if (recorded.outcome === 'incorrect') {
-                                playIncorrect();
-                            }
-                        }
+                    /*
+                     * The celebration is for the ANSWER, not for a number.
+                     *
+                     * It used to carry `recorded.xp` into a `+N POINTS!` burst.
+                     * That number comes from `xpFor(outcome)` on this device, and
+                     * INV-016 forbids a client inferring earned value. Whether
+                     * the answer was right, and how many right answers are in a
+                     * row, are facts about the round rather than awards — so
+                     * those are what the burst says.
+                     */
+                    const recorded = updatedSession.results.at(-1);
+                    let streak = 0;
+                    for (let i = updatedSession.results.length - 1; i >= 0; i -= 1) {
+                        if (updatedSession.results[i].outcome !== 'correct') break;
+                        streak += 1;
+                    }
+                    if (recorded?.outcome === 'correct') {
+                        setBurst((b) => ({ correct: true, streak, token: b.token + 1 }));
+                        if (streak >= 3) playStreak(streak);
+                        else playCorrect();
+                    } else if (recorded?.outcome === 'incorrect') {
+                        setBurst((b) => ({ correct: false, streak: 0, token: b.token + 1 }));
+                        playIncorrect();
                     }
 
                     /* Report every outcome (not just correct) toward the engine's
@@ -1551,7 +1594,6 @@ export default function GameShell({
             gameName={phase === 'setup' ? null : gameLabel}
             questionAt={phase === 'playing' ? questionNumber : null}
             questionOf={phase === 'playing' ? questionTotal : null}
-            points={session?.xpEarned ?? 0}
             soundOn={soundOn}
             onToggleSound={() => setSoundOn(setSoundEnabled(!soundOn))}
             onHome={handleHome}
@@ -1654,7 +1696,7 @@ export default function GameShell({
                             type="button"
                             onClick={() => setPlayerLevel(id)}
                             aria-pressed={playerLevel === id}
-                            className="min-h-[32px] rounded-lg border px-2 font-medium"
+                            className="min-h-[44px] rounded-lg border px-3 font-medium"
                             style={
                                 playerLevel === id
                                     ? {
@@ -1685,7 +1727,9 @@ export default function GameShell({
                         type="button"
                         onClick={() => setAdaptive((a) => !a)}
                         aria-pressed={adaptive}
-                        className="ml-auto min-h-[32px] rounded-lg border border-slate-300 px-2 font-medium text-slate-600 dark:border-slate-600 dark:text-slate-300"
+                        /* 44px, like every other control. It sat at 32px beside
+                         * the level buttons and had the same problem they did. */
+                        className="ml-auto min-h-[44px] rounded-lg border border-slate-300 px-3 font-medium text-slate-600 dark:border-slate-600 dark:text-slate-300"
                     >
                         {adaptive ? 'Adjusts as you learn' : 'Stays the same'}
                     </button>
@@ -1698,7 +1742,7 @@ export default function GameShell({
                 )}
 
                 <PointsBurst
-                    points={burst.points}
+                    correct={burst.correct}
                     streak={burst.streak}
                     token={burst.token}
                     gameId={selectedGame}
@@ -1933,7 +1977,11 @@ export default function GameShell({
                                             style={
                                                 active
                                                     ? {
-                                                          background: `linear-gradient(135deg, ${accent}, ${COLOR.purple})`,
+                                                          /* White label on this, so the
+                                                           * contrast-checked variant —
+                                                           * see the two accent maps in
+                                                           * src/theme.js. */
+                                                          background: `linear-gradient(135deg, ${accentOnWhiteFor(g.id)}, ${COLOR.purple})`,
                                                       }
                                                     : undefined
                                             }

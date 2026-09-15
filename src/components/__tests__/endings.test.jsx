@@ -194,3 +194,57 @@ describe('every ending still reads as a different screen', () => {
         }
     });
 });
+
+describe('the client never reports an award it invented', () => {
+    /*
+     * INV-016 (Accepted 2026-09-05, binding platform-wide): "No client may
+     * originate, compute, or infer earned value… It may never derive the award
+     * itself from round performance… or answer counts."
+     *
+     * The completion screen showed "Points earned +N", counted up from
+     * `session.xpEarned` — accumulated on this device from `xpFor(outcome)`,
+     * with no ledger row and no settlement identifier behind it.
+     */
+    it('shows no points figure on any ending', () => {
+        for (const session of [perfect, strong, partial, practice]) {
+            const { text, unmount } = render(session);
+            expect(text).not.toMatch(/points/i);
+            expect(text).not.toMatch(/\bXP\b/);
+            unmount();
+        }
+    });
+
+    it('does not put a zero in its place either', () => {
+        /*
+         * The same invariant: absence of a settlement is not evidence of no
+         * awards, so "0 points" would be a claim about the ledger this screen
+         * cannot make.
+         */
+        const { text, unmount } = render(practice);
+        expect(text).not.toMatch(/\+0/);
+        unmount();
+    });
+
+    it('still reports what it legitimately watched happen', () => {
+        /* Counts of answers are facts about the round, not awards. */
+        const { text, unmount } = render(partial);
+        expect(text).toContain('2 / 4');
+        expect(text).toMatch(/questions answered/i);
+        unmount();
+    });
+});
+
+describe('a round with nothing to practise offers something that works', () => {
+    it('does not label the primary action "Practise these words" with no words', () => {
+        /*
+         * An unanswered round grades as PRACTICE with `reviewing === 0`, and the
+         * screen falls back to `onPlayAgain` — so the button said one thing and
+         * did another, with nothing to practise either way.
+         */
+        const emptyRound = sessionOf([]);
+        const { buttons, unmount } = render(emptyRound);
+        expect(buttons[0]).toContain('Play again');
+        expect(buttons[0]).not.toContain('Practise');
+        unmount();
+    });
+});

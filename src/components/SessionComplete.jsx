@@ -42,33 +42,6 @@ import { playPartial, playTryAgain, playWin } from '../sound.js';
  * then a quiet way out.
  */
 
-/** Count a number up, for the one number worth watching arrive. */
-function useCountUp(target, { enabled }) {
-    const [shown, setShown] = useState(enabled ? 0 : target);
-
-    useEffect(() => {
-        if (!enabled || typeof requestAnimationFrame !== 'function' || target <= 0) {
-            setShown(target);
-            return undefined;
-        }
-        let frame = null;
-        const started = Date.now();
-        const duration = 900;
-        const tick = () => {
-            const progress = Math.min(1, (Date.now() - started) / duration);
-            const eased = 1 - (1 - progress) ** 3;
-            setShown(Math.round(target * eased));
-            if (progress < 1) frame = requestAnimationFrame(tick);
-        };
-        frame = requestAnimationFrame(tick);
-        return () => {
-            if (frame) cancelAnimationFrame(frame);
-        };
-    }, [target, enabled]);
-
-    return shown;
-}
-
 export default function SessionComplete({
     session,
     learnedCount,
@@ -83,8 +56,6 @@ export default function SessionComplete({
 }) {
     const [reduced] = useState(() => prefersReducedMotion());
     const grade = session ? gradeSession(session) : null;
-    const xpTarget = grade?.xp ?? 0;
-    const shownXp = useCountUp(xpTarget, { enabled: Boolean(grade) && !reduced });
 
     /*
      * The ending sound, once, when the screen arrives.
@@ -180,10 +151,32 @@ export default function SessionComplete({
                 {message.detail}
             </p>
 
-            {/* 2. Words worked out, and what they were worth. */}
+            {/*
+             * 2. What the round contained — and NOT what it was worth.
+             *
+             * This said "Points earned +N", counted up from `session.xpEarned`,
+             * which is accumulated on this device from `xpFor(outcome)`. INV-016
+             * (Accepted, binding platform-wide) is explicit that a client
+             * "may never derive the award itself from round performance… or
+             * answer counts": an inferred total has no ledger row, disagrees
+             * with the same player on a second device, and teaches a learner
+             * that the reward is theatre.
+             *
+             * Words worked out is not an award — it is a count of what happened,
+             * which this client watched happen. Settled awards render below,
+             * through `earnedBadges(awards)`, when the engine returns them.
+             *
+             * Nothing replaces the points figure with a zero, either: INV-016
+             * says absence of a settlement is not evidence of no awards, so
+             * "0 points" would be a claim about the ledger this screen is in no
+             * position to make.
+             */}
             <div className="mb-3 grid w-full max-w-xs grid-cols-2 gap-3">
                 <Figure label="Words worked out" value={`${grade.correct} / ${grade.answered}`} />
-                <Figure label="Points earned" value={`+${shownXp}`} color={COLOR.success} />
+                <Figure
+                    label={grade.answered === 1 ? 'Question answered' : 'Questions answered'}
+                    value={`${grade.answered}`}
+                />
             </div>
 
             {/* 3. One secondary fact, when there is a true one. */}

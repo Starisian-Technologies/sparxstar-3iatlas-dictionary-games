@@ -171,6 +171,23 @@ export function resultMessage(grade) {
 
         case RESULT.PRACTICE:
         default:
+            /*
+             * A round with NOTHING to practise still lands here — an answered
+             * count of zero grades as PRACTICE — and the screen's primary
+             * button falls back to `onPlayAgain` when `reviewing` is 0. Naming
+             * that button "Practise these words" made it say one thing and do
+             * another, with no words to practise either way.
+             */
+            if (reviewing === 0) {
+                return {
+                    headline: 'That was a tough round.',
+                    detail:
+                        correct > 0
+                            ? `You worked out ${plural(correct, 'word')}.`
+                            : 'No questions were answered this time.',
+                    action: 'Play again',
+                };
+            }
             return {
                 headline: 'That was a tough round.',
                 detail:

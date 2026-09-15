@@ -172,9 +172,22 @@ export function useGameSession() {
      */
 
     const recordResult = useCallback(
+        /*
+         * Returns `{ session, accepted }` rather than a bare session.
+         *
+         * A caller cannot tell a rejected duplicate from an accepted result by
+         * inspecting the session it gets back: a duplicate of the LAST word
+         * returns a session whose final result matches the uuid just submitted,
+         * which is indistinguishable from success. The shell was reading it that
+         * way, so a double-tap sailed past the guard and went on to queue a
+         * second `game_result`, advance calibration and emit reward signals —
+         * everything the de-duplication existed to prevent, minus the counter.
+         *
+         * `accepted` says it outright. There is nothing to infer.
+         */
         async (wordUuid, outcome, attempts, xp, timeMs) => {
             const current = sessionRef.current;
-            if (!current) return null;
+            if (!current) return { session: null, accepted: false };
 
             /*
              * ONE RESULT PER QUESTION. NOT ONE PER CALL.
@@ -194,7 +207,21 @@ export function useGameSession() {
              * make a second one harmless, and only this can.
              */
             const already = current.results.some((r) => r.wordUuid === wordUuid);
-            if (already) return current;
+            if (already) return { session: current, accepted: false };
+
+            /*
+             * AND THE WORD MUST BE IN THIS DECK.
+             *
+             * Checking only the index leaves a stale callback — a game component
+             * unmounted mid-answer, a late promise from a previous round — able
+             * to supply a uuid this round never contained. It would be accepted
+             * as the next result, advance the counter and add its XP to a
+             * question that does not exist.
+             */
+            const deck = Array.isArray(current.words) ? current.words : null;
+            if (deck && !deck.some((word) => word?.uuid === wordUuid)) {
+                return { session: current, accepted: false };
+            }
 
             /*
              * And a hard stop at the end of the deck, whatever the word. A
@@ -202,8 +229,10 @@ export function useGameSession() {
              * bug upstream; recording it would put the counter past the end
              * and the XP past what was earned.
              */
-            const deckLength = Array.isArray(current.words) ? current.words.length : null;
-            if (deckLength !== null && current.currentIndex >= deckLength) return current;
+            const deckLength = deck ? deck.length : null;
+            if (deckLength !== null && current.currentIndex >= deckLength) {
+                return { session: current, accepted: false };
+            }
 
             const result = {
                 wordUuid,
@@ -245,7 +274,7 @@ export function useGameSession() {
 
             await safePutRecord('game-sessions', updated);
             setSession(updated);
-            return updated;
+            return { session: updated, accepted: true };
         },
         [safePutRecord]
     );
