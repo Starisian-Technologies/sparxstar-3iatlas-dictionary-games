@@ -157,6 +157,72 @@ describe('the session is as long as the player asked', () => {
     });
 });
 
+describe('an empty calibration pack is not an empty language', () => {
+    /*
+     * A learner on the runway is served `?swadesh=true`, because a runway
+     * topped up with words they may never have met is not a runway. For a
+     * language whose corpus carries no universal entries that request comes
+     * back EMPTY — and the shell sent the player to setup with "there are no
+     * words yet" for a language with plenty.
+     *
+     * The selection-level relaxations (`universalOnly: false` on an empty
+     * slice) could not save it: they re-select from an array that is already
+     * empty. The unfiltered pack is already being fetched alongside it.
+     */
+    const routeSplitPacks = () =>
+        jest.fn(async (url) => {
+            const u = String(url);
+            if (u.includes('/domains')) {
+                return {
+                    ok: true,
+                    status: 200,
+                    json: async () => ({ ok: true, data: { domains: [] } }),
+                };
+            }
+            /* The calibration request. Nothing on the universal list here. */
+            const words = u.includes('swadesh=true') ? [] : WORDS;
+            return { ok: true, status: 200, json: async () => ({ ok: true, data: { words } }) };
+        });
+
+    it('deals from the unfiltered pack rather than refusing to start', async () => {
+        window.fetch = routeSplitPacks();
+        const { container, unmount } = mount(baseProps());
+        await settle();
+
+        await click(findChip(container, '10'));
+        await click(findButton(container, 'Start'));
+
+        expect(container.textContent).not.toContain('There are no words');
+        const deck = persistedDeck();
+        expect(deck).not.toBeNull();
+        expect(deck).toHaveLength(10);
+        unmount();
+    });
+
+    it('still reports an empty language as empty', async () => {
+        /* The guard has to keep doing its job: nothing anywhere is still
+         * nothing, and the player is told rather than dropped into a round. */
+        window.fetch = jest.fn(async (url) => {
+            if (String(url).includes('/domains')) {
+                return {
+                    ok: true,
+                    status: 200,
+                    json: async () => ({ ok: true, data: { domains: [] } }),
+                };
+            }
+            return { ok: true, status: 200, json: async () => ({ ok: true, data: { words: [] } }) };
+        });
+        const { container, unmount } = mount(baseProps());
+        await settle();
+
+        await click(findChip(container, '10'));
+        await click(findButton(container, 'Start'));
+
+        expect(persistedDeck()).toBeNull();
+        unmount();
+    });
+});
+
 describe('a round the corpus cannot fill is explained, not started', () => {
     it('names the real length and waits for the player', async () => {
         window.fetch = routeFetch(WORDS.slice(0, 6));

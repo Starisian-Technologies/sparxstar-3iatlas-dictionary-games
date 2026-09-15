@@ -777,7 +777,28 @@ export default function GameShell({
                 setPhase('setup');
                 return;
             }
-            if (fetchedWords.length === 0) {
+            /*
+             * AN EMPTY CALIBRATION PACK IS NOT AN EMPTY LANGUAGE.
+             *
+             * `fetchedWords` is requested with `universalOnly` while a learner
+             * is on the runway, so for a language whose corpus has no universal
+             * entries it comes back empty — and this guard sent the player back
+             * to setup with "there are no words yet", for a language that has
+             * plenty.
+             *
+             * The selection-level relaxations further down (`universalOnly:
+             * false` on an empty or over-long slice) could not save it: they
+             * re-select from an array that is already empty.
+             *
+             * `neutralWords` is the unfiltered pack, already being fetched
+             * whenever the primary one is narrowed — the same substitution the
+             * setup preview makes with `previewPack`. Wait for it before
+             * declaring anything empty, and only then say so.
+             */
+            if (packIsNarrowed && neutralLoading) return;
+            const dealPack =
+                fetchedWords.length > 0 || !packIsNarrowed ? fetchedWords : neutralWords;
+            if (dealPack.length === 0) {
                 setSetupError(SHORTAGE_MESSAGE.empty);
                 setPhase('setup');
                 return;
@@ -794,7 +815,7 @@ export default function GameShell({
              * still something the player can do about it.
              */
             const { playable: playableWords, reasons } = partitionForGame(
-                fetchedWords,
+                dealPack,
                 selectedGame,
                 sourceLanguage ?? '',
                 language
@@ -1057,6 +1078,12 @@ export default function GameShell({
         gameSetLoading,
         gameSetError,
         fetchedWords,
+        /* The neutral pack is a real input now, not just a preview source:
+         * the deal falls back to it when calibration narrows the primary
+         * pack to nothing. See the guard above. */
+        packIsNarrowed,
+        neutralLoading,
+        neutralWords,
         wordCount,
         selectedGame,
         selectedDomain,

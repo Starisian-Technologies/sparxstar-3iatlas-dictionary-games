@@ -80,7 +80,11 @@ const WORDS = Array.from({ length: 40 }, (_, i) => ({
 const routeFetch = () =>
     jest.fn(async (url) => {
         if (String(url).includes('/domains')) {
-            return { ok: true, status: 200, json: async () => ({ ok: true, data: { domains: [] } }) };
+            return {
+                ok: true,
+                status: 200,
+                json: async () => ({ ok: true, data: { domains: [] } }),
+            };
         }
         return { ok: true, status: 200, json: async () => ({ ok: true, data: { words: WORDS } }) };
     });
