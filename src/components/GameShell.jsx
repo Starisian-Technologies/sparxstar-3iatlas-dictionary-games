@@ -21,7 +21,14 @@ import {
 import { emptyRecent, remember } from '../recent.js';
 import LeaveGameDialog from './LeaveGameDialog.jsx';
 import PointsBurst from './PointsBurst.jsx';
-import { playCorrect, playIncorrect, playStreak, soundEnabled, setSoundEnabled } from '../sound.js';
+import {
+    playCorrect,
+    playIncorrect,
+    playStreak,
+    primeSound,
+    setSoundEnabled,
+    soundEnabled,
+} from '../sound.js';
 import {
     ADJUST,
     ADJUST_MESSAGE,
@@ -338,6 +345,12 @@ export default function GameShell({
      * re-render anything and must survive until the player answers.
      */
     const [shortRound, setShortRound] = useState(null);
+    /*
+     * Set when the round was filled by reaching past the learner's usual band.
+     * Distinct from `shortRound`: that one is asked BEFORE the round, this one
+     * is told during it, because there is nothing to decide.
+     */
+    const [widenNotice, setWidenNotice] = useState(null);
     const pendingDeckRef = useRef(null);
     /*
      * The reward moment for the answer just given.
@@ -1005,6 +1018,29 @@ export default function GameShell({
                 return;
             }
 
+            /*
+             * THE ROUND IS FULL LENGTH — BECAUSE IT REACHED FOR IT.
+             *
+             * `planRound` reports `widened` when it had to fill the round from
+             * outside the learner's permitted pools. That was being discarded
+             * here, and the only notice shown was for a SHORT round — so the
+             * trade-off this shell deliberately makes on the player's behalf
+             * (longer words rather than a two-question session) happened
+             * silently whenever the widening succeeded, which is most of the
+             * time. A full deck of harder words is the case the player is least
+             * likely to notice and most likely to feel.
+             *
+             * Said once, on the round it applies to, and never as a warning:
+             * nothing is wrong, and the round is the length they asked for.
+             */
+            if (plan.widened) {
+                setWidenNotice(
+                    'Some words in this round are a little longer than usual — there were not enough short ones for a full round.'
+                );
+            } else {
+                setWidenNotice(null);
+            }
+
             await startWithDeck(sliced, token);
         };
 
@@ -1047,6 +1083,17 @@ export default function GameShell({
          * number that could not change.
          */
         (uuid, outcome, attempts, xp, timeMs, hintsUsed = 0) => {
+            /*
+             * UNLOCK AUDIO HERE, SYNCHRONOUSLY, WHILE THE TAP IS STILL LIVE.
+             *
+             * The sounds play inside the promise chain below, after an
+             * IndexedDB write. That callback has left the tap's transient user
+             * activation by then, so a context created at that point is
+             * suspended and the first correct answer of a session is silent.
+             * This line costs nothing after the first call.
+             */
+            primeSound();
+
             /*
              * Chain onto pendingResultRef so that back-to-back synchronous calls
              * (e.g. the final onResult + onComplete pair in DomainFlash) are serialized.
@@ -1734,6 +1781,15 @@ export default function GameShell({
                         {adaptive ? 'Adjusts as you learn' : 'Stays the same'}
                     </button>
                 </div>
+
+                {widenNotice && (
+                    <p
+                        role="status"
+                        className="shrink-0 px-3 py-1.5 text-center text-xs text-slate-600 dark:text-slate-300"
+                    >
+                        {widenNotice}
+                    </p>
+                )}
 
                 {adjustNotice && (
                     <p className="shrink-0 px-3 py-1.5 text-center text-xs text-slate-600 dark:text-slate-300">

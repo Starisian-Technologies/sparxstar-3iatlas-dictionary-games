@@ -84,6 +84,26 @@ export function resetSoundForTests() {
     context = null;
 }
 
+/**
+ * Create and unlock the audio context WHILE A GESTURE IS STILL IN HAND.
+ *
+ * Every sound in this file is played after `await recordResult(...)`, which
+ * includes an IndexedDB write. By the time it resolves the callback has left
+ * the transient user activation the tap gave it, and Chromium will create or
+ * resume an AudioContext in the `suspended` state — so the first correct answer
+ * of a session is silent, which is exactly the one that most needs not to be.
+ *
+ * Called synchronously from the answer handler, before any await. Cheap and
+ * idempotent: after the first call it is a state check. Safe to call when sound
+ * is off, where it does nothing at all rather than building a context nobody
+ * asked for.
+ */
+export function primeSound() {
+    /* Not `ensureContext()`: that is the same work, but naming this separately
+     * keeps the reason legible at the call site, where the ordering matters. */
+    return ensureContext() !== null;
+}
+
 function ensureContext() {
     if (!soundEnabled()) return null;
     const Ctor = audioContextClass();
