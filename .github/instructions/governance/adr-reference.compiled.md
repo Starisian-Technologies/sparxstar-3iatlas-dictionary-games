@@ -1,4 +1,4 @@
-# Platform Decisions — Auto-synced from registry@b6aafc3
+# Platform Decisions — Auto-synced from registry@3cea50e
 # DO NOT EDIT — this file is overwritten on every registry change
 
 - ADR-001: Relational canonical record; graph is derived projection only
@@ -38,3 +38,6 @@
 - ADR-035: Set audio constraints from a named capture profile, never from a single platform-wide ceiling
 - ADR-036: Separate elicitation pacing from acoustic prosody; a paced reader measures nothing
 - ADR-037: A Pull Request Merges on Green CI *and* Zero Open Review Threads
+- ADR-038: `sparxstar-starmus-audio` is the Spoken Audio Node — a Node/TypeScript service, not a WordPress plugin
+- ADR-039: The archive never edits audio — release rendering is a separate pipeline
+- ADR-040: The object storage backend for spoken audio is Cloudflare R2

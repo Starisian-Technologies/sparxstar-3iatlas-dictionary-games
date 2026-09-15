@@ -1,4 +1,4 @@
-# Open Questions — Auto-synced from registry@b6aafc3
+# Open Questions — Auto-synced from registry@3cea50e
 # DO NOT EDIT
 
 # Open Questions
@@ -305,3 +305,116 @@ A floor set from architecture rather than from what the measurements require is
 how the platform-wide 16 kHz cap arose in the first place. Routes to AIWA +
 the acoustic-analysis owner. ADR-035's Consequences carry a starting point for
 them to react to; no repository may implement a value before it is ruled on.
+## OQ-022 — Which repository is the single home for the Starmus↔ESU intake contract? [OPEN]
+
+[ADR-034](decisions/ADR-034-capture-experience-vs-audio-lifecycle-split.md)
+filed the Starmus↔ESU seam in this registry as
+[`contracts/spoken-audio-asset-to-records.md`](../contracts/spoken-audio-asset-to-records.md).
+The 2026-09-10 owner ruling describes the same seam as the **Starmus–ESU Intake
+Contract** and raised a separate contracts repository as its home.
+[ADR-038](decisions/ADR-038-spoken-audio-node-is-a-node-service.md) records the
+ruling's substance and deliberately does **not** settle the home: its text says
+the contract is defined once, in one home, with both builders, and routes the
+choice of repository here.
+
+A note on the candidate's name, because it has already caused one broken
+reference: the session said "platform-contracts", and this registry's
+[2026-08-24 repository-reference correction report](../docs/reports/2026-08-24-repository-reference-correction-report.md)
+records that `sparxstar-platform-contracts` does not exist while
+`sparxstar-contracts-registry` does. So the candidate, if it is chosen, is
+`sparxstar-contracts-registry` — or a new repository someone decides to create,
+which is a different answer and should be said out loud rather than implied by a
+name.
+
+That is two candidate homes for one fact, which is the condition the platform's
+one-home rule exists to prevent. Unanswered:
+
+1. Whether seam contracts live in this registry alongside the ADRs that create
+   them, or in a separate contracts repository that both builders depend on as a
+   versioned package. If a separate one, it is `sparxstar-contracts-registry` or
+   a new repository created for the purpose — not the `platform-contracts` name
+   the session used, which resolves to nothing, as the paragraph above records.
+2. If a separate repository, what happens to
+   `contracts/spoken-audio-asset-to-records.md` specifically — moved, or left as
+   the record with a package generated from it. This question is about the
+   intake seam only. The capture→ingestion and elicitation-pacing contracts are
+   separate seams and moving them is not asked here, nor implied by an answer
+   to this.
+3. Which side's CI runs the shared conformance suite the contract calls for.
+
+This is a governance-home question, not an architecture one: both answers work
+technically, and the cost of getting it wrong is a duplicated contract that
+drifts. Until it is ruled on, neither builder implements a guessed wire shape
+and the contract text stays where ADR-034 put it. Filed 2026-09-10 from the
+Starmus repo-split cleanup session.
+
+## OQ-023 — Who owns consent, rights, and the CMS host for the spoken-audio stack? [OPEN]
+
+[ADR-034](decisions/ADR-034-capture-experience-vs-audio-lifecycle-split.md)
+demotes the CMS capture product from owner to host and strips CMS-shaped
+capabilities from the Spoken Audio Node, and
+[ADR-038](decisions/ADR-038-spoken-audio-node-is-a-node-service.md) fixes the
+four service owners. Neither names an owner for three capabilities the v1.0
+Starmus architecture held, and the Starmus specification stands at
+`status: review` with all three unassigned. Whether that status may advance
+before they are owned is itself part of this question: stating it here as a
+rule would make this entry normative, and this file stays question-only until a
+ratifying ADR resolves it. Raised by Max Barrett on 2026-09-14.
+
+The first two carry a proposed owner below, with its grounds; the third has
+none, and says so. They are proposals rather than rulings either way — naming
+the owner is the platform owner's call, and the point of filing all three
+together is that they are the same kind of question, not that they are equally
+far along.
+
+1. **Consent capture and verification.** *Proposed owner: Helios
+   (`sparxstar-helios-trust`).* [INV-010](invariants.md#inv-010--one-identity-authority-opaque-refs-everywhere)
+   makes Helios the sole minting authority for `contributor_id`, and
+   [ADR-012](decisions/ADR-012-contributor-identity-keystone.md) already reasons
+   about consent authority shifting between guardian, school and adult
+   contributor — so the consent lifecycle is already Helios-shaped. What is owed
+   is a contract: which party verifies consent scope at the moment of a governed
+   action, what the capture UI may assert (today it reports `consentGranted`
+   from a browser-local flag, which cannot represent a per-session or hook-based
+   grant), and what an asset arriving without verifiable consent becomes. Note
+   that ADR-011 binds here: the answer cannot be to refuse the recording.
+
+2. **The rights, credits and agreement *record* — its schema and its capture at
+   contribution time.** *Proposed owner for the record: the governed-artifact
+   lineage layer (`INV-012`, this repo's `contracts/governed-artifact-lineage.md`).*
+
+   Scoped deliberately, because two neighbouring records already answer parts of
+   this and answering it again would contradict them.
+   [ADR-039](decisions/ADR-039-archive-never-edits-audio.md) places commissioning
+   and rights **for releases** with the rights module, so release-rights
+   ownership is not open. And GAL states its own boundary: it "does **not**
+   determine legal rights, ownership, or governing law", routing those to a
+   Legal & Compliance standard and policy registry that do not yet exist. So GAL
+   is proposed as the owner of the *record* — it already owns
+   `contributor_ref`, `ArtifactGovernanceDeclaration` and `Release Receipt`,
+   which is the vocabulary these fields belong to — and explicitly not as the
+   authority that decides what anyone's rights are.
+
+   What remains genuinely unowned is narrower than "rights": which party captures
+   an agreement at contribution time, in what shape, and what a contribution
+   without one becomes. It is
+   `Proposed` and not Accepted, so this question is partly blocked on its
+   ratification. What is owed is the mapping from the v1.0 `FIELD_MAP`'s
+   rights/credits/agreement fields onto that vocabulary.
+
+3. **The CMS host.** *No owner proposed — this one genuinely has no candidate in
+   the registry.* ADR-034 says what the host keeps (its own templates,
+   shortcodes, admin screens and product-local persistence) but not which
+   repository or team maintains it.
+
+   Two things that read as rules here are recorded where they belong rather
+   than stated as rules by this entry, which stays question-only: the Starmus
+   specification is what holds its CMS-shaped capabilities as superseded in
+   architecture and not abandoned in fact (`REQ-STARMUS-051`), and the
+   field-by-field disposition of the v1.0 `FIELD_MAP` against the DVE canonical
+   schema is v1.0 action D-01, which was called for and never done. What is open
+   *here* is only who owns the host — and, because nobody does, what an owner
+   would be taking on.
+
+Tracked in the product specification registry as `OI-STARMUS-001`, whose
+resolution points back here.

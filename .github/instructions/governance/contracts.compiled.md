@@ -1,4 +1,4 @@
-# Cross-Repo Contracts — Auto-synced from registry@b6aafc3
+# Cross-Repo Contracts — Auto-synced from registry@3cea50e
 # DO NOT EDIT — this file is overwritten on every registry change
 
 
@@ -100,7 +100,7 @@ Drafted in the WordPad ↔ corpus governance session as GAL's deferred sibling (
 <!-- source: contracts/elicitation-pacing-sync.md -->
 # Contract: Elicitation Pacing ↔ Recorder
 
-**Status:** Proposed. Binding when [ADR-036](../standards/decisions/ADR-036-elicitation-pacing-is-not-acoustic-prosody.md) is Accepted.
+**Status:** Its **division of responsibility and its prohibitions bind** — [ADR-036](../standards/decisions/ADR-036-elicitation-pacing-is-not-acoustic-prosody.md) was Accepted on 2026-09-12. The items under *Still owed* are unsettled and neither side implements a guess at them.
 **Home:** this registry.
 **Sides:** the **elicitation pacing package** (emitter) and any **host that records or plays audio** alongside it — today the capture UI package, embedded by a product.
 **Concretizes:** ADR-036's rule that the reader synchronizes through injected adapters and typed events, never shared globals.
@@ -174,7 +174,7 @@ Read from the package's `src/types.ts`, not proposed.
 - Any symbol, event, field or emitted record inside the reader naming or
   implying a measured prosodic value.
 
-## Owed before this contract is Accepted
+## Still owed
 
 1. **Whether the host needs an event the closed set does not carry** —
    specifically for tap calibration, which is specified but not implemented.
@@ -336,8 +336,11 @@ Developed in the WordPad ↔ corpus governance session from the multilingual-use
 <!-- source: contracts/spoken-audio-asset-to-records.md -->
 # Contract: Asset → Records
 
-**Status:** Proposed. Binding when [ADR-034](../standards/decisions/ADR-034-capture-experience-vs-audio-lifecycle-split.md) and [ADR-036](../standards/decisions/ADR-036-elicitation-pacing-is-not-acoustic-prosody.md) are Accepted.
-**Home:** this registry.
+**Status:** Its **ownership split and its prohibitions bind** — [ADR-034](../standards/decisions/ADR-034-capture-experience-vs-audio-lifecycle-split.md) and [ADR-036](../standards/decisions/ADR-036-elicitation-pacing-is-not-acoustic-prosody.md) were Accepted on 2026-09-12. Its **record shapes do not exist yet**: the items under *Still owed* are unsettled and neither side implements a guess at them.
+**Amended by:** [ADR-038](../standards/decisions/ADR-038-spoken-audio-node-is-a-node-service.md), which settles the delivery direction (owed item 3 below) and leaves the contract's single home open as OQ-022.
+**Home:** this registry — *where it lives today, not a settled answer.* Which
+repository is its single home is open as OQ-022, and this field moves when that
+is ruled on.
 **Sides:** the **Spoken Audio Node** (producer of assets and measurements) and **ESU** (holder of the reviewed linguistic record).
 **Concretizes:** ADR-034's assignment of transcript and translation records to ESU, and ADR-036's separation of measurement from interpretation.
 
@@ -399,7 +402,7 @@ ESU, or a meaning asserted by the Node, is a defect in this seam.
 - A third service reading the machine transcript and publishing it as though
   it were reviewed.
 
-## Owed before this contract is Accepted
+## Still owed
 
 1. **The asset identifier's shape and where it is minted.** The capture
    contract has the client minting a UUID at capture; whether that value is the
@@ -410,12 +413,36 @@ ESU, or a meaning asserted by the Node, is a defect in this seam.
    and their precision. Owed by the acoustic-analysis owner. This is the same
    gap OQ-021 names on the capture side; a measurement's admissibility floor
    and its serialization are one decision, not two.
-3. **The delivery direction** — whether ESU pulls measurements or the Node
-   emits them, and the ordering guarantee either way. Owed jointly. Existing
-   platform rules on terminal outcomes before delivery apply to whichever shape
-   is chosen; this contract does not restate them.
+3. ~~**The delivery direction**~~ — **decided.**
+   [ADR-038](../standards/decisions/ADR-038-spoken-audio-node-is-a-node-service.md)
+   rules that the Node **emits** an intake event and ESU requests temporary
+   authorized access when it needs bytes. ADR-038 requires the event to carry an
+   idempotency key, so a replay is detectable, and to state ordering rules — it
+   does not choose the mechanism, and neither does this contract. An earlier
+   draft of this item named a per-asset sequence; that was a wire decision made
+   outside the record that authorizes it, and it is withdrawn. Existing platform
+   rules on terminal outcomes before delivery apply and are not restated here.
 
-**No repository implements a guess at items 1–3.**
+   Still owed on this item: the ordering mechanism, and the field names that
+   express it.
+
+   Still owed on this item: nothing about direction; everything about shape.
+   The concrete field names belong to the intake contract, whose single home is
+   **OQ-022** — see below.
+
+**No repository implements a guess at items 1–2, or at the intake event's field
+names.**
+
+## Whose contract this is
+
+OQ-022 asks which repository is the single home for the Starmus↔ESU intake
+contract: this file, or a separate contracts repository — `sparxstar-contracts-registry`
+or one created for the purpose, not the `platform-contracts` name the session
+used, which resolves to no repository. Until that is
+ruled on, this file stays where ADR-034 put it and no second copy is written
+anywhere. The Spoken Audio Node models the intake event as a **domain** type and
+ships no adapter mapping it to a wire format, which is what "no repository
+implements a guess" means in practice on this seam.
 
 ## Enforcement
 
@@ -426,9 +453,10 @@ capture seam. It does not exist yet; neither does the Node.
 <!-- source: contracts/spoken-audio-capture-to-ingestion.md -->
 # Contract: Capture → Ingestion
 
-**Status:** Proposed. Binding when [ADR-034](../standards/decisions/ADR-034-capture-experience-vs-audio-lifecycle-split.md) and [ADR-035](../standards/decisions/ADR-035-capture-profiles-not-a-platform-audio-ceiling.md) are Accepted.
+**Status:** Its **division of responsibility and its prohibitions bind** — [ADR-034](../standards/decisions/ADR-034-capture-experience-vs-audio-lifecycle-split.md) and [ADR-035](../standards/decisions/ADR-035-capture-profiles-not-a-platform-audio-ceiling.md) were Accepted on 2026-09-12. Its **wire shape does not exist yet**: the items under *Still owed* are unsettled, and no side implements a guess at them. A binding contract with an open shape is the point — it stops either builder inventing the shape while the boundaries hold.
+**Corrected by:** [ADR-038](../standards/decisions/ADR-038-spoken-audio-node-is-a-node-service.md), which moves transport and storage off the Node — see the division of responsibility below.
 **Home:** this registry.
-**Sides:** the **capture UI package** (producer) and the **Spoken Audio Node** (consumer).
+**Sides:** the **capture UI package** (producer), the **media ingest service** (transport), and the **Spoken Audio Node** (authorizer, and consumer of the registered asset). ADR-038 made this a three-party seam; it was written as two, and the clauses below name their owning party rather than saying "the consumer" or "both sides" — wording that left the transport's obligations unstated.
 **Concretizes:** ADR-034's role split at the point where a recording leaves the browser, and ADR-035's requirement that a capture profile travel with the asset.
 
 ---
@@ -437,8 +465,9 @@ capture seam. It does not exist yet; neither does the Node.
 
 ADR-034 divides the stack but does not say what crosses the seam. Without that,
 each side invents its own answer and the split reproduces the drift it was
-filed to end. This states what the producer must send and what the consumer
-must accept, in the terms both sides can verify in their own code.
+filed to end. This states what the producer must send, what the transport must
+accept and preserve, and what the Node must register — in terms each party can
+verify in its own code.
 
 ## Division of responsibility
 
@@ -446,87 +475,289 @@ must accept, in the terms both sides can verify in their own code.
 | --- | --- |
 | Microphone access, recording, local/offline handling, capture UX | capture UI package |
 | Chunked upload client (retry, resume, backoff) | capture UI package |
-| Receiving, validating, and acknowledging chunks | Spoken Audio Node |
-| Integrity verification, immutable object storage, derivatives, quality measurement, processing jobs | Spoken Audio Node |
+| Receiving, validating, and acknowledging chunks; object storage operations; issuing short-lived access URLs | media ingest service |
+| Object storage backend: **Cloudflare R2** | media ingest service |
+| Authorizing upload and authorizing access | Spoken Audio Node |
+| Acceptance, integrity verification, derivatives, quality measurement, processing jobs | Spoken Audio Node |
 
-**The producer never writes to object storage directly, and the consumer never
-opens a microphone.** Neither side re-implements the other's step.
+**ADR-038 corrects the first version of this table**, which gave chunk receipt
+and immutable object storage to the Node. Transport is the standalone,
+media-type-agnostic ingest service's. The Node's ownership is named rather than
+described as "everything after": **acceptance, integrity, quality assessment,
+derivative production, acoustic measurement, processing jobs, and authorization
+of every read.** Storage operations and URL issuance stay the transport's even
+after the asset exists, which an earlier draft of this paragraph blurred.
+
+The producer therefore transfers to the ingest service under an authorization
+the Node granted — it still never writes to object storage on its own account,
+and the Node still never opens a microphone. No party re-implements another's
+step.
 
 ## Terms fixed by existing code
 
-These are read from the producer's working tree, not proposed. Both sides build
-to them; either side changing one is a change to this contract.
+These are read from the producer's working tree, not proposed. Every party on
+this seam builds to them — capture UI, media ingest and the Node, which is three
+and not the two an earlier wording implied — and any party changing one is a
+change to this contract.
 
-- **Resumable chunked upload.** The producer uses TUS (`tus-js-client`). The
-  consumer exposes a TUS-compatible endpoint.
+- **Resumable chunked upload.** The producer uses TUS (`tus-js-client`). A
+  TUS-compatible endpoint is exposed by the media ingest service, not by the
+  Node (ADR-038).
 - **Chunk size is capped at 512 KB** and clamped by the producer. A larger
   chunk is a producer defect.
-- **Per-chunk checksums are mandatory**, `sha256` as the producer currently
-  sends. A chunk whose checksum is missing or does not verify is **not
-  discarded**: the consumer persists what it received, marks the asset's
-  integrity as failed, and does not treat it as a clean source. Refusing intake
-  would contradict ADR-011's unconditional-capture rule, which this contract
-  applies to integrity exactly as it applies to a missing profile below — the
-  speaker does not lose their recording because a byte range disagreed.
+- **Per-chunk checksums are mandatory.** The producer currently sends `sha256`;
+  whether that remains the algorithm is owed item 4 below, which is the only
+  binding statement about it. Read the algorithm named here as a description of
+  today's producer, not a term the transport can build to and forget.
+
+  Integrity has two owners since ADR-038 and they are not the same check:
+
+  - **Chunk-level, the transport's.** The media ingest service verifies each
+    chunk as it arrives and reports the outcome. It does **not** discard a
+    chunk that fails: it persists what it received and says so.
+  - **Asset-level, the Node's.** The Node records the assembled original's
+    integrity as `verified`, `failed`, or `unverified`. Only the third of those
+    is specified today: **no asset-level checksum is defined on this seam**, so
+    a Node that has nothing to verify against records `unverified` and treats
+    the asset as kept-but-not-a-clean-source. It does not invent a field to
+    check. Defining that checksum — whether the producer sends one, and under
+    what key — is owed (item 6 below); `verified` and `failed` become reachable
+    when it is, and not before.
+
+    A chunk-level integrity failure is not one of these states and never
+    becomes `unverified`. `unverified` describes an asset that arrived intact
+    as far as the transport could tell and has no whole-asset checksum to
+    confirm it — not one known to be damaged. The two are different facts and
+    a Node must not report the second as the first.
+
+    **Nothing here refuses a recording, and nothing here may be implemented as
+    a refusal.** The transport persists what it received and reports the
+    outcome, as the clause above binds it to; the producer retains its copy
+    under ADR-011 and does not delete it on a failed transfer. What is *not*
+    defined is how a transfer whose chunks keep failing reaches a durable
+    terminal outcome — a failed-integrity state the Node can register, and an
+    acknowledgement that lets the producer stop retrying something that cannot
+    succeed. Until that is settled (item 7 below), such a recording is retained
+    at both ends and accepted at neither, which is a gap to close and not a
+    licence to discard it. INV-009 governs: deny nothing, quarantine instead.
+
+    The three states are named now rather than later because the difference
+    matters and is easy to collapse: a checksum that did not match and a
+    checksum that was never supplied are different facts about a recording, and
+    a schema that has only a boolean forces them together.
+
+  Neither outcome refuses intake. That would contradict ADR-011's
+  unconditional-capture rule, which this contract applies to integrity exactly
+  as it applies to a missing profile below — the speaker does not lose their
+  recording because a byte range disagreed. What a failed check costs the asset
+  is its standing as a clean source for measurement, not its existence.
 - **Every asset carries a client-minted UUID** (`crypto.randomUUID()`),
   transmitted as upload metadata. The producer refuses to run in a context
   where secure UUID generation is unavailable rather than falling back.
-- **There is no full-file upload endpoint.** Adding one is forbidden on both
-  sides: it defeats resumability on the networks this platform is built for.
+- **There is no full-file upload endpoint.** Adding one is forbidden on every
+  side: it defeats resumability on the networks this platform is built for.
+  ADR-038 states the same rule from the other end — no re-upload-from-scratch of
+  a partially transferred original. A failed transfer is queued and resumed from
+  the last acknowledged offset.
+
+## Who owns the accepted asset
+
+**Starmus Audio — the Spoken Audio Node — owns the accepted acoustic asset.**
+This restates [ADR-038](../standards/decisions/ADR-038-spoken-audio-node-is-a-node-service.md),
+which already places the asset and its acoustic measurements with that service;
+it is written out here because a reading had appeared in which the capture UI
+owned the asset by virtue of holding the bytes first, and this is the seam where
+that reading did damage. Max Barrett confirmed the correction on 2026-09-14.
+
+Recorded as a restatement and not as a ruling of its own. A platform decision
+taken in a contract rather than an ADR is the failure the R2 backend needed
+[ADR-040](../standards/decisions/ADR-040-object-storage-backend-is-cloudflare-r2.md)
+to repair; this one needs no new ADR, because the decision already exists.
+
+The producer holds a *recording on a device* and is responsible for it from the
+moment the contributor submits it until the Node accepts it: that is what the
+offline queue and the no-deletion-before-acceptance rule are for.
+
+The obligation starts at submission, and saying so matters. Before that, the
+recording is the contributor's own draft and retaking or discarding it is their
+choice — [ADR-039](../standards/decisions/ADR-039-archive-never-edits-audio.md)
+puts retake and discard in the capture experience for exactly that reason. Read
+without the starting point, "no deletion before acceptance" would oblige a
+contributor to keep every take they did not want, which is neither what ADR-011
+protects nor anything this seam should impose. What ADR-011 forbids is the
+*platform* discarding contributed material; a person deciding their own
+unsubmitted draft is not that. The transport holds *bytes in motion* and owns neither
+end of them. Once the Node accepts, the asset is the Node's — its identity, its
+integrity, its lifecycle state, its derivatives and its measurements — and the
+producer's copy is a cache it may release.
+
+The practical consequence, and the reason this needed saying: the capture UI
+never decides what an asset *is*. It does not rule on admissibility, it does not
+name a codec it cannot establish, and it does not treat "the bytes left the
+device" as "the platform has it". The point at which responsibility transfers is
+acceptance by Starmus Audio, and nothing earlier.
+
+## Storage backend
+
+**The object storage backend is Cloudflare R2**, ratified by
+[ADR-040](../standards/decisions/ADR-040-object-storage-backend-is-cloudflare-r2.md).
+
+Recording it here alone was the first attempt, on the grounds that ADR-021
+forbids editing an Accepted ADR in place. That left this contract as the only
+canonical record of a platform decision, which leaves the decision trail
+incomplete — so the ruling has its own ADR, extending ADR-038 rather than
+amending it, and this section states what the ruling means for the parties on
+this seam.
+
+The binding part is the operation, not the vendor's surface: R2 is where objects
+live. The **media ingest service** issues the short-lived access URLs, as the
+responsibility table above and ADR-038 both have it — naming the backend does
+not move URL issuance to it. That distinction is the authorization boundary:
+a URL minted by the store rather than by the service is one the Node never
+authorized, and an implementation reading this section alone could have built
+exactly that. No other party addresses the store. The Node never writes to it on its own account, the producer never receives
+a durable URL to it, and nothing outside the transport encodes an R2 path,
+bucket name or endpoint — ADR-038's prohibition on durable storage URLs in
+events and records is unaffected by naming the backend, and naming it is not
+permission to leak it.
 
 ## Terms fixed by ADR-035
 
 - **A capture profile travels with the asset** — `conversation`,
-  `documentation`, or `import` — recorded on the asset by the consumer so a
-  later reader can tell whether a measurement taken from it is admissible.
+  `documentation`, or `import` — passed through unchanged by the transport and
+  recorded on the asset by the Node, so a later reader can tell whether a
+  measurement taken from it is admissible.
+- **The transport preserves the capture profile and its attainment record, and
+  interprets neither.** It carries both to the Node byte-for-byte: it does not
+  validate the profile name against a list, does not compute or amend
+  attainment, does not drop an attainment record it finds unfamiliar, and does
+  not reject an asset on the strength of either. The media ingest service is
+  media-type-agnostic by ADR-038 and therefore has no basis for reading these
+  fields; a transport that interpreted them would be making an admissibility
+  judgement that belongs to the Node, at a layer that cannot see what the
+  judgement is for. Losing them is the same failure by omission: an asset whose
+  profile did not survive the transport arrives indistinguishable from one
+  captured without a profile at all, and those mean different things.
 - **An asset that arrives with no profile is stored, and is not admissible as
-  a source for acoustic measurement.** It is not rejected: ADR-011's
-  unconditional-capture rule holds, so the material is kept and the limitation
-  is recorded, never used as grounds to discard a contributor's recording.
-- **The consumer performs no transcode on the ingestion path.** `import` means
-  the artifact is preserved as received. Derivatives are additional objects;
-  the received bytes are immutable.
-- **The consumer never applies a platform-wide sample-rate, bitrate, channel
-  or codec ceiling.** Constraints belong to the profile the product chose.
+  a source for acoustic measurement.** Neither the transport nor the Node
+  rejects it: ADR-011's unconditional-capture rule binds every party on this
+  seam, so the material is kept and the limitation is recorded, never used as
+  grounds to discard a contributor's recording.
+- **No party transcodes on the ingestion path.** The transport stores the bytes
+  it received, unaltered; the Node registers those bytes as the original.
+  `import` means the artifact is preserved as received. Derivatives are
+  additional objects produced by the Node; the received bytes are immutable.
+- **Neither the transport nor the Node applies a platform-wide sample-rate,
+  bitrate, channel or codec ceiling.** Constraints belong to the profile the
+  product chose.
 
 ## Forbidden on this seam
 
+- Any party altering or discarding received bytes **on this seam**. The
+  transport persists what arrived even when a chunk checksum fails; the Node
+  records the integrity outcome. Neither treats a failed check as grounds to
+  drop the material.
+
+  This is an intake and transfer rule, and it does not reach past registration.
+  Read as a blanket prohibition it would forbid the consent-derived and lawful
+  destruction transitions ADR-013 and ADR-039 explicitly allow for raw audio as
+  retention-governed carrier: INV-009's no-loss guarantee is scoped to
+  contributions, and destruction under a retention rule or a consent withdrawal
+  is a governed act, not a party on this seam deciding a recording is not worth
+  keeping. What is forbidden here is exactly that: discarding *during intake*,
+  on the strength of a failed check or an unreadable field.
 - The producer reaching a CMS. The endpoint is currently CMS-shaped
   (`/wp-json/…/tus` in the producer's tree); under ADR-034 the endpoint becomes
   configuration supplied by the host, and the producer keeps no CMS path,
   nonce, or page global.
 - The consumer rendering anything, or holding the reviewed transcript — that is
   ESU's, per the sibling contract.
-- Either side keeping a second editable copy of the other's source files.
+- Any party keeping a second editable copy of another's source files.
 
-## Owed before this contract is Accepted
+## Still owed
 
-Neither side may invent the other's shape. Each item is owed by the named side,
-from its own code, and this document is corrected from those answers:
+The boundaries above bind now. The wire shape below does not exist, and no side
+may invent the others'. Each item is owed by the named side, from its own code,
+and this document is corrected from those answers:
 
-1. **The consumer's endpoint path and auth model.** Owed by the Spoken Audio
-   Node once it exists. Until then the producer treats the endpoint as injected
-   configuration with no default.
+1. **The endpoint path and auth model.** Owed jointly by the media ingest
+   service and the Spoken Audio Node, which authorizes against it (ADR-038).
+   Until then the producer treats both the endpoint and any auth header as
+   injected configuration with no default — which is what its code now does.
 2. **The upload metadata key set.** The producer sends `upload_uuid` plus
    product-supplied keys today; the agreed minimum set, and the profile's key
-   name, are owed jointly and belong here once both sides can name them.
+   name, are owed jointly and belong here once the producer, the transport and
+   the Node can name them together.
 3. **The acknowledgement and error envelope**, including which failures the
-   producer must retry and which are terminal. Owed by the consumer.
+   producer must retry and which are terminal. Owed by the ingest service, with
+   the Node's acceptance states alongside it. Note what the producer may not do
+   with the answer: ADR-011 keeps the recording either way, so a terminal
+   failure decides what happens next, never whether the material survives.
 4. **Whether `sha256` remains the checksum algorithm.** It is what the
    producer sends today, having been raised from `sha1` in the producer's
-   hardening work. The consumer must confirm it verifies the same algorithm.
-   Owed by the consumer, and a change here is a producer change too.
+   hardening work. The verifying side must confirm it verifies the same
+   algorithm; a checksum the Node cannot verify is recorded as *unverified*
+   rather than *failed*, and the material is kept either way.
 
-Routes to the Spoken Audio Node's builder and the capture UI package's builder
-jointly. **No repository implements a guess at items 1–4**; that is how phantom
+   **Owed by both verifying parties, named rather than left to "the
+   consumer"** — a word from when this seam had two sides, which on a
+   three-party seam can leave the obligation with neither. The **media ingest
+   service** confirms the algorithm it verifies chunks against; the **Spoken
+   Audio Node** confirms the algorithm for asset-level integrity, once item 6
+   settles whether an asset-level checksum exists at all. A change here is a
+   producer change too.
+
+5. **The upload metadata key name for the capture profile.** The producer sends
+   it under the name its own `starmus:complete` contract already fixes, rather
+   than inventing a second one, and will change to whatever this contract
+   settles. The producer omits the key entirely when it has no profile, so an
+   absent profile and an unreadable one stay distinguishable.
+
+6. **An asset-level checksum, or the decision not to have one.** Per-chunk
+   checksums say each range arrived intact; they do not say the assembled
+   original is the recording the device produced. Whether the producer computes
+   and sends a whole-asset digest — and under what key — is owed jointly. Until
+   it is settled the Node records `unverified`, which is the honest state, and
+   nothing implements a guessed field to make `verified` appear.
+
+7. **The terminal outcome for a transfer whose chunks keep failing their
+   checksums.** The transport persists what it received and reports it, and the
+   producer keeps its copy — so nothing is lost — but there is no defined way
+   for such a recording to be *accepted*, and no acknowledgement that tells the
+   producer's queue to stop retrying something that cannot succeed. It is
+   retained at both ends and accepted at neither.
+
+   What is owed is that outcome: a failed-integrity state the Node can register
+   against a partial, what the transport acknowledges so the queue can hold
+   rather than retry, and whether the producer's copy is then released or kept
+   pending a person. INV-009 sets the direction — quarantine, never deny — but
+   the shape is a three-party decision and no repository implements a guess at
+   it.
+
+Routes to the Spoken Audio Node's builder, the capture UI package's builder and
+the media ingest service's, jointly. **No repository implements a guess at items 1–7**; that is how phantom
 identifiers ship.
+
+## Consent, rights, and the CMS host
+
+Not settled on this seam, and named here so they are not mistaken for settled.
+Consent verification, the rights/credits/agreement record, and the CMS host all
+lost their owner when ADR-034 demoted the CMS product. All three are filed in
+[OQ-023](../standards/open-questions.md); **two carry a proposed owner and one
+does not.** Consent is proposed to Helios and the rights record to the
+governed-artifact lineage layer, both with their grounds. The CMS host has no
+candidate in this registry at all, and saying otherwise would make an unowned
+component look assigned. No party on this
+seam may assume another holds them, and the capture UI's browser-local
+`consentGranted` flag is not consent verification.
 
 ## Enforcement
 
-One shared conformance suite, run by **both** sides against the same cases — an
-upload the producer generates and the consumer accepts. Two suites that agree
-today is the failure mode this replaces. The suite does not exist yet; it is
-part of standing up the consumer.
+One shared conformance suite, run by **every** side against the same cases — an
+upload the producer generates, the transport accepts and acknowledges, and the
+Node registers. Two suites that agree today is the failure mode this replaces,
+and three parties make it likelier rather than less. The suite does not exist
+yet; it is part of standing up the Node and wiring it to the transport.
 
 
 <!-- source: contracts/the-locket-no-provider-held-key.md -->
