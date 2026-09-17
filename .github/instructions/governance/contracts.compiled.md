@@ -1,4 +1,4 @@
-# Cross-Repo Contracts — Auto-synced from registry@3cea50e
+# Cross-Repo Contracts — Auto-synced from registry@22c100a
 # DO NOT EDIT — this file is overwritten on every registry change
 
 
@@ -404,15 +404,77 @@ ESU, or a meaning asserted by the Node, is a defect in this seam.
 
 ## Still owed
 
-1. **The asset identifier's shape and where it is minted.** The capture
+**Read [ADR-038](../standards/decisions/ADR-038-spoken-audio-node-is-a-node-service.md)
+before adding anything here.** It is Accepted, and it settles far more of this
+seam in substance than the items below once implied. What remains owed is
+largely **shape**: how already-decided facts are serialized. Where that shape is
+written down is tracked by **OQ-022**, which is open and names two candidate
+homes — a separate contracts repository, and this file, which ADR-034 filed as
+the seam. This section does not pre-empt that: saying the shape "belongs to the
+intake contract" says which document, not which repository. An earlier revision
+of this section asked five questions that contradicted ADR-038; they are
+corrected below rather than left as a second reading of a ratified record.
+
+Each item names what is genuinely undecided and who owes it. **No answer is
+proposed here.**
+
+1. **Where the asset identifier is minted, and its format.** The capture
    contract has the client minting a UUID at capture; whether that value is the
    durable asset id, or the Node mints its own and maps to it, is not decided.
    Owed by the Spoken Audio Node's builder — and it must be decided before ESU
    stores a reference, or ESU will store the wrong one.
-2. **The measurement record's shape** — which measurements exist, their units,
-   and their precision. Owed by the acoustic-analysis owner. This is the same
-   gap OQ-021 names on the capture side; a measurement's admissibility floor
-   and its serialization are one decision, not two.
+
+   **The identifier is ratified; its wire key is not.** ADR-038 establishes
+   `audio_asset_id` as the immutable reference and derivative identifiers
+   alongside it: *"assets are referenced everywhere by an immutable
+   `audio_asset_id` and derivative identifiers."* That settles **the concept and
+   its name in decision text** — no repository may substitute a different
+   identifier for the asset.
+
+   It does not settle the **wire key**. Concrete field names belong to the
+   intake contract (item 3, home OQ-022), so a consumer must not read
+   `audio_asset_id` here as a ratified serialization key and start emitting it.
+   Owed: the value's format, the wire representation, and — for derivatives —
+   how a rendition in the ADR-038 ladder is addressed, given that the ladder
+   defines five classes but not how one is named.
+
+2. **The measurement record's units, precision and serialization.** Owed by the
+   acoustic-analysis owner.
+
+   **Which measurements exist is not open.** ADR-038's *Intake measurement
+   scope* enumerates them — container/codec validation, duration and timeline
+   verification, channel inspection, corruption/truncation, clipping/dropout,
+   loudness and true peak, signal/noise and intelligibility indicators, DC
+   offset, speech/non-speech ratio, server-side VAD, silence and long-gap
+   detection, overlapping-speaker and music/background indicators — together
+   with quality flags and a recommended processing route.
+
+   **Also settled there, and not reopened here:** Praat is the pinned,
+   server-side analysis worker; *"every stored measurement retains its
+   extraction parameters and tool version"*, and every Praat result retains
+   *"its Praat version, script, parameters, hashes, and original-timeline
+   coordinates"*; the immutable original is the *"evidence and timeline
+   authority"* and every result maps to it; and the unreliable-measurement
+   behaviour is fixed — classes whose published reliability floors are not met
+   are *"marked unreliable rather than silently reported."*
+
+   What remains owed is therefore **units, precision, and shape**: the units
+   and precision of each measurement; how the retained provenance fields are
+   expressed on the wire; how a segment or measurement expresses its
+   original-timeline coordinates; and the quality-flag vocabulary and
+   granularity that carry the already-decided unreliable marking. **Numeric
+   thresholds are explicitly OQ-021** (AIWA and the acoustic-analysis owner)
+   and are not invented here or there.
+
+   **An open shape question, not a requirement this contract imposes:** ADR-038
+   requires an unreliable result to be marked, and says nothing about the other
+   two states. Whether the serialization must also distinguish an **absent**
+   measurement from a measured **zero** — so that a consumer cannot read "not
+   measured" as "measured as nothing" — is owed with the shape. An earlier
+   revision of this section stated the three-state distinction as a property the
+   shape must preserve; that was a normative rule with no ratifying record, and
+   it is withdrawn. If it should bind, it needs an ADR, not a sentence here.
+
 3. ~~**The delivery direction**~~ — **decided.**
    [ADR-038](../standards/decisions/ADR-038-spoken-audio-node-is-a-node-service.md)
    rules that the Node **emits** an intake event and ESU requests temporary
@@ -430,8 +492,69 @@ ESU, or a meaning asserted by the Node, is a defect in this seam.
    The concrete field names belong to the intake contract, whose single home is
    **OQ-022** — see below.
 
-**No repository implements a guess at items 1–2, or at the intake event's field
-names.**
+4. **The temporary-access protocol's shape, and it has two owners.** ADR-038
+   decided the split: the **Node authorizes both upload and access**, and the
+   **ingest service** (`files.sparxstar.com`) *"performs transport/storage
+   operations and issues the requested temporary URL"*, with URLs *"short-lived
+   and requested on demand."*
+
+   So the protocol cannot be owed to one builder — and **this contract cannot
+   assign the part that is not its own.** Its `Sides` are the Spoken Audio Node
+   and ESU; the media ingest service is not a party here. The sibling
+   Capture → Ingestion contract already names it a side, its header recording
+   that *"ADR-038 made this a three-party seam; it was written as two."*
+
+   - **Authorization** — what a consumer presents, and what the Node checks
+     before granting. Owed by the Spoken Audio Node's builder, and it is this
+     contract's to ask.
+   - **Issuance, expiry, errors and retry** — the grant's lifetime and whether
+     it renews, the failure vocabulary, which failures are terminal, and which
+     a consumer must retry and with what backoff. ADR-038 gives issuance to the
+     ingest service and fixes that URLs are short-lived and requested on demand;
+     it settles none of the rest. **Open, and not routed:** an earlier revision
+     sent these to the Capture → Ingestion seam's item 3, but that item is the
+     **producer's upload** acknowledgement and error envelope — *"which failures
+     the producer must retry"* — a different leg with a different consumer.
+     Sending ESU's access-grant behaviour there recorded an answer no decision
+     supports.
+
+   **Prior to both, a scope question owed jointly:** whether this contract's
+   `Sides` must become three, as its sibling's did, because ESU's access request
+   is answered by a party this contract does not name — and if not, which
+   document does own the ingest service's obligations on this leg. Until that is
+   ruled on, the second bullet has no owning home, which is the gap the question
+   exists to close. Whether the upload leg and the access leg share one error
+   vocabulary or state two is undecided as well, and answering them
+   independently risks one pipeline with two error languages.
+
+   **Already forbidden, and not a question:** ADR-038 lists *"durable storage
+   URLs in events, records, or evidence fields"* among what is forbidden
+   platform-wide on this path, and its intake-seam paragraph says the event
+   carries asset and derivative IDs *"never storage URLs"*. Any protocol shape
+   must satisfy that. This contract does not extend the prohibition beyond
+   ADR-038's wording; a broader rule about grants on every downstream leg would
+   need its own ratifying record.
+
+5. **Where the inference service's leg is described.** Its existence is not
+   open. ADR-038 places `sparxstar-esu-mcp` as *"a consumer, not the capture
+   backend"*, and [ADR-039](../standards/decisions/ADR-039-archive-never-edits-audio.md)
+   — Accepted 2026-09-10 — states it directly: *"`sparxstar-esu-mcp` — consumes
+   authorized access to the original; all timestamps on the original timeline
+   (no mapping contract exists or is needed)."* An earlier revision of this item
+   asked whether that relationship exists; it is ratified, and the question is
+   withdrawn.
+
+   What remains is where the already-decided leg is written down: this
+   two-sided contract, ESU's own seam contract, or the intake contract whose
+   home is OQ-022. Owed jointly. It is a document question, not a shape one.
+
+   Identity on this leg is not a question either: rule 4 under `## Rules` already
+   binds attribution to the platform's existing identity invariants, which this
+   contract does not restate and does not re-mint.
+
+**No repository implements a guess at items 1, 2, 4 or 5, at the intake event's
+field names, or at the ordering mechanism in item 3.** A reference stored under
+a guessed identifier is not correctable by a later rename.
 
 ## Whose contract this is
 
