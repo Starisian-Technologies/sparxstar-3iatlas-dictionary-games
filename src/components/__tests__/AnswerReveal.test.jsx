@@ -80,59 +80,93 @@ describe('the meaning always reaches the player when one exists', () => {
     });
 });
 
-describe('the definitions the adapter carries actually render', () => {
-    it('shows the source-derived definition', () => {
-        /*
-         * The other defect, and the more embarrassing one: the field audit
-         * established `definition` is 0% populated and `english_definition`
-         * 62.3%, the adapter was changed to carry the second — and this panel
-         * still rendered only the first. The fix reached the browser and
-         * stopped there.
-         */
-        const { text, unmount } = render({
-            word: word({ english_definition: 'a large natural stream' }),
-        });
-        expect(text).toContain('a large natural stream');
+describe('a definition must be about THIS entry', () => {
+    /*
+     * ===================== THE DEVON HAMLET =========================
+     *
+     * The panel rendered `english_definition` under the heading "English
+     * definition", as though the Dictionary had said it about the word on
+     * screen. It had not. That field defines the English LEMMA — or the
+     * Mandinka headword read as English — so a Mandinka learner revealing
+     * `kaw` was taught, in the app's own voice:
+     *
+     *     kaw
+     *     MEANS water
+     *     ENGLISH DEFINITION  A hamlet in Manaton parish, Teignbridge
+     *                         district, Devon, England (OS grid ref SX7580).
+     *
+     * The records below are the real ones from the production pack, kept as a
+     * fixture. Nothing in the payload separates the entries where this field
+     * is right (`min` / drink) from the ones where it is a homograph, so the
+     * panel shows none of it. A definition cannot be "probably about this
+     * word".
+     */
+    const fromPack = (headword) => {
+        const { adaptGamePackWord } = require('../../api/gamePackAdapter.js');
+        const pack = require('../../__tests__/fixtures/mnk-swadesh-60.json');
+        const row = pack.data.words.find((w) => w.header_word === headword);
+        if (!row) throw new Error(`fixture has no entry for ${headword}`);
+        return adaptGamePackWord(row);
+    };
+
+    it('never shows the English homograph for kaw', () => {
+        const kaw = fromPack('kaw');
+        /* Non-vacuity: the bad definition really is on the entry. */
+        expect(kaw.english_definition).toContain('Devon');
+
+        const { text, unmount } = render({ word: kaw });
+        expect(text).not.toContain('Devon');
+        expect(text).not.toContain('hamlet');
+        expect(text).not.toContain('English definition');
+        /* The approved gloss is what the learner gets, and it is correct. */
+        expect(text).toContain('water');
         unmount();
     });
 
-    it('shows the AIWA-elicited definition', () => {
+    it('never shows it for min either, even though min’s happens to be right', () => {
+        /*
+         * `min` (drink) carries "(ambitransitive) To consume (a liquid)
+         * through the mouth" — which IS about the right concept. It is still
+         * not rendered: the field is unverified as a class, and showing the
+         * ones that look plausible is how the Devon hamlet got through.
+         */
+        const min = fromPack('min');
+        expect(min.english_definition).toContain('consume');
+
+        const { text, unmount } = render({ word: min });
+        expect(text).not.toContain('consume');
+        expect(text).toContain('drink');
+        unmount();
+    });
+
+    it.each([
+        ['kewo', 'Metropolitan Area Network', 'man'],
+        ['wuleerin', 'electrodialysis', 'red'],
+        ['jamboo', 'surname', 'leaf'],
+    ])('suppresses the homograph on %s and keeps the gloss', (headword, wrong, gloss) => {
+        const entry = fromPack(headword);
+        expect(entry.english_definition.toLowerCase()).toContain(wrong.toLowerCase());
+
+        const { text, unmount } = render({ word: entry });
+        expect(text.toLowerCase()).not.toContain(wrong.toLowerCase());
+        expect(text).toContain(gloss);
+        unmount();
+    });
+
+    it('shows the entry’s own AIWA-elicited definition', () => {
+        /* The field that IS keyed to the entry still renders, under its own
+         * heading. Suppressing the homograph is not suppressing definitions. */
         const { text, unmount } = render({ word: word({ definition: 'a river' }) });
         expect(text).toContain('a river');
         unmount();
     });
 
-    it('shows both, separately, when both exist', () => {
+    it('renders nothing rather than a fallback when no verified definition exists', () => {
         const { text, unmount } = render({
-            word: word({ definition: 'a river', english_definition: 'a large stream' }),
+            word: word({ definition: '', english_definition: 'a large natural stream' }),
         });
-        expect(text).toContain('a river');
-        expect(text).toContain('a large stream');
-        unmount();
-    });
-
-    it('renders nothing for a withheld definition, and never substitutes', () => {
-        /*
-         * The rights invariant at the last hop. An empty `english_definition`
-         * is WITHHELD upstream. The panel must show nothing there — and must
-         * not put the AIWA-elicited `definition` under that heading, nor the
-         * translation, either of which would reconstruct what was withheld.
-         */
-        const { text, unmount } = render({
-            word: word({ english_definition: '', definition: 'AIWA text' }),
-        });
-        expect(text).not.toContain('English definition');
-        /* The AIWA field still shows under its OWN heading. */
-        expect(text).toContain('AIWA text');
-        unmount();
-    });
-
-    it('prefers the French definition on a French UI when there is one', () => {
-        const { text, unmount } = render({
-            language: 'fr',
-            word: word({ french_definition: 'un cours d’eau', english_definition: 'a stream' }),
-        });
-        expect(text).toContain('un cours d’eau');
+        expect(text).not.toContain('a large natural stream');
+        expect(text).not.toContain('Definition');
         unmount();
     });
 });

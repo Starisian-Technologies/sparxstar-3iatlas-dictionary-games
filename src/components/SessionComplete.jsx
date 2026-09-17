@@ -1,38 +1,47 @@
-import React from 'react';
-import { BarChart3, CheckCircle2, RotateCcw, List, Home, Grid3x3 } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { BarChart3, Grid3x3, List, RotateCcw, Sparkles } from 'lucide-react';
 import { PRODUCTION_GAMES } from '../constants.js';
-import { needsReview } from '../pedagogy.js';
-import Celebration from './Celebration.jsx';
+import Celebration, { prefersReducedMotion } from './Celebration.jsx';
 import BadgeCard from './BadgeCard.jsx';
 import { earnedBadges } from '../awards.js';
+import { RESULT, gradeSession, isWin, resultMessage } from '../results.js';
+import { COLOR, GRADIENT } from '../theme.js';
+import { playPartial, playTryAgain, playWin } from '../sound.js';
 
 /**
- * SessionComplete — post-session summary screen.
+ * SessionComplete — the end of a round, and it is not the same end every time.
  *
- * Props:
- *   session        {object}   Completed session from useGameSession
- *   learnedCount   {number}   Cumulative total of uniquely written words (production games only)
- *   onPracticeMissed {Function} Re-play with "Still learning" words
- *   onPlayAgain      {Function} Start a new session with same settings
- *   onChooseAnother  {Function} Back to the game chooser
- *   onHome           {Function} Back to the games menu
- *   adjustNotice     {string}   What adaptation decided at the end of this round
- *   awards           {Array}    OPTIONAL. Awards SETTLED BY THE ENGINE for this
- *                               session. Display only — this screen cannot
- *                               decide that an award was earned, and an absent
- *                               list simply renders nothing.
- *   onStats          {Function} OPTIONAL. Open the progress/leaderboard
- *                               screen. Offered here because the moment a
- *                               round ends is when "where does that put me?"
- *                               is actually being asked; making the player
- *                               navigate home first to find out is how a
- *                               ranking goes unread. Omitted means no button.
- *   onBrowse         {Function} OPTIONAL. Switch to the host's Browse tab.
- *                               Rendered only when a host actually supplies one
- *                               — the games site passed an empty function, so
- *                               this button shipped as the only exit from a
- *                               screen that had no other, and did nothing.
+ * ==================== WHAT THIS SCREEN USED TO DO =====================
+ *
+ * Every round finished identically: a gold trophy on a magenta gradient,
+ * confetti, and "Session complete!". A player who answered nothing correctly
+ * and earned zero XP got exactly that, word for word and animation for
+ * animation, alongside a player who got everything right.
+ *
+ * Under it sat six statistic tiles and up to six buttons of equal weight, so
+ * the screen said everything and therefore nothing: what happened, what it
+ * meant, and what to do next were all the same size.
+ *
+ * ==================== WHAT IT DOES NOW ===============================
+ *
+ * Three visibly different endings, graded in `src/results.js` from the
+ * recorded results:
+ *
+ *   PERFECT / STRONG   the celebration. Confetti, a glow, the score counting
+ *                      up, and the biggest treatment reserved for a perfect
+ *                      round so there is something left to reach for.
+ *   PARTIAL            warm and encouraging, no confetti. Names what was
+ *                      achieved AND what is ready to practise, with practice
+ *                      as the obvious next step.
+ *   PRACTICE           quiet. No trophy, no confetti, a soft sound, and one
+ *                      strong recovery action. The ROUND is called tough —
+ *                      never the player.
+ *
+ * And one hierarchy, in one order: what happened, what it was worth, one
+ * secondary fact if it is true, then the primary action, then the alternative,
+ * then a quiet way out.
  */
+
 export default function SessionComplete({
     session,
     learnedCount,
@@ -45,78 +54,142 @@ export default function SessionComplete({
     onStats = null,
     onBrowse = null,
 }) {
-    if (!session) return null;
+    const [reduced] = useState(() => prefersReducedMotion());
+    const grade = session ? gradeSession(session) : null;
 
     /*
-     * Every category, not three of them.
+     * The ending sound, once, when the screen arrives.
      *
-     * The screen previously reported `correct`, `learning` and XP, which do not
-     * add up to the number of questions played — a player who got some wrong or
-     * skipped some saw a summary that silently lost them. `answered` is derived
-     * from the same `results` array the others come from, so the reconciliation
-     * test has one source to check against.
+     * Keyed on the tier rather than fired in render: a re-render for any other
+     * reason must not replay the fanfare.
      */
-    const total = session.words?.length ?? 0;
-    const results = session.results ?? [];
-    const correct = results.filter((r) => r.outcome === 'correct').length;
-    const missed = results.filter((r) => r.outcome === 'learning').length;
-    const incorrect = results.filter((r) => r.outcome === 'incorrect').length;
-    const skipped = results.filter((r) => r.outcome === 'skipped').length;
-    const reviewing = results.filter((r) => needsReview(r.outcome)).length;
-    const answered = results.length;
+    useEffect(() => {
+        if (!grade) return;
+        if (grade.tier === RESULT.PERFECT || grade.tier === RESULT.STRONG) playWin();
+        else if (grade.tier === RESULT.PARTIAL) playPartial();
+        else playTryAgain();
+        /* eslint-disable-next-line react-hooks/exhaustive-deps -- once per ending */
+    }, [grade?.tier]);
+
+    if (!session || !grade) return null;
+
+    const message = resultMessage(grade);
+    const celebrate = isWin(grade.tier);
+    const perfect = grade.tier === RESULT.PERFECT;
     /* Whatever the engine settled, looked up in the catalogue. Never computed
      * here — see the header of `src/awards.js`. */
     const badges = earnedBadges(awards);
-    const xp = session.xpEarned ?? 0;
     const isProductionGame = Boolean(PRODUCTION_GAMES?.has?.(session.gameType));
 
+    /*
+     * ONE secondary fact, and only when it is true.
+     *
+     * The brief asks for a single meaningful result beside the headline, not a
+     * grid of six. A streak is shown when the results contain one; otherwise
+     * the words waiting to be practised, which is the fact the next action
+     * depends on. Neither is ever manufactured.
+     */
+    const secondary =
+        grade.streak >= 3
+            ? `Best run: ${grade.streak} in a row`
+            : grade.reviewing > 0
+              ? `${grade.reviewing} ready to practise`
+              : null;
+
+    /*
+     * Practice leads when the round needs it and there is something to
+     * practise. A strong round still offers it, as a quiet link — the player
+     * who wants to drill the one word they missed can, without the screen
+     * telling a winner to go and practise.
+     */
+    const practiceIsPrimary = grade.reviewing > 0 && !celebrate;
+
+    const tierStyle = celebrate
+        ? {
+              ring: perfect ? COLOR.magenta : COLOR.purple,
+              background: GRADIENT.primary,
+              glow: `0 0 60px ${perfect ? COLOR.magenta : COLOR.purple}55`,
+          }
+        : grade.tier === RESULT.PARTIAL
+          ? {
+                ring: COLOR.warning,
+                background: `linear-gradient(135deg, ${COLOR.warning}, ${COLOR.magenta})`,
+                glow: 'none',
+            }
+          : { ring: COLOR.textMuted, background: COLOR.panelRaised, glow: 'none' };
+
     return (
-        <div className="relative flex h-full flex-col items-center justify-center p-6 text-center">
-            <Celebration />
-            {/* Trophy / success icon */}
+        <div
+            className="relative flex h-full flex-col items-center justify-center p-6 text-center"
+            style={celebrate && !reduced ? { boxShadow: `inset ${tierStyle.glow}` } : undefined}
+        >
+            {/* Confetti is earned, not automatic. A round that needs practice
+             *  gets none — see the tier note in the header. */}
+            <Celebration active={celebrate} />
+
+            {/*
+             * The mark. A trophy only for a win; the practice ending gets a
+             * quiet, non-judgemental icon instead of an empty podium.
+             */}
             <div
-                className="w-20 h-20 rounded-full flex items-center justify-center mb-5 text-4xl"
-                style={{ background: 'linear-gradient(135deg, #E91E8C 0%, #7B3FA0 100%)' }}
+                className="mb-5 flex h-20 w-20 items-center justify-center rounded-full text-4xl"
+                style={{
+                    background: tierStyle.background,
+                    boxShadow: celebrate && !reduced ? tierStyle.glow : undefined,
+                    animation: celebrate && !reduced ? 'aiwa-pop 520ms ease-out' : undefined,
+                }}
                 aria-hidden="true"
             >
-                🏆
+                {perfect ? '🌟' : celebrate ? '🏆' : grade.tier === RESULT.PARTIAL ? '💪' : '🌱'}
             </div>
 
-            <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-1">
-                Session complete!
+            {/* 1. The result. */}
+            <h2 className="mb-1 text-2xl font-bold text-slate-900 dark:text-slate-100">
+                {message.headline}
             </h2>
-
-            <p className="text-gray-500 dark:text-gray-400 text-sm mb-6">
-                You practised{' '}
-                <span className="font-semibold text-gray-800 dark:text-gray-200">{total}</span>{' '}
-                words
+            <p className="mb-5 max-w-xs text-sm text-slate-600 dark:text-slate-300">
+                {message.detail}
             </p>
 
             {/*
-             * Stats row.
+             * 2. What the round contained — and NOT what it was worth.
              *
-             * The four OUTCOME tiles — knew, still learning, not yet, skipped —
-             * are mutually exclusive and sum to `answered`. "To review" is not
-             * one of them: it is the union of the three non-correct outcomes,
-             * shown because it is what `Practice these words` will replay. It
-             * deliberately overlaps, so do not add it into a total.
+             * This said "Points earned +N", counted up from `session.xpEarned`,
+             * which is accumulated on this device from `xpFor(outcome)`. INV-016
+             * (Accepted, binding platform-wide) is explicit that a client
+             * "may never derive the award itself from round performance… or
+             * answer counts": an inferred total has no ledger row, disagrees
+             * with the same player on a second device, and teaches a learner
+             * that the reward is theatre.
+             *
+             * Words worked out is not an award — it is a count of what happened,
+             * which this client watched happen. Settled awards render below,
+             * through `earnedBadges(awards)`, when the engine returns them.
+             *
+             * Nothing replaces the points figure with a zero, either: INV-016
+             * says absence of a settlement is not evidence of no awards, so
+             * "0 points" would be a claim about the ledger this screen is in no
+             * position to make.
              */}
-            <div className="mb-3 grid w-full max-w-xs grid-cols-3 gap-3">
-                <StatCard label="You knew" value={correct} color="#E91E8C" />
-                <StatCard label="Still learning" value={missed} color="#7B3FA0" />
-                <StatCard label="Not yet" value={incorrect} color="#9CA3AF" />
-                <StatCard label="Skipped" value={skipped} color="#9CA3AF" />
-                <StatCard label="To review" value={reviewing} color="#F5A623" />
-                <StatCard label="XP earned" value={`+${xp}`} color="#009688" />
+            <div className="mb-3 grid w-full max-w-xs grid-cols-2 gap-3">
+                <Figure label="Words worked out" value={`${grade.correct} / ${grade.answered}`} />
+                <Figure
+                    label={grade.answered === 1 ? 'Question answered' : 'Questions answered'}
+                    value={`${grade.answered}`}
+                />
             </div>
 
-            <p className="mb-6 text-xs text-gray-400">
-                {answered} of {total} questions answered
-            </p>
+            {/* 3. One secondary fact, when there is a true one. */}
+            {secondary && (
+                <p className="mb-5 flex items-center gap-1.5 text-sm font-semibold text-slate-700 dark:text-slate-200">
+                    <Sparkles size={15} aria-hidden="true" style={{ color: tierStyle.ring }} />
+                    {secondary}
+                </p>
+            )}
 
             {badges.length > 0 && (
-                <div className="mb-6 w-full max-w-xs">
-                    <p className="mb-2 text-xs font-bold uppercase tracking-[0.14em] text-gray-400">
+                <div className="mb-5 w-full max-w-xs">
+                    <p className="mb-2 text-xs font-bold uppercase tracking-[0.14em] text-slate-500">
                         {badges.length === 1 ? 'New award' : 'New awards'}
                     </p>
                     <div className="grid grid-cols-2 gap-3">
@@ -132,122 +205,165 @@ export default function SessionComplete({
              *
              * It was previously rendered only in the playing phase but set one
              * line before the transition to this screen, so the player never
-             * saw it — the `Adaptive: on` label was the only evidence that
-             * anything adapted, which is the reported defect.
+             * saw it.
              */}
             {adjustNotice && (
-                <p className="mb-6 rounded-xl bg-gray-50 px-4 py-2 text-sm text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+                <p className="mb-5 rounded-xl bg-slate-100 px-4 py-2 text-sm text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                     {adjustNotice}
                 </p>
             )}
 
             {/*
-             * Cumulative production count — only shown for games that require
-             * the player to produce (write/type/arrange) the word.
-             * DomainFlash and MeaningMatch are recognition-only; showing a
-             * "words you can write" count after them would misrepresent progress.
+             * 4-6. The actions, in three weights.
+             *
+             * One primary, one alternative, and a quiet way out. The screen
+             * previously offered "Choose Another Game" and "Return to Games
+             * Home" as equal-weight buttons stacked under an equally weighted
+             * "Play Again" and an equally weighted progress link — five things
+             * competing to be the obvious next tap, which means none of them
+             * was.
+             *
+             * The primary IS the recommended action and it changes with the
+             * result: a round that went well offers another; a round that did
+             * not offers the practice that will fix it.
+             */}
+            <div className="flex w-full max-w-xs flex-col gap-3">
+                {/*
+                 * THE PRIMARY IS THE RECOMMENDED ACTION, and it changes with
+                 * the result. A round that went well offers another; a round
+                 * that did not offers the practice that will fix it. Whichever
+                 * is not the primary becomes a quiet link below, so it is
+                 * still reachable without competing.
+                 */}
+                {practiceIsPrimary ? (
+                    <PrimaryButton onClick={onPracticeMissed} background={GRADIENT.primary}>
+                        <RotateCcw size={16} aria-hidden="true" />
+                        {message.action} ({grade.reviewing})
+                    </PrimaryButton>
+                ) : (
+                    <PrimaryButton onClick={onPlayAgain} background={GRADIENT.primary}>
+                        <RotateCcw size={16} aria-hidden="true" />
+                        {message.action}
+                    </PrimaryButton>
+                )}
+
+                <SecondaryButton onClick={onChooseAnother}>
+                    <Grid3x3 size={16} aria-hidden="true" />
+                    Try another game
+                </SecondaryButton>
+
+                {/* The quiet row. Text weight, deliberately below the two
+                 *  buttons — but still 44px tall, because "quiet" is about
+                 *  visual weight and never about being hard to hit. */}
+                <div className="flex flex-wrap items-center justify-center gap-4 pt-1">
+                    <QuietLink onClick={onHome}>Finish</QuietLink>
+                    {practiceIsPrimary ? (
+                        <QuietLink onClick={onPlayAgain}>Play again</QuietLink>
+                    ) : (
+                        grade.reviewing > 0 && (
+                            <QuietLink onClick={onPracticeMissed}>
+                                Practise {grade.reviewing}{' '}
+                                {grade.reviewing === 1 ? 'word' : 'words'}
+                            </QuietLink>
+                        )
+                    )}
+                    {onStats && (
+                        <QuietLink onClick={onStats}>
+                            <BarChart3 size={14} aria-hidden="true" />
+                            Your progress
+                        </QuietLink>
+                    )}
+                    {/* Only when a host actually implements it — see the prop doc. */}
+                    {onBrowse && (
+                        <QuietLink onClick={onBrowse}>
+                            <List size={14} aria-hidden="true" />
+                            Browse dictionary
+                        </QuietLink>
+                    )}
+                </div>
+            </div>
+
+            {/*
+             * The cumulative count, demoted to a footnote.
+             *
+             * It is a lifetime number and this screen is about one round, so it
+             * no longer sits in a gradient panel above the actions competing
+             * with the result.
+             *
+             * "Words you have written correctly" — not "words you can write".
+             * The count is incremented when a production game is answered
+             * correctly, which is evidence of writing a word correctly once. It
+             * is not evidence of mastery, and the old label claimed it was.
+             * Recognition games do not contribute at all, which is why this is
+             * hidden after them rather than shown as a total the round did not
+             * move.
              */}
             {isProductionGame && (
-                <div
-                    className="w-full max-w-xs rounded-2xl p-4 mb-6"
-                    style={{ background: 'linear-gradient(135deg, #E91E8C 0%, #7B3FA0 100%)' }}
-                >
-                    <p className="text-white/80 text-xs font-semibold uppercase tracking-wider mb-1">
-                        Total words you can write
-                    </p>
-                    <p className="text-white text-3xl font-bold">{learnedCount}</p>
-                </div>
+                <p className="mt-6 text-xs text-slate-500 dark:text-slate-400">
+                    Words you have written correctly:{' '}
+                    <span className="font-bold text-slate-700 dark:text-slate-200">
+                        {learnedCount}
+                    </span>
+                </p>
             )}
 
-            {/* Actions */}
-            <div className="flex flex-col gap-3 w-full max-w-xs">
-                {/*
-                 * Gated on `reviewing`, not `missed`.
-                 *
-                 * `handlePracticeMissed` replays everything `needsReview()`
-                 * covers — learning, incorrect AND skipped — but this button
-                 * was shown only when a `learning` result existed. A round
-                 * where the player skipped every card therefore had words
-                 * waiting in the review queue and no way to practise them,
-                 * which became reachable the moment DomainFlash gained a Skip.
-                 * One predicate now decides both what is replayed and whether
-                 * the offer appears.
-                 */}
-                {reviewing > 0 && (
-                    <button
-                        type="button"
-                        onClick={onPracticeMissed}
-                        className="flex items-center justify-center gap-2 w-full py-3 rounded-xl font-semibold text-sm transition-colors border-2"
-                        style={{ borderColor: '#E91E8C', color: '#E91E8C' }}
-                    >
-                        <RotateCcw size={16} aria-hidden="true" />
-                        Practice these words ({reviewing})
-                    </button>
-                )}
-
-                <button
-                    type="button"
-                    onClick={onPlayAgain}
-                    className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold text-white transition-colors"
-                    style={{ background: '#E91E8C' }}
-                >
-                    <CheckCircle2 size={16} aria-hidden="true" />
-                    Play Again
-                </button>
-
-                <button
-                    type="button"
-                    onClick={onChooseAnother}
-                    className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl bg-gray-100 py-3 text-sm font-semibold text-gray-700 transition-colors dark:bg-gray-800 dark:text-gray-200"
-                >
-                    <Grid3x3 size={16} aria-hidden="true" />
-                    Choose Another Game
-                </button>
-
-                <button
-                    type="button"
-                    onClick={onHome}
-                    className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl border border-gray-300 py-3 text-sm font-semibold text-gray-700 transition-colors dark:border-gray-600 dark:text-gray-200"
-                >
-                    <Home size={16} aria-hidden="true" />
-                    Return to Games Home
-                </button>
-
-                {/* Only when a host has wired the surface — see the prop doc. */}
-                {onStats && (
-                    <button
-                        type="button"
-                        onClick={onStats}
-                        className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl bg-gray-100 py-3 text-sm font-semibold text-gray-700 transition-colors dark:bg-gray-800 dark:text-gray-200"
-                    >
-                        <BarChart3 size={16} aria-hidden="true" />
-                        See your progress and ranking
-                    </button>
-                )}
-
-                {/* Only when a host actually implements it — see the prop doc. */}
-                {onBrowse && (
-                    <button
-                        type="button"
-                        onClick={onBrowse}
-                        className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold text-gray-500 transition-colors dark:text-gray-400"
-                    >
-                        <List size={16} aria-hidden="true" />
-                        Browse dictionary
-                    </button>
-                )}
-            </div>
+            <style>{`
+                @keyframes aiwa-pop {
+                    0%   { transform: scale(0.4) rotate(-12deg); opacity: 0; }
+                    60%  { transform: scale(1.15) rotate(4deg); opacity: 1; }
+                    100% { transform: scale(1) rotate(0deg); opacity: 1; }
+                }
+            `}</style>
         </div>
     );
 }
 
-function StatCard({ label, value, color }) {
+function Figure({ label, value, color }) {
     return (
-        <div className="flex-1 rounded-xl p-3 bg-gray-50 dark:bg-gray-800 text-center">
-            <p className="text-xl font-bold" style={{ color }}>
+        <div className="flex-1 rounded-xl bg-slate-100 p-3 text-center dark:bg-slate-800">
+            <p className="text-xl font-bold" style={{ color: color ?? undefined }}>
                 {value}
             </p>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 leading-snug">{label}</p>
+            <p className="mt-0.5 text-xs leading-snug text-slate-600 dark:text-slate-300">
+                {label}
+            </p>
         </div>
+    );
+}
+
+function PrimaryButton({ onClick, background, children }) {
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            className="flex min-h-[48px] w-full items-center justify-center gap-2 rounded-xl text-base font-bold text-white transition-transform active:scale-[0.98]"
+            style={{ background }}
+        >
+            {children}
+        </button>
+    );
+}
+
+function SecondaryButton({ onClick, children }) {
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl border-2 border-slate-300 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
+        >
+            {children}
+        </button>
+    );
+}
+
+function QuietLink({ onClick, children }) {
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            className="flex min-h-[44px] items-center gap-1.5 text-sm font-medium text-slate-500 underline-offset-4 transition-colors hover:text-slate-800 hover:underline dark:text-slate-400 dark:hover:text-slate-100"
+        >
+            {children}
+        </button>
     );
 }

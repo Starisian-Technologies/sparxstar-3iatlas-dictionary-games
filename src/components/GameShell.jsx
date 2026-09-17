@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Loader2, ChevronDown } from 'lucide-react';
 import { MAX_PACK_SIZE, useGameSet } from '../hooks/useGameSet.js';
 import { useGameSession } from '../hooks/useGameSession.js';
@@ -20,6 +20,15 @@ import {
 } from '../literacy.js';
 import { emptyRecent, remember } from '../recent.js';
 import LeaveGameDialog from './LeaveGameDialog.jsx';
+import PointsBurst from './PointsBurst.jsx';
+import {
+    playCorrect,
+    playIncorrect,
+    playStreak,
+    primeSound,
+    setSoundEnabled,
+    soundEnabled,
+} from '../sound.js';
 import {
     ADJUST,
     ADJUST_MESSAGE,
@@ -29,10 +38,12 @@ import {
     applyAdjustment,
     decideAdjustment,
     emptyPerformance,
+    planRound,
     progressKey,
     recordOutcome,
-    selectForLevel,
 } from '../difficulty.js';
+import { SHORTAGE_MESSAGE, availabilityFor, partitionForGame } from '../playability.js';
+import { COLOR, GRADIENT, accentFor, accentOnWhiteFor } from '../theme.js';
 import {
     CALIBRATION,
     STAGE,
@@ -326,6 +337,35 @@ export default function GameShell({
 
     /* ── Active game words (sliced + filtered for the chosen game) ── */
     const [gameWords, setGameWords] = useState([]);
+    /*
+     * A dealt round that is SHORTER than the player asked for, waiting on them.
+     *
+     * `{ delivered, requested }` while the notice is up, null otherwise. The
+     * deck itself is held in a ref rather than in state because it must not
+     * re-render anything and must survive until the player answers.
+     */
+    const [shortRound, setShortRound] = useState(null);
+    /*
+     * Set when the round was filled by reaching past the learner's usual band.
+     * Distinct from `shortRound`: that one is asked BEFORE the round, this one
+     * is told during it, because there is nothing to decide.
+     */
+    const [widenNotice, setWidenNotice] = useState(null);
+    const pendingDeckRef = useRef(null);
+    /*
+     * The reward moment for the answer just given.
+     *
+     * `token` increments per answer so two identical results in a row are two
+     * separate bursts rather than one that never re-fires. It carries whether
+     * the answer was CORRECT and the streak length — facts about the round —
+     * and deliberately no award value: see INV-016 and the note in
+     * `PointsBurst.jsx`.
+     */
+    const [burst, setBurst] = useState({ correct: false, streak: 0, token: 0 });
+    const [soundOn, setSoundOn] = useState(() => soundEnabled());
+    /* Set the moment the player taps a game card. After that the selection is
+     * theirs and nothing may move it — see the auto-select effect below. */
+    const gameChosenByPlayerRef = useRef(false);
 
     /* ── Hooks ── */
     /*
@@ -389,6 +429,102 @@ export default function GameShell({
          */
         universalOnly: requiresUniversalWords(currentStage),
     });
+
+    /*
+     * A GAME-NEUTRAL PACK, for answering "can this game be played at all?"
+     *
+     * The pack above is narrowed for the SELECTED game — `listen_write` asks
+     * for audio-verified entries, calibration asks for universal ones — which
+     * makes it the wrong evidence for judging the other five. Judging
+     * `complete_sentence` by an audio-only pack would disable a game that is
+     * perfectly playable.
+     *
+     * Fetched only WHEN the primary pack is narrowed: an empty `language`
+     * makes the hook a no-op, so the ordinary case still issues one request
+     * and this costs nothing.
+     */
+    const packIsNarrowed = selectedGame === 'listen_write' || requiresUniversalWords(currentStage);
+    const {
+        words: neutralWords,
+        loading: neutralLoading,
+        error: neutralError,
+    } = useGameSet({
+        bffPath,
+        language: packIsNarrowed ? sourceLanguage : '',
+        domain: selectedDomain,
+        limit: Math.min(MAX_PACK_SIZE, Math.max(wordCount * 6, 40)),
+    });
+    const previewPack = packIsNarrowed ? neutralWords : fetchedWords;
+    const previewLoading = packIsNarrowed ? neutralLoading : gameSetLoading;
+    const previewError = packIsNarrowed ? neutralError : gameSetError;
+
+    /*
+     * WHETHER A GAME CAN BE OFFERED IS KNOWABLE BEFORE IT IS OFFERED.
+     *
+     * "No words are available for this game yet" used to appear AFTER the
+     * player chose a game, chose a length and pressed Start — the answer to a
+     * question they had already committed to, with no way back but to leave
+     * the round. Every input to that answer is present here, at setup, so it
+     * is answered here: an unplayable game is disabled and says what it needs.
+     */
+    const availability = useMemo(() => {
+        const out = {};
+        for (const game of GAME_TYPES) {
+            out[game.id] = availabilityFor(previewPack, {
+                gameId: game.id,
+                languageCode: sourceLanguage ?? '',
+                /* The gloss the games will actually render depends on the UI
+                 * language, so availability must ask the same question. */
+                uiLanguage: language,
+            });
+        }
+        return out;
+    }, [previewPack, sourceLanguage, language]);
+
+    /*
+     * Nothing is disabled while the evidence is still arriving. A game greyed
+     * out because a fetch has not landed is a game the player believes is
+     * broken.
+     */
+    /*
+     * A SUCCESSFUL EMPTY PACK IS AN ANSWER.
+     *
+     * This required `previewPack.length > 0`, so a language or domain with no
+     * entries at all left `availabilityKnown` false forever: nothing was
+     * disabled, Start stayed enabled, and the player discovered the empty
+     * corpus only after committing to a round — the exact defect the preview
+     * exists to prevent, surviving in the case where the corpus is emptiest.
+     *
+     * Completion is now tracked apart from contents. An error is NOT completion:
+     * a failed fetch means the answer is unknown, and an unknown answer must not
+     * disable a game the corpus may well be able to play.
+     */
+    const availabilityKnown = !previewLoading && !previewError;
+    const selectedAvailability = availability[selectedGame] ?? null;
+    const selectedUnplayable =
+        availabilityKnown && selectedAvailability ? !selectedAvailability.playable : false;
+
+    /*
+     * NEVER OPEN ON A GAME THAT CANNOT BE PLAYED.
+     *
+     * The default selection is the first game in the list, chosen before
+     * anything is known about the corpus. In Mandinka today that is
+     * `listen_write` and no entry has consented audio, so the screen the
+     * player lands on is a disabled game above a disabled Start — which reads
+     * as the whole product being broken rather than as one game being
+     * unavailable.
+     *
+     * Only ever moves off a game the PLAYER has not chosen. Once they pick one
+     * themselves the choice is theirs, disabled or not: it stays selected, its
+     * reason stays on screen, and nothing is silently swapped underneath them.
+     */
+    useEffect(() => {
+        if (!availabilityKnown) return;
+        if (gameChosenByPlayerRef.current) return;
+        if (availability[selectedGame]?.playable) return;
+        const firstPlayable = GAME_TYPES.find((g) => availability[g.id]?.playable);
+        if (firstPlayable) setSelectedGame(firstPlayable.id);
+    }, [availabilityKnown, availability, selectedGame]);
 
     const { session, learnedCount, initSession, recordResult, completeSession, clearSession } =
         useGameSession();
@@ -539,6 +675,95 @@ export default function GameShell({
         }
     }, [session, phase, onSourceLanguage]); // resume once session loads asynchronously; phase guard prevents re-entry
 
+    /*
+     * Commit a dealt deck and enter the game.
+     *
+     * Shared by the ordinary path and by the shortfall notice: a player who
+     * accepts a shorter round must get exactly the same session — the same
+     * recent-word memory write, the same run id, the same return-visit event —
+     * and not a second, subtly different start path. Two ways to begin a game
+     * is two places for a start to go wrong.
+     */
+    const startWithDeck = useCallback(
+        async (deck, token) => {
+            const litKey = literacyKey(sourceLanguage ?? '', GAME_SKILL[selectedGame]);
+
+            /* Remember what this round served, before it is played. Bounded ids
+             * only, and written per language+skill so one language's history
+             * never suppresses another's words. */
+            recentRef.current[litKey] = remember(
+                recentRef.current[litKey] ?? emptyRecent(),
+                deck.map((w) => w?.uuid).filter(Boolean)
+            );
+            setLocalStorageItem(RECENT_KEY, JSON.stringify(recentRef.current));
+            setSetupError(null);
+            setShortRound(null);
+            pendingDeckRef.current = null;
+
+            try {
+                await initSession({
+                    gameType: selectedGame,
+                    langSource: sourceLanguage ?? '',
+                    domain: selectedDomain,
+                    level: playerLevel,
+                    words: deck,
+                });
+            } catch (error) {
+                if (runTokenRef.current !== token) return;
+                setSetupError(error?.message ?? 'Unable to start the game session.');
+                setPhase('setup');
+                return;
+            }
+
+            /* The player left while this was initialising. Do not put them back
+             * into a game they walked away from. */
+            if (runTokenRef.current !== token) return;
+
+            setGameWords(deck);
+            setPhase('playing');
+
+            /* Fire return-visit event. */
+            const today = new Date().toDateString();
+            const lastVisit = getLocalStorageItem('aiwa-dict-last-play');
+            if (lastVisit.available && lastVisit.value !== today) {
+                const didPersistVisit = setLocalStorageItem('aiwa-dict-last-play', today);
+                if (didPersistVisit) {
+                    await addEvent({ type: 'aiwa_game_return_visit' });
+                }
+            }
+        },
+        [addEvent, initSession, playerLevel, selectedDomain, selectedGame, sourceLanguage]
+    );
+
+    /** The player accepted the shorter round the corpus can actually fill. */
+    const acceptShortRound = useCallback(() => {
+        const deck = pendingDeckRef.current;
+        if (!deck || deck.length === 0) {
+            setShortRound(null);
+            return;
+        }
+        runTokenRef.current += 1;
+        startWithDeck(deck, runTokenRef.current);
+    }, [startWithDeck]);
+
+    /*
+     * A shortfall notice belongs to ONE dealt deck. Change the game, the
+     * domain, the level or the length and that deck is no longer the answer to
+     * the question being asked, so the notice and the deck it held both go.
+     * Leaving them would let "Play 2 words" start a round for a game the
+     * player has since navigated away from.
+     */
+    useEffect(() => {
+        pendingDeckRef.current = null;
+        setShortRound(null);
+    }, [selectedGame, selectedDomain, playerLevel, wordCount, sourceLanguage]);
+
+    /** The player would rather pick something else. Keep every other choice. */
+    const dismissShortRound = useCallback(() => {
+        pendingDeckRef.current = null;
+        setShortRound(null);
+    }, []);
+
     /* ── When game-set loads (after Start is tapped), kick off the session ── */
     useEffect(() => {
         const load = async () => {
@@ -552,8 +777,52 @@ export default function GameShell({
                 setPhase('setup');
                 return;
             }
-            if (fetchedWords.length === 0) {
-                setSetupError('No words are available for this game yet.');
+            /*
+             * AN EMPTY CALIBRATION PACK IS NOT AN EMPTY LANGUAGE.
+             *
+             * `fetchedWords` is requested with `universalOnly` while a learner
+             * is on the runway, so for a language whose corpus has no universal
+             * entries it comes back empty — and this guard sent the player back
+             * to setup with "there are no words yet", for a language that has
+             * plenty.
+             *
+             * The selection-level relaxations further down (`universalOnly:
+             * false` on an empty or over-long slice) could not save it: they
+             * re-select from an array that is already empty.
+             *
+             * `neutralWords` is the unfiltered pack, already being fetched
+             * whenever the primary one is narrowed — the same substitution the
+             * setup preview makes with `previewPack`. Wait for it before
+             * declaring anything empty, and only then say so.
+             */
+            if (packIsNarrowed && neutralLoading) return;
+            const dealPack =
+                fetchedWords.length > 0 || !packIsNarrowed ? fetchedWords : neutralWords;
+            if (dealPack.length === 0) {
+                setSetupError(SHORTAGE_MESSAGE.empty);
+                setPhase('setup');
+                return;
+            }
+
+            /*
+             * THE GAME'S OWN RULES, BEFORE THE DEAL.
+             *
+             * Each game used to filter the deck itself, after Start. So a
+             * ten-word round became however many words survived that filter,
+             * and a game with nothing to play rendered "No words are available
+             * for this game yet" as the answer to a question the player had
+             * already committed to. Both are decided here now, while there is
+             * still something the player can do about it.
+             */
+            const { playable: playableWords, reasons } = partitionForGame(
+                dealPack,
+                selectedGame,
+                sourceLanguage ?? '',
+                language
+            );
+            if (playableWords.length === 0) {
+                const dominant = Object.entries(reasons).sort((a, b) => b[1] - a[1])[0]?.[0];
+                setSetupError(SHORTAGE_MESSAGE[dominant] ?? SHORTAGE_MESSAGE.empty);
                 setPhase('setup');
                 return;
             }
@@ -632,9 +901,23 @@ export default function GameShell({
                  */
                 universalOnly: requiresUniversalWords(stage),
                 preferUniversal: stage === STAGE.RANKED && state !== LEARNER_STATE.ESTABLISHED,
+                /*
+                 * The selector's own guarantee is the stricter one — an
+                 * uncertain learner's round comes back SHORT rather than
+                 * reaching past their band. That is right for a library and
+                 * wrong for a player who chose ten questions and was handed
+                 * two without being told.
+                 *
+                 * The shell is the caller that can speak to the player, so it
+                 * is the caller allowed to make this trade: reach one honest
+                 * step further, easiest words first, and SAY SO below. What is
+                 * never acceptable is the silent two-word round.
+                 */
+                widen: true,
             };
 
-            let sliced = selectForLevel(fetchedWords, selectionOptions);
+            let plan = planRound(playableWords, selectionOptions);
+            let sliced = plan.words;
 
             /*
              * WHEN THE CORPUS CANNOT SUPPLY A RUNWAY, PLAY WITHOUT ONE.
@@ -660,11 +943,12 @@ export default function GameShell({
              * to play, not to wait.
              */
             if (sliced.length === 0 && selectionOptions.universalOnly) {
-                sliced = selectForLevel(fetchedWords, {
+                plan = planRound(playableWords, {
                     ...selectionOptions,
                     universalOnly: false,
                     preferUniversal: true,
                 });
+                sliced = plan.words;
             }
 
             /*
@@ -693,14 +977,15 @@ export default function GameShell({
             if (selectionOptions.universalOnly && sliced.length > calibrationLeft) {
                 const head = sliced.slice(0, calibrationLeft);
                 const takenIds = new Set(head.map((w) => w?.uuid).filter(Boolean));
-                const tail = selectForLevel(
-                    fetchedWords.filter((w) => !takenIds.has(w?.uuid)),
+                const tail = planRound(
+                    playableWords.filter((w) => !takenIds.has(w?.uuid)),
                     {
                         ...selectionOptions,
                         universalOnly: false,
                         preferUniversal: true,
+                        count: wordCount - head.length,
                     }
-                ).slice(0, wordCount - head.length);
+                ).words;
                 sliced = [...head, ...tail];
             }
 
@@ -731,51 +1016,58 @@ export default function GameShell({
                 return;
             }
 
-            /* Remember what this round served, before it is played. Bounded ids
-             * only, and written per language+skill so one language's history
-             * never suppresses another's words. */
-            recentRef.current[litKey] = remember(
-                recentRef.current[litKey] ?? emptyRecent(),
-                sliced.map((w) => w?.uuid).filter(Boolean)
-            );
-            setLocalStorageItem(RECENT_KEY, JSON.stringify(recentRef.current));
-            setSetupError(null);
-
-            try {
-                await initSession({
-                    gameType: selectedGame,
-                    langSource: sourceLanguage ?? '',
-                    domain: selectedDomain,
-                    level: playerLevel,
-                    words: sliced,
-                });
-            } catch (error) {
+            /*
+             * A SHORTER ROUND IS THE PLAYER'S TO ACCEPT, NOT OURS TO IMPOSE.
+             *
+             * The corpus genuinely cannot always fill the round that was asked
+             * for — `listen_write` needs consented audio, `complete_sentence`
+             * needs example sentences, and a narrow domain at a low band may
+             * hold a handful of words. That is a legitimate short round and it
+             * is the ONLY legitimate one.
+             *
+             * What it must never be is a surprise. The deck is already dealt
+             * here, so its real length is known before a single question is
+             * shown: hold it, say how long the round actually is, and let the
+             * player start it or pick something else with every other choice
+             * they made still in place.
+             */
+            if (sliced.length < wordCount) {
                 if (runTokenRef.current !== token) return;
-                setSetupError(error?.message ?? 'Unable to start the game session.');
+                pendingDeckRef.current = sliced;
+                setShortRound({ delivered: sliced.length, requested: wordCount });
                 setPhase('setup');
                 return;
             }
 
-            /* The player left while this was initialising. Do not put them back
-             * into a game they walked away from. */
-            if (runTokenRef.current !== token) return;
-
-            setGameWords(sliced);
-            setPhase('playing');
-
-            /* Fire return-visit event. */
-            const today = new Date().toDateString();
-            const lastVisit = getLocalStorageItem('aiwa-dict-last-play');
-            if (lastVisit.available && lastVisit.value !== today) {
-                const didPersistVisit = setLocalStorageItem('aiwa-dict-last-play', today);
-                if (didPersistVisit) {
-                    await addEvent({ type: 'aiwa_game_return_visit' });
-                }
+            /*
+             * THE ROUND IS FULL LENGTH — BECAUSE IT REACHED FOR IT.
+             *
+             * `planRound` reports `widened` when it had to fill the round from
+             * outside the learner's permitted pools. That was being discarded
+             * here, and the only notice shown was for a SHORT round — so the
+             * trade-off this shell deliberately makes on the player's behalf
+             * (longer words rather than a two-question session) happened
+             * silently whenever the widening succeeded, which is most of the
+             * time. A full deck of harder words is the case the player is least
+             * likely to notice and most likely to feel.
+             *
+             * Said once, on the round it applies to, and never as a warning:
+             * nothing is wrong, and the round is the length they asked for.
+             */
+            if (plan.widened) {
+                setWidenNotice(
+                    'Some words in this round are a little longer than usual — there were not enough short ones for a full round.'
+                );
+            } else {
+                setWidenNotice(null);
             }
+
+            await startWithDeck(sliced, token);
         };
 
         load();
     }, [
+        startWithDeck,
         /* `playerLevel` and `offsets` belong here: they choose WHICH words the
          * round gets, so a stale pair would deal the previous level's deck.
          * The effect is gated on `phase === 'loading'`, so listing them cannot
@@ -786,6 +1078,12 @@ export default function GameShell({
         gameSetLoading,
         gameSetError,
         fetchedWords,
+        /* The neutral pack is a real input now, not just a preview source:
+         * the deal falls back to it when calibration narrows the primary
+         * pack to nothing. See the guard above. */
+        packIsNarrowed,
+        neutralLoading,
+        neutralWords,
         wordCount,
         selectedGame,
         selectedDomain,
@@ -813,13 +1111,81 @@ export default function GameShell({
          */
         (uuid, outcome, attempts, xp, timeMs, hintsUsed = 0) => {
             /*
+             * UNLOCK AUDIO HERE, SYNCHRONOUSLY, WHILE THE TAP IS STILL LIVE.
+             *
+             * The sounds play inside the promise chain below, after an
+             * IndexedDB write. That callback has left the tap's transient user
+             * activation by then, so a context created at that point is
+             * suspended and the first correct answer of a session is silent.
+             * This line costs nothing after the first call.
+             */
+            primeSound();
+
+            /*
              * Chain onto pendingResultRef so that back-to-back synchronous calls
              * (e.g. the final onResult + onComplete pair in DomainFlash) are serialized.
              * handleComplete awaits this chain before calling completeSession().
              */
             pendingResultRef.current = pendingResultRef.current
                 .then(async () => {
-                    const updatedSession = await recordResult(uuid, outcome, attempts, xp, timeMs);
+                    const { session: updatedSession, accepted } = await recordResult(
+                        uuid,
+                        outcome,
+                        attempts,
+                        xp,
+                        timeMs
+                    );
+
+                    /*
+                     * A REJECTED RESULT STOPS THE WHOLE HANDLER.
+                     *
+                     * The guard used to be "does the last recorded result match
+                     * the uuid I just submitted?", which a double-tap on the
+                     * LAST word passes — the last result does match, because the
+                     * first tap wrote it. So every duplicate carried on into the
+                     * code below: a second `game_result` queued for the engine,
+                     * calibration and adaptation advanced again, and the reward
+                     * signals fired twice for one answer.
+                     *
+                     * `recordResult` now says `accepted` outright. Nothing after
+                     * this line runs for a result the session refused.
+                     */
+                    if (!accepted || !updatedSession) return;
+
+                    /*
+                     * THE REWARD, FROM THE RECORDED RESULT.
+                     *
+                     * Read off `updatedSession` rather than off the arguments,
+                     * so what the player is congratulated for is exactly what
+                     * the session stored. A duplicate result returns the
+                     * session unchanged, which means a double-tap replays no
+                     * burst and awards no second streak — the display cannot
+                     * drift from the ledger because it is reading the ledger.
+                     */
+                    /*
+                     * The celebration is for the ANSWER, not for a number.
+                     *
+                     * It used to carry `recorded.xp` into a `+N POINTS!` burst.
+                     * That number comes from `xpFor(outcome)` on this device, and
+                     * INV-016 forbids a client inferring earned value. Whether
+                     * the answer was right, and how many right answers are in a
+                     * row, are facts about the round rather than awards — so
+                     * those are what the burst says.
+                     */
+                    const recorded = updatedSession.results.at(-1);
+                    let streak = 0;
+                    for (let i = updatedSession.results.length - 1; i >= 0; i -= 1) {
+                        if (updatedSession.results[i].outcome !== 'correct') break;
+                        streak += 1;
+                    }
+                    if (recorded?.outcome === 'correct') {
+                        setBurst((b) => ({ correct: true, streak, token: b.token + 1 }));
+                        if (streak >= 3) playStreak(streak);
+                        else playCorrect();
+                    } else if (recorded?.outcome === 'incorrect') {
+                        setBurst((b) => ({ correct: false, streak: 0, token: b.token + 1 }));
+                        playIncorrect();
+                    }
 
                     /* Report every outcome (not just correct) toward the engine's
                      * game.result intake (GAME-SERVICE-INTAKE-SPEC-v1.0 OQ-3) — the
@@ -1234,6 +1600,40 @@ export default function GameShell({
         leaveToHome();
     }, [phase, session, leaveToHome]);
 
+    /*
+     * THE MODE A QUESTION IS PLAYED AT IS FIXED WHEN THE QUESTION STARTS.
+     *
+     * The strip under the nav says "Hints change now. Difficulty changes next
+     * game." — and it was not true. `mode` was computed inline in the render
+     * from the live `playerLevel`, and `ListenWrite`, `CompleteSentence` and
+     * `LetterReveal` read that prop while resolving the CURRENT word. So
+     * tapping Challenge halfway through a question cut the retry and reveal
+     * budget of the question already on screen, which is both a promise broken
+     * and a difficulty change nobody asked for mid-answer.
+     *
+     * `ArrangeWord` already captured mode at question start; this makes every
+     * game behave the way that one does, in one place, rather than four.
+     *
+     * The key is the question's identity, not the level: a new deal or the next
+     * word takes the latest level, and nothing in between does. Adjusting state
+     * during render on a changed key is React's documented pattern for exactly
+     * this — it re-renders before the children see the stale value, with no
+     * effect and no flash of the wrong mode.
+     */
+    const requestedMode =
+        opensWithSupport(currentStage) ||
+        needsImmediateSupport(
+            literacyRef.current[literacyKey(sourceLanguage ?? '', GAME_SKILL[selectedGame])]
+        )
+            ? MODE.PRACTICE
+            : playerLevel === LEVEL.CHALLENGE
+              ? MODE.CHALLENGE
+              : MODE.PRACTICE;
+    const questionKey = `${selectedGame}|${session?.startedAt ?? ''}|${session?.currentIndex ?? 0}`;
+    const [heldMode, setHeldMode] = useState({ key: questionKey, mode: requestedMode });
+    if (heldMode.key !== questionKey) setHeldMode({ key: questionKey, mode: requestedMode });
+    const questionMode = heldMode.key === questionKey ? heldMode.mode : requestedMode;
+
     /* Restart deals a fresh round of the same game rather than resuming. */
     const handleRestart = useCallback(async () => {
         setConfirmLeave(null);
@@ -1274,12 +1674,36 @@ export default function GameShell({
      * forgotten by one of them.
      */
     const gameLabel = GAME_TYPES.find((g) => g.id === selectedGame)?.label ?? null;
+
+    /*
+     * ONE SOURCE FOR THE COUNTER, AND IT CANNOT OVERRUN.
+     *
+     * This read `session.currentIndex + 1` out of `gameWords.length` and
+     * printed "3 / 2" on screen. Both halves were wrong:
+     *
+     *   the total   `gameWords` is the deck currently being PLAYED, and a
+     *               resumed session is handed only the words that remain
+     *               (`session.words.slice(currentIndex)`). The nav then
+     *               divided an absolute position by a relative length.
+     *   the number  `currentIndex` counts answers RECORDED, so after the last
+     *               one it equals the deck length — and +1 put the counter one
+     *               past the end for the frame between the final answer and
+     *               the completion screen.
+     *
+     * The session is the authority for both: its `words` are the whole round
+     * and its `currentIndex` the position within it. Clamped, so no ordering
+     * of state updates can print a question that does not exist.
+     */
+    const questionTotal = session?.words?.length ?? gameWords.length;
+    const questionNumber = Math.min((session?.currentIndex ?? 0) + 1, Math.max(questionTotal, 1));
+
     const nav = (
         <GameNav
             gameName={phase === 'setup' ? null : gameLabel}
-            questionAt={phase === 'playing' ? (session?.currentIndex ?? 0) + 1 : null}
-            questionOf={phase === 'playing' ? gameWords.length : null}
-            points={session?.xpEarned ?? 0}
+            questionAt={phase === 'playing' ? questionNumber : null}
+            questionOf={phase === 'playing' ? questionTotal : null}
+            soundOn={soundOn}
+            onToggleSound={() => setSoundOn(setSoundEnabled(!soundOn))}
             onHome={handleHome}
             onRestart={phase === 'playing' || phase === 'complete' ? handleRestart : null}
             /* Between rounds only — see the note on `showStats`. */
@@ -1309,7 +1733,7 @@ export default function GameShell({
      */
     if (showStats) {
         return (
-            <div className="flex-1 flex flex-col overflow-y-auto bg-white dark:bg-gray-900">
+            <div className="flex-1 flex flex-col overflow-y-auto bg-white dark:bg-slate-900">
                 {nav}
                 <div className="px-4 pt-4">
                     <button
@@ -1333,11 +1757,13 @@ export default function GameShell({
 
     if (phase === 'loading') {
         return (
-            <div className="flex-1 flex flex-col overflow-hidden bg-white dark:bg-gray-900">
+            <div className="flex-1 flex flex-col overflow-hidden bg-white dark:bg-slate-900">
                 {nav}
                 <div className="flex flex-1 flex-col items-center justify-center gap-4">
                     <Loader2 className="animate-spin" style={{ color: '#E91E8C' }} size={40} />
-                    <p className="text-gray-400 text-sm">Loading game set&hellip;</p>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">
+                        Loading game set&hellip;
+                    </p>
                     {gameSetError && <p className="text-red-500 text-sm">{gameSetError}</p>}
                 </div>
                 {leaveDialog}
@@ -1347,7 +1773,10 @@ export default function GameShell({
 
     if (phase === 'playing') {
         return (
-            <div className="flex-1 flex flex-col overflow-hidden bg-white dark:bg-gray-900">
+            /* `relative`, because the reward burst is positioned over the whole
+             * play area. It is `pointer-events: none` and takes no layout
+             * space, so nothing below it moves or becomes unreachable. */
+            <div className="relative flex flex-1 flex-col overflow-hidden bg-white dark:bg-slate-900">
                 {nav}
                 {/*
                  * Transparency strip. The current level is always visible and
@@ -1368,14 +1797,14 @@ export default function GameShell({
                  * round. Play again is one tap from the summary.
                  */}
                 <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-gray-100 px-3 py-2 text-xs dark:border-gray-800">
-                    <span className="text-gray-400">Level</span>
+                    <span className="text-slate-500 dark:text-slate-400">Level</span>
                     {Object.entries(LEVEL_PROFILE).map(([id, p]) => (
                         <button
                             key={id}
                             type="button"
                             onClick={() => setPlayerLevel(id)}
                             aria-pressed={playerLevel === id}
-                            className="min-h-[32px] rounded-lg border px-2 font-medium"
+                            className="min-h-[44px] rounded-lg border px-3 font-medium"
                             style={
                                 playerLevel === id
                                     ? {
@@ -1399,24 +1828,42 @@ export default function GameShell({
                      * re-deal it; the code comments admitted this while the
                      * label told the player otherwise.
                      */}
-                    <span className="w-full text-[11px] text-gray-400">
-                        Help changes next question; new word level begins next game
+                    <span className="w-full text-[11px] text-slate-500 dark:text-slate-400">
+                        Hints change now. Difficulty changes next game.
                     </span>
                     <button
                         type="button"
                         onClick={() => setAdaptive((a) => !a)}
                         aria-pressed={adaptive}
-                        className="ml-auto min-h-[32px] rounded-lg border border-gray-200 px-2 font-medium text-gray-500 dark:border-gray-700 dark:text-gray-400"
+                        /* 44px, like every other control. It sat at 32px beside
+                         * the level buttons and had the same problem they did. */
+                        className="ml-auto min-h-[44px] rounded-lg border border-slate-300 px-3 font-medium text-slate-600 dark:border-slate-600 dark:text-slate-300"
                     >
-                        Adaptive: {adaptive ? 'on' : 'off'}
+                        {adaptive ? 'Adjusts as you learn' : 'Stays the same'}
                     </button>
                 </div>
 
+                {widenNotice && (
+                    <p
+                        role="status"
+                        className="shrink-0 px-3 py-1.5 text-center text-xs text-slate-600 dark:text-slate-300"
+                    >
+                        {widenNotice}
+                    </p>
+                )}
+
                 {adjustNotice && (
-                    <p className="shrink-0 px-3 py-1.5 text-center text-xs text-gray-500 dark:text-gray-400">
+                    <p className="shrink-0 px-3 py-1.5 text-center text-xs text-slate-600 dark:text-slate-300">
                         {adjustNotice}
                     </p>
                 )}
+
+                <PointsBurst
+                    correct={burst.correct}
+                    streak={burst.streak}
+                    token={burst.token}
+                    gameId={selectedGame}
+                />
 
                 {renderGame({
                     gameType: selectedGame,
@@ -1444,17 +1891,7 @@ export default function GameShell({
                      * player can always ask for less help than the policy
                      * gives, and never less than it requires.
                      */
-                    mode:
-                        opensWithSupport(currentStage) ||
-                        needsImmediateSupport(
-                            literacyRef.current[
-                                literacyKey(sourceLanguage ?? '', GAME_SKILL[selectedGame])
-                            ]
-                        )
-                            ? MODE.PRACTICE
-                            : playerLevel === LEVEL.CHALLENGE
-                              ? MODE.CHALLENGE
-                              : MODE.PRACTICE,
+                    mode: questionMode,
                     onResult: handleWordResult,
                     onComplete: handleComplete,
                     onEvent: addEvent,
@@ -1466,7 +1903,7 @@ export default function GameShell({
 
     if (phase === 'complete') {
         return (
-            <div className="flex-1 flex flex-col overflow-y-auto bg-white dark:bg-gray-900">
+            <div className="flex-1 flex flex-col overflow-y-auto bg-white dark:bg-slate-900">
                 {nav}
                 <SessionComplete
                     session={session}
@@ -1489,7 +1926,7 @@ export default function GameShell({
 
     /* ── Setup screen ── */
     return (
-        <div className="flex-1 flex flex-col overflow-y-auto bg-white dark:bg-gray-900">
+        <div className="flex-1 flex flex-col overflow-y-auto bg-white dark:bg-slate-900">
             {nav}
             <div className="flex flex-1 flex-col gap-5 p-4">
                 <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 shrink-0">
@@ -1502,10 +1939,55 @@ export default function GameShell({
                     </div>
                 )}
 
+                {/*
+                 * THE SHORT ROUND, BEFORE IT STARTS.
+                 *
+                 * The deck is already dealt when this shows, so the number is
+                 * the real one and not an estimate. Two actions, and the
+                 * player's game, domain, level and length choices all survive
+                 * either of them.
+                 */}
+                {shortRound && (
+                    <div
+                        className="rounded-xl border px-4 py-3"
+                        style={{ borderColor: '#7B3FA0', background: 'rgba(123,63,160,0.08)' }}
+                        role="status"
+                    >
+                        <p className="text-sm font-bold text-gray-900 dark:text-gray-100">
+                            This round will be {shortRound.delivered}{' '}
+                            {shortRound.delivered === 1 ? 'word' : 'words'}, not{' '}
+                            {shortRound.requested}.
+                        </p>
+                        <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">
+                            That is every word this game can use right now for your level and
+                            domain. Play these, or pick another game or domain.
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                            <button
+                                type="button"
+                                onClick={acceptShortRound}
+                                className="rounded-xl px-4 py-2 text-sm font-bold text-white"
+                                style={{ background: 'linear-gradient(135deg,#E91E8C,#7B3FA0)' }}
+                            >
+                                Play {shortRound.delivered}{' '}
+                                {shortRound.delivered === 1 ? 'word' : 'words'}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={dismissShortRound}
+                                className="rounded-xl border-2 px-4 py-2 text-sm font-bold text-gray-700 dark:text-gray-200"
+                                style={{ borderColor: '#d1d5db' }}
+                            >
+                                Choose something else
+                            </button>
+                        </div>
+                    </div>
+                )}
+
                 {/* Language check */}
                 {!sourceLanguage && (
-                    <div className="rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700 p-6 text-center">
-                        <p className="text-gray-500 dark:text-gray-400 text-sm mb-3">
+                    <div className="rounded-xl border-2 border-dashed border-slate-300 p-6 text-center dark:border-slate-600">
+                        <p className="mb-3 text-sm text-slate-600 dark:text-slate-300">
                             Choose a source language to start playing
                         </p>
                         <div className="flex flex-wrap gap-2 justify-center">
@@ -1528,11 +2010,13 @@ export default function GameShell({
                     <>
                         {/* Domain selector */}
                         <section>
-                            <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">
+                            <h3 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
                                 Domain (optional)
                             </h3>
                             {domainsLoading ? (
-                                <p className="text-sm text-gray-400">Loading domains&hellip;</p>
+                                <p className="text-sm text-slate-500 dark:text-slate-400">
+                                    Loading domains&hellip;
+                                </p>
                             ) : (
                                 <div className="relative">
                                     <select
@@ -1550,7 +2034,7 @@ export default function GameShell({
                                     </select>
                                     <ChevronDown
                                         size={16}
-                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
+                                        className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-slate-400"
                                         aria-hidden="true"
                                     />
                                 </div>
@@ -1559,54 +2043,118 @@ export default function GameShell({
 
                         {/* Game type */}
                         <section>
-                            <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">
+                            <h3 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
                                 Game
                             </h3>
-                            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                                {GAME_TYPES.map((g) => (
-                                    <button
-                                        key={g.id}
-                                        type="button"
-                                        onClick={() => setSelectedGame(g.id)}
-                                        className="p-3 rounded-xl text-left border-2 transition-all"
-                                        style={
-                                            selectedGame === g.id
-                                                ? {
-                                                      background:
-                                                          'linear-gradient(135deg,#E91E8C,#7B3FA0)',
-                                                      borderColor: 'transparent',
-                                                      color: 'white',
-                                                  }
-                                                : {
-                                                      borderColor: '#f3f4f6',
-                                                      background: 'white',
-                                                  }
-                                        }
-                                    >
-                                        <span className="block text-xl mb-1" aria-hidden="true">
-                                            {g.emoji}
-                                        </span>
-                                        <span
-                                            className="block text-xs font-bold"
-                                            style={{
-                                                color: selectedGame === g.id ? 'white' : '#1f2937',
+                            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+                                {GAME_TYPES.map((g) => {
+                                    const status = availability[g.id];
+                                    /* Only a KNOWN refusal disables a card. An
+                                     * unanswered question is not a "no". */
+                                    const blocked = availabilityKnown && status && !status.playable;
+                                    const active = selectedGame === g.id;
+                                    const accent = accentFor(g.id);
+                                    return (
+                                        <button
+                                            key={g.id}
+                                            type="button"
+                                            onClick={() => {
+                                                gameChosenByPlayerRef.current = true;
+                                                setSelectedGame(g.id);
                                             }}
+                                            disabled={blocked}
+                                            aria-disabled={blocked || undefined}
+                                            aria-pressed={active}
+                                            title={blocked ? status.message : undefined}
+                                            className={[
+                                                'relative overflow-hidden rounded-xl border-2 p-3 text-left transition-all',
+                                                /* The play area is the playful
+                                                 * part: a selected card lifts.
+                                                 * The shell around it does not
+                                                 * move — see src/theme.js. */
+                                                active ? 'scale-[1.02] shadow-lg' : '',
+                                                blocked
+                                                    ? 'cursor-not-allowed border-slate-200 bg-slate-100 dark:border-slate-700 dark:bg-slate-800/60'
+                                                    : active
+                                                      ? 'border-transparent text-white'
+                                                      : 'border-slate-200 bg-white hover:border-slate-300 dark:border-slate-700 dark:bg-slate-800 dark:hover:border-slate-500',
+                                            ]
+                                                .filter(Boolean)
+                                                .join(' ')}
+                                            style={
+                                                active
+                                                    ? {
+                                                          /* White label on this, so the
+                                                           * contrast-checked variant —
+                                                           * see the two accent maps in
+                                                           * src/theme.js. */
+                                                          background: `linear-gradient(135deg, ${accentOnWhiteFor(g.id)}, ${COLOR.purple})`,
+                                                      }
+                                                    : undefined
+                                            }
                                         >
-                                            {g.label}
-                                        </span>
-                                        <span
-                                            className="block text-xs mt-0.5 leading-snug"
-                                            style={{
-                                                color:
-                                                    selectedGame === g.id
-                                                        ? 'rgba(255,255,255,0.8)'
-                                                        : '#9ca3af',
-                                            }}
-                                        >
-                                            {g.description}
-                                        </span>
-                                    </button>
-                                ))}
+                                            {/*
+                                             * SELECTION IS NOT SAID IN COLOUR ALONE.
+                                             *
+                                             * The gradient reads as "chosen" only
+                                             * to someone who can see it. The tick,
+                                             * the left accent bar and `aria-pressed`
+                                             * each say the same thing another way.
+                                             */}
+                                            {active && (
+                                                <span
+                                                    className="absolute right-2 top-2 text-sm font-black"
+                                                    aria-hidden="true"
+                                                >
+                                                    ✓
+                                                </span>
+                                            )}
+                                            {!active && !blocked && (
+                                                <span
+                                                    className="absolute inset-y-0 left-0 w-1"
+                                                    style={{ background: accent }}
+                                                    aria-hidden="true"
+                                                />
+                                            )}
+
+                                            <span
+                                                className="mb-1 block text-2xl"
+                                                aria-hidden="true"
+                                            >
+                                                {g.emoji}
+                                            </span>
+                                            <span
+                                                className={`block text-sm font-bold leading-tight ${
+                                                    active
+                                                        ? 'text-white'
+                                                        : blocked
+                                                          ? 'text-slate-500 dark:text-slate-400'
+                                                          : 'text-slate-900 dark:text-slate-100'
+                                                }`}
+                                            >
+                                                {g.label}
+                                            </span>
+                                            <span
+                                                className={`mt-0.5 block text-xs leading-snug ${
+                                                    active
+                                                        ? 'text-white/85'
+                                                        : 'text-slate-600 dark:text-slate-300'
+                                                }`}
+                                            >
+                                                {g.description}
+                                            </span>
+                                            {/* The specific missing thing, never
+                                             * "unavailable" on its own — a player
+                                             * can act on "needs example sentences"
+                                             * and cannot act on a grey card. */}
+                                            {blocked && (
+                                                <span className="mt-1.5 block text-xs font-semibold leading-snug text-amber-700 dark:text-amber-400">
+                                                    {status.message}
+                                                </span>
+                                            )}
+                                        </button>
+                                    );
+                                })}
                             </div>
                         </section>
 
@@ -1615,7 +2163,7 @@ export default function GameShell({
                          *  What no level changes is that Skip, reveal and navigation
                          *  stay available: a harder level is not a trap. */}
                         <section>
-                            <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                            <h3 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
                                 Level
                             </h3>
                             <div className="flex gap-2">
@@ -1631,21 +2179,28 @@ export default function GameShell({
                                             type="button"
                                             onClick={() => setPlayerLevel(m.id)}
                                             aria-pressed={playerLevel === m.id}
-                                            className="flex-1 rounded-xl border-2 px-3 py-2.5 text-left transition-colors"
                                             style={
                                                 playerLevel === m.id
-                                                    ? {
-                                                          background: '#7B3FA0',
-                                                          borderColor: 'transparent',
-                                                          color: 'white',
-                                                      }
-                                                    : { borderColor: '#f3f4f6', color: '#374151' }
+                                                    ? { background: GRADIENT.deep }
+                                                    : {}
                                             }
+                                            className={`flex-1 rounded-xl border-2 px-3 py-2.5 text-left transition-colors ${
+                                                playerLevel === m.id
+                                                    ? 'border-transparent text-white'
+                                                    : 'border-slate-200 text-slate-800 hover:border-slate-300 dark:border-slate-700 dark:text-slate-100 dark:hover:border-slate-500'
+                                            }`}
                                         >
-                                            <span className="block text-sm font-semibold">
+                                            <span className="block text-sm font-bold">
+                                                {playerLevel === m.id ? '✓ ' : ''}
                                                 {m.label}
                                             </span>
-                                            <span className="block text-xs opacity-80">
+                                            <span
+                                                className={`block text-xs ${
+                                                    playerLevel === m.id
+                                                        ? 'text-white/85'
+                                                        : 'text-slate-600 dark:text-slate-300'
+                                                }`}
+                                            >
                                                 {m.hint}
                                             </span>
                                         </button>
@@ -1655,7 +2210,7 @@ export default function GameShell({
 
                         {/* Word count */}
                         <section>
-                            <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">
+                            <h3 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
                                 Words per session
                             </h3>
                             <div className="flex gap-2">
@@ -1664,29 +2219,42 @@ export default function GameShell({
                                         key={n}
                                         type="button"
                                         onClick={() => setWordCount(n)}
-                                        className="flex-1 py-2.5 rounded-xl font-semibold text-sm transition-colors border-2"
-                                        style={
+                                        aria-pressed={wordCount === n}
+                                        className={`min-h-[48px] flex-1 rounded-xl border-2 text-base font-bold transition-colors ${
                                             wordCount === n
-                                                ? {
-                                                      background: '#E91E8C',
-                                                      borderColor: 'transparent',
-                                                      color: 'white',
-                                                  }
-                                                : { borderColor: '#f3f4f6', color: '#374151' }
-                                        }
+                                                ? 'border-transparent text-white'
+                                                : 'border-slate-200 text-slate-800 hover:border-slate-300 dark:border-slate-700 dark:text-slate-100 dark:hover:border-slate-500'
+                                        }`}
+                                        style={wordCount === n ? { background: COLOR.magenta } : {}}
                                     >
-                                        {n}
+                                        {wordCount === n ? `✓ ${n}` : n}
                                     </button>
                                 ))}
                             </div>
                         </section>
 
-                        {/* Start button */}
+                        {/* Start button. Disabled rather than allowed to fail:
+                         *  starting a game that cannot deal a question is the
+                         *  defect, and the reason sits beside the control that
+                         *  would have triggered it. */}
+                        {selectedUnplayable && (
+                            <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                                {selectedAvailability?.message}
+                            </p>
+                        )}
                         <button
                             type="button"
                             onClick={handleStart}
-                            className="w-full py-4 rounded-xl font-bold text-base text-white transition-colors mt-auto"
-                            style={{ background: 'linear-gradient(135deg,#E91E8C,#7B3FA0)' }}
+                            disabled={selectedUnplayable}
+                            aria-disabled={selectedUnplayable || undefined}
+                            className={`mt-auto w-full rounded-xl py-4 text-base font-bold text-white transition-transform ${
+                                selectedUnplayable ? 'cursor-not-allowed' : 'active:scale-[0.99]'
+                            }`}
+                            style={
+                                selectedUnplayable
+                                    ? { background: COLOR.panelRaised }
+                                    : { background: GRADIENT.primary }
+                            }
                         >
                             Start
                         </button>

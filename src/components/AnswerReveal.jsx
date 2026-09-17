@@ -45,27 +45,41 @@ import { segmentHeadword } from '../orthography.js';
  * bug as a button that does not exist.
  */
 
-/** What the player is told happened, per outcome. */
+/**
+ * What the player is told happened, per outcome.
+ *
+ * Written for a child or a new reader, and written as SPEECH rather than as a
+ * label on a form. "The answer" is a filing heading — it states the category of
+ * the thing below it and says nothing to the person reading it. "Not quite"
+ * says what happened, in two words anyone can read, without calling the answer
+ * wrong or the player anything at all.
+ *
+ * "Got there" went for the same reason in the other direction: it is idiomatic
+ * English that a learner of English may not parse, and it undersells what it is
+ * reporting. That outcome is the player reaching the right answer after working
+ * for it, which is the moment this whole app exists for — "You found it!" says
+ * so.
+ */
 const VERDICT = {
     [OUTCOME.CORRECT]: {
-        label: 'Correct',
+        label: 'Correct!',
         Icon: Check,
         tone: 'text-emerald-600 dark:text-emerald-400',
     },
     [OUTCOME.LEARNING]: {
-        label: 'Got there',
+        label: 'You found it!',
         Icon: Check,
         tone: 'text-sky-600 dark:text-sky-400',
     },
     [OUTCOME.INCORRECT]: {
-        label: 'The answer',
+        label: 'Not quite',
         Icon: X,
         tone: 'text-amber-600 dark:text-amber-400',
     },
     [OUTCOME.SKIPPED]: {
-        label: 'Skipped',
+        label: "Here's the answer",
         Icon: SkipForward,
-        tone: 'text-gray-500 dark:text-gray-400',
+        tone: 'text-slate-500 dark:text-slate-400',
     },
 };
 
@@ -159,16 +173,42 @@ export default function AnswerReveal({
     const translation =
         language === 'fr' && word.translation_fr ? word.translation_fr : word.translation_en;
     /*
-     * The source-derived definition in the UI language, with the same
-     * fallback logic and the same limit: these two fields ARE rights-gated, so
-     * an empty French definition may fall back to English only because both
-     * are the same KIND of field — a withheld one is empty in both and nothing
-     * is reconstructed either way.
+     * ============ WHY NO `english_definition` IS RENDERED ============
+     *
+     * It is not a definition OF THIS ENTRY. It is a definition of the English
+     * lemma — or of the Mandinka headword read as though it were English — and
+     * the games showed it under the heading "English definition" as though the
+     * Dictionary had said it about the word on screen.
+     *
+     * What players saw, from the live pack
+     * (`game-set?language=mnk&size=60&swadesh=true`, kept as a fixture):
+     *
+     *   kaw       water   "A hamlet in Manaton parish, Teignbridge district,
+     *                      Devon, England (OS grid ref SX7580)."
+     *   kewo      man     "(computing) Initialism of Metropolitan Area Network"
+     *   wuleerin  red     "Acronym of reverse electrodialysis."
+     *   jamboo    leaf    "A surname from Old English."
+     *   yontoroo  rain    "A female given name."
+     *
+     * A Mandinka learner was being taught that `kaw` is a hamlet in Devon.
+     * Nothing in the payload separates the entries where this field happens to
+     * be right (`min` / drink is correct) from the ones where it is a
+     * homograph, so there is no safe way to show any of it: a definition
+     * cannot be "probably about this word".
+     *
+     * Two fields survive, and both belong to the entry itself:
+     *
+     *   translation_en   the APPROVED gloss, from `english_lemma` — "water".
+     *                    This is what the learner needs and it is right.
+     *   definition       AIWA-elicited, keyed to this entry. 0% populated in
+     *                    the sampled corpus, so it usually renders nothing —
+     *                    which is the correct behaviour for a field with no
+     *                    verified value, and better than a confident wrong one.
+     *
+     * If the Dictionary later ships a definition that is verifiably about the
+     * entry rather than about its English lemma, it gets rendered here. Until
+     * then this stays shut.
      */
-    const definitionInUiLanguage =
-        language === 'fr' && word.french_definition
-            ? word.french_definition
-            : word.english_definition;
     const example = word.example_sentences?.[0];
     const audioLabel =
         audioState === 'playing'
@@ -240,22 +280,9 @@ export default function AnswerReveal({
                     </div>
                 )}
                 {/*
-                 * Both definitions, SEPARATELY, and never one standing in for
-                 * the other.
-                 *
-                 * The field audit found `definition` is 0% populated and
-                 * `english_definition` 62.3%, which is why the adapter now
-                 * carries the second — but this panel still rendered only the
-                 * first, so the fix reached the browser and stopped there and
-                 * nearly two words in three still showed no definition.
-                 *
-                 * They are different things and are labelled as such:
-                 * `definition` is AIWA-elicited and ships regardless of the
-                 * source licence; `english_definition` is source-derived and
-                 * comes back EMPTY when redistribution is not permitted. An
-                 * empty value renders nothing. Neither is ever used as a
-                 * fallback for the other — that would put back exactly what a
-                 * rights decision withheld.
+                 * The entry's OWN definition, and only that. See the long note
+                 * above for why the source-derived one is not rendered: it
+                 * describes the English lemma, not the word on screen.
                  */}
                 {word.definition && (
                     <div>
@@ -263,16 +290,6 @@ export default function AnswerReveal({
                             Definition
                         </dt>
                         <dd className="text-gray-800 dark:text-gray-100">{word.definition}</dd>
-                    </div>
-                )}
-                {definitionInUiLanguage && (
-                    <div>
-                        <dt className="text-xs uppercase tracking-wide text-gray-400">
-                            {language === 'fr' ? 'Définition' : 'English definition'}
-                        </dt>
-                        <dd className="text-gray-800 dark:text-gray-100">
-                            {definitionInUiLanguage}
-                        </dd>
                     </div>
                 )}
                 {word.ipa && (

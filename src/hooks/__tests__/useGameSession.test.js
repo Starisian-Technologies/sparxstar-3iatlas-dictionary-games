@@ -56,12 +56,27 @@ async function startSession(hook, gameType = 'listen_write') {
     });
 }
 
-async function record(hook, ...args) {
+/**
+ * Record one result and return the SESSION it produced.
+ *
+ * `recordResult` now answers `{ session, accepted }` rather than a bare
+ * session: a caller cannot otherwise tell a rejected duplicate from an accepted
+ * result, because a duplicate of the last word returns a session whose final
+ * result matches the uuid just submitted. This helper unwraps it so the
+ * existing assertions keep reading the session; `recordFull` below is for the
+ * tests that care about the acceptance itself.
+ */
+async function recordFull(hook, ...args) {
     let returned;
     await act(async () => {
         returned = await hook.current.recordResult(...args);
     });
     return returned;
+}
+
+async function record(hook, ...args) {
+    const returned = await recordFull(hook, ...args);
+    return returned?.session ?? null;
 }
 
 beforeEach(() => {

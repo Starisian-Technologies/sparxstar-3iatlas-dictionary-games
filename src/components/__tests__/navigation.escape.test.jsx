@@ -74,19 +74,40 @@ describe('GameNav — the escape hatch', () => {
         unmount();
     });
 
-    it('shows the game name, position and points while playing', () => {
+    it('shows the game name and position while playing', () => {
         const { container, unmount } = mount(
             <GameNav
                 onHome={jest.fn()}
                 gameName="Arrange the Word"
                 questionAt={3}
                 questionOf={10}
-                points={25}
             />
         );
         expect(container.textContent).toContain('Arrange the Word');
         expect(container.textContent).toContain('3 / 10');
-        expect(container.textContent).toContain('25 pts');
+        unmount();
+    });
+
+    it('shows no points total, because this client cannot know one', () => {
+        /*
+         * The nav used to render `session.xpEarned` as "N pts" — a figure
+         * accumulated on this device from `xpFor(outcome)`. INV-016 (Accepted,
+         * binding platform-wide) says a client renders SETTLED awards and never
+         * infers one, so that total had no ledger row behind it.
+         *
+         * And no zero in its place: the same invariant says absence of a
+         * settlement is not evidence of no awards.
+         */
+        const { container, unmount } = mount(
+            <GameNav
+                onHome={jest.fn()}
+                gameName="Arrange the Word"
+                questionAt={3}
+                questionOf={10}
+            />
+        );
+        expect(container.textContent).not.toMatch(/\bpts\b/);
+        expect(container.textContent).not.toMatch(/\bpoints\b/i);
         unmount();
     });
 
@@ -130,12 +151,18 @@ describe('SessionComplete — never a dead end', () => {
             />
         );
 
+    /*
+     * The labels changed when the screen was given a hierarchy: one primary
+     * action, one alternative, and quiet links. The GUARANTEE did not — every
+     * exit still exists on every ending and each still runs its own handler,
+     * which is what this suite is for. Only the words moved.
+     */
     it('offers all three required exits', () => {
         const { container, unmount } = render();
         const text = buttonTexts(container).join(' | ');
-        expect(text).toContain('Play Again');
-        expect(text).toContain('Choose Another Game');
-        expect(text).toContain('Return to Games Home');
+        expect(text).toContain('Practise these words');
+        expect(text).toContain('Try another game');
+        expect(text).toContain('Finish');
         unmount();
     });
 
@@ -143,13 +170,23 @@ describe('SessionComplete — never a dead end', () => {
         const onPlayAgain = jest.fn();
         const onChooseAnother = jest.fn();
         const onHome = jest.fn();
-        const { container, unmount } = render({ onPlayAgain, onChooseAnother, onHome });
+        const onPracticeMissed = jest.fn();
+        const { container, unmount } = render({
+            onPlayAgain,
+            onChooseAnother,
+            onHome,
+            onPracticeMissed,
+        });
 
-        clickText(container, 'Play Again');
-        expect(onPlayAgain).toHaveBeenCalledTimes(1);
-        clickText(container, 'Choose Another Game');
+        clickText(container, 'Practise these words');
+        expect(onPracticeMissed).toHaveBeenCalledTimes(1);
+        clickText(container, 'Try another game');
         expect(onChooseAnother).toHaveBeenCalledTimes(1);
-        clickText(container, 'Return to Games Home');
+        /* Play again is still reachable — as the quiet link it becomes when
+         * practice is the recommended action. */
+        clickText(container, 'Play again');
+        expect(onPlayAgain).toHaveBeenCalledTimes(1);
+        clickText(container, 'Finish');
         expect(onHome).toHaveBeenCalledTimes(1);
         unmount();
     });
@@ -170,16 +207,19 @@ describe('SessionComplete — never a dead end', () => {
         unmount();
     });
 
-    it('reconciles every outcome category against questions answered', () => {
+    it('reconciles what it shows against the questions answered', () => {
         /*
-         * The scoreboard reported `correct`, `learning` and XP only, so a round
-         * with a skip or a wrong answer displayed totals that did not add up.
+         * The six-tile scoreboard is gone — it said everything and therefore
+         * nothing. What replaced it must still ADD UP, which is the property
+         * the old test was really protecting: the figure on screen is
+         * correct-out-of-answered, and the words offered for practice are the
+         * ones the results say need it.
          */
         const { container, unmount } = render();
         const text = container.textContent;
-        expect(text).toContain('3 of 3 questions answered');
-        expect(text).toContain('Skipped');
-        expect(text).toContain('To review');
+        /* One correct of three answered, and two waiting (learning + skipped). */
+        expect(text).toContain('1 / 3');
+        expect(text).toContain('Practise these words (2)');
         unmount();
     });
 
@@ -212,7 +252,10 @@ describe('SessionComplete — never a dead end', () => {
             />
         );
         const practice = Array.from(container.querySelectorAll('button')).find((b) =>
-            b.textContent.includes('Practice these words')
+            /* Renamed with the hierarchy — "Practise" in the learner's
+             * spelling, and it is now the PRIMARY action on a round that went
+             * badly rather than one option among six. */
+            b.textContent.includes('Practise these words')
         );
         expect(practice).toBeDefined();
         expect(practice.textContent).toContain('(2)');

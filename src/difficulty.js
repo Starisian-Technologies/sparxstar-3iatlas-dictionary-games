@@ -263,9 +263,18 @@ export const ADJUST = {
 /**
  * Player-facing wording for an adjustment. Simple, and never a judgement.
  */
+/*
+ * One spelling of the verb across the whole product: "practise".
+ *
+ * The completion screen, the review button and this notice all say it to the
+ * same learner within a few seconds of each other, and two spellings of one
+ * word is exactly the kind of wobble a new reader notices and an experienced
+ * reader does not. The LEVEL is still called "Practice" — that is its name, not
+ * the verb.
+ */
 export const ADJUST_MESSAGE = {
     [ADJUST.HARDER]: 'Ready for a little more challenge?',
-    [ADJUST.EASIER]: "Let's practice this pattern again.",
+    [ADJUST.EASIER]: "Let's practise these words again.",
     [ADJUST.HOLD]: null,
 };
 
@@ -331,7 +340,7 @@ export function applyAdjustment(offset, adjustment) {
  * so no offset and no performance history can produce a question a game cannot
  * play. `partitionSpellable` still runs in each spelling game, after this.
  */
-export function selectForLevel(
+export function planRound(
     words,
     {
         level = LEVEL.PRACTICE,
@@ -362,6 +371,25 @@ export function selectForLevel(
         preferUniversal = false,
         /* Ids served in recent rounds, avoided but never a filter — see below. */
         recent = null,
+        /*
+         * May a round that the permitted pools cannot fill be topped up from
+         * the rest of the eligible corpus, easiest-first?
+         *
+         * OFF by default, because the module's own guarantee is the stricter
+         * one: an uncertain learner (`mix.next === 0`) meets no harder word,
+         * and a round that cannot be filled at their band comes back SHORT.
+         * That is deliberate and tested — padding an uncertain learner's round
+         * with harder words is the failure the zero-share gate exists for.
+         *
+         * The PRODUCT needs the other answer, and needs it explicitly: a
+         * player who chose ten questions must not be handed two without being
+         * told. So the shell turns this on and shows what it did — the round
+         * reaches one honest step further and says so, rather than either
+         * silently shortening or silently reaching. The choice belongs to the
+         * caller that can speak to the player; it is not a default the
+         * selector may take on its own.
+         */
+        widen = false,
         /* Injectable so tests assert distribution instead of hoping. */
         rng = Math.random,
     } = {}
@@ -424,7 +452,15 @@ export function selectForLevel(
     if (!band) {
         const maxStart = Math.max(0, scored.length - wanted);
         const start = Math.min(maxStart, Math.max(0, Math.round(offset) * 2));
-        return scored.slice(start, start + wanted).map((s) => s.word);
+        const windowed = scored.slice(start, start + wanted).map((s) => s.word);
+        return {
+            words: windowed,
+            requested: wanted,
+            delivered: windowed.length,
+            eligible: scored.length,
+            widened: false,
+            shortfall: Math.max(0, wanted - windowed.length),
+        };
     }
 
     /*
@@ -560,6 +596,63 @@ export function selectForLevel(
         return out;
     };
 
+    /*
+     * WIDEN BEFORE SHORTENING — AND SAY SO.
+     *
+     * Replaces a guard that fired only when the round came back COMPLETELY
+     * empty. That threshold is what shipped the defect players actually hit: a
+     * pack of sixty Mandinka words holds exactly two at three orthographic
+     * units, so a new learner's 10-, 20- and 30-word sessions all came back
+     * with the same two words — `kaw` and `min` — and started anyway. Two is
+     * not zero, so nothing fired, and nothing was said.
+     *
+     * A shortfall has three answers, in this order:
+     *
+     *   1. Fill from the permitted pools.               (`attempt`)
+     *   2. Fill from the rest of the ELIGIBLE corpus,   (`widenFrom`)
+     *      easiest-first — every word here already
+     *      passed level, game, rights and domain.
+     *   3. Deliver fewer, and report the shortfall so
+     *      the player is told before they commit.       (the caller)
+     *
+     * Easiest-first is ordered by ORTHOGRAPHIC UNITS rather than by band index,
+     * so a word below the lowest band sorts ahead of one above it.
+     *
+     * It honours `exclude` for the same reason `attempt` does, and the first
+     * cut of this did not: widening that ignores the recent memory serves the
+     * same padding every session, which is how five consecutive rounds of ten
+     * covered twelve distinct words. Inside one unit count the order is
+     * SHUFFLED and left shuffled — an earlier version sorted by score
+     * afterwards and threw the variation away again.
+     */
+    const widenFrom = (entries, exclude) => {
+        const taken = new Set(entries.map((e) => e.word));
+        const byUnits = new Map();
+        for (const entry of scored) {
+            if (taken.has(entry.word)) continue;
+            if (exclude.has(entry.word?.uuid)) continue;
+            const units = segmentHeadword(entry.word?.headword ?? '', languageCode).length;
+            if (!byUnits.has(units)) byUnits.set(units, []);
+            byUnits.get(units).push(entry);
+        }
+        const easiestFirst = [...byUnits.keys()]
+            .sort((a, b) => a - b)
+            .flatMap((units) => shuffle(byUnits.get(units), rng));
+        return [...entries, ...easiestFirst.slice(0, wanted - entries.length)];
+    };
+
+    /*
+     * One pass at a given exclusion level: the mix, then the widen if the
+     * caller allows it. Both must sit INSIDE the loop that relaxes the recent
+     * memory, or the relaxation only ever applies to half the round.
+     */
+    const fill = (exclude) => {
+        const mixed = attempt(exclude);
+        if (!widen || mixed.length >= wanted) return { entries: mixed, widened: false };
+        const padded = widenFrom(mixed, exclude);
+        return { entries: padded, widened: padded.length > mixed.length };
+    };
+
     const ringSize = recent?.ids?.length ?? 0;
     const steps = [
         0,
@@ -567,38 +660,37 @@ export function selectForLevel(
     ];
 
     let picked = [];
+    let widened = false;
     for (const forget of steps) {
-        picked = attempt(recent ? excludedIds(recent, forget) : new Set());
+        const round = fill(recent ? excludedIds(recent, forget) : new Set());
+        picked = round.entries;
+        widened = round.widened;
         if (picked.length >= wanted) break;
     }
 
     /*
      * Last resort: the memory has been fully released and the eligible corpus
-     * still cannot fill a round, so words must repeat within it. This is the
-     * "approved corpus is genuinely too small" case the pedagogy accepts —
-     * `scored` is the eligible set, so even here nothing outside the learner's
-     * permitted pools is reachable.
+     * still cannot fill a round, so words must repeat ACROSS rounds — never
+     * within one. This is the "approved corpus is genuinely too small" case
+     * the pedagogy accepts; `scored` is the eligible set, so even here nothing
+     * outside the learner's permitted pools is reachable.
      */
-    if (picked.length < wanted) picked = attempt(new Set());
+    if (picked.length < wanted) {
+        const round = fill(new Set());
+        picked = round.entries;
+        widened = round.widened;
+    }
 
     /*
-     * A SHORT ROUND AND NO ROUND ARE DIFFERENT FAILURES.
+     * THE LOCKOUT GUARD, which is not the same thing as widening.
      *
-     * The gate above is right for the ordinary shortfall: the current band
-     * has SOME words but not enough, and padding the round with harder ones
-     * is the thing an uncertain learner must not meet. A short round is the
-     * correct answer there.
-     *
-     * It is the wrong answer when the current band and below have NOTHING —
-     * a first-time writer placed at three units in a language whose approved
-     * corpus starts at five. Then the band is unusable for this corpus, and
-     * withholding every word locks the learner out of the game entirely to
-     * protect them from it.
-     *
-     * So harder material is permitted only when there is no easier material
-     * at all, and it is taken EASIEST-FIRST rather than by the mix. This is a
-     * lockout guard, not a quota filler: one word at or below the band is
-     * enough to keep it closed.
+     * A short round and NO round are different failures. When the current band
+     * and below hold nothing at all — a first-time writer placed at three
+     * units in a language whose approved corpus starts at five — withholding
+     * every word locks the learner out of the game entirely to protect them
+     * from it. Harder material is permitted only when there is no easier
+     * material AT ALL, easiest-first, whatever the caller asked for: one word
+     * at or below the band is enough to keep this closed.
      */
     if (picked.length === 0 && !mayReachUp && scored.length > 0) {
         const easiestFirst = [...scored].sort(
@@ -609,5 +701,25 @@ export function selectForLevel(
         picked = easiestFirst.slice(0, wanted);
     }
 
-    return picked.slice(0, wanted).map((e) => e.word);
+    const words_ = picked.slice(0, wanted).map((e) => e.word);
+    return {
+        words: words_,
+        requested: wanted,
+        delivered: words_.length,
+        /* How many words the game could have dealt at all, whatever the mix. */
+        eligible: scored.length,
+        widened,
+        shortfall: Math.max(0, wanted - words_.length),
+    };
+}
+
+/**
+ * Select words for a round, returning only the words.
+ *
+ * The long-standing signature. `planRound` is the same work with the round's
+ * shape attached — callers that must TELL the player why a round is short use
+ * that one; callers that only need words use this.
+ */
+export function selectForLevel(words, options = {}) {
+    return planRound(words, options).words;
 }
