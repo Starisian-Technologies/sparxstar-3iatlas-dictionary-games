@@ -1,4 +1,4 @@
-# Platform Decisions — Auto-synced from registry@22c100a
+# Platform Decisions — Auto-synced from registry@e40cbdd
 # DO NOT EDIT — this file is overwritten on every registry change
 
 - ADR-001: Relational canonical record; graph is derived projection only
@@ -41,3 +41,8 @@
 - ADR-038: `sparxstar-starmus-audio` is the Spoken Audio Node — a Node/TypeScript service, not a WordPress plugin
 - ADR-039: The archive never edits audio — release rendering is a separate pipeline
 - ADR-040: The object storage backend for spoken audio is Cloudflare R2
+- ADR-041: A Runtime Version Floor Is a Dated Support Window, Not a Constant
+- ADR-042: Device-Key Proof at Session Refresh Is Bound to an Identity Nonce, Not to the Expired Access Token
+- ADR-043: Device Trust Contracts v1 and v2 Are Both Accepted Until Identity Runs v2 in Production, Plus 30 Days
+- ADR-044: A service acts for a person only through an Identity token exchange that names the service in `act`
+- ADR-045: Identity Node ↔ Device Trust Node Boundary for 3iAtlas SSO

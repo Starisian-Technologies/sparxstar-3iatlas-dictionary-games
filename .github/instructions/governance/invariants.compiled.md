@@ -1,4 +1,4 @@
-# Invariants — Auto-synced from registry@22c100a
+# Invariants — Auto-synced from registry@e40cbdd
 # DO NOT EDIT
 
 # Platform Invariants
@@ -182,13 +182,14 @@ nothing else. Five failures, all closed:
 - **Wrong class** — a credential of one class is refused where another class is
   expected, **even if every other claim appears valid**. A human session is not
   an offline authorization, an offline authorization is not a vault grant, and
-  a machine token is none of them.
+  a machine token is none of them. A delegated token (ADR-044) is none of
+  them either, and is valid only at the one service named in its `aud`.
 - **Server presentation of an offline authorization** — a `wordpad-offline`
   credential presented to Identity, Key Vault, the Dictionary, the RLC node or
   any synchronization endpoint is refused. It is valid only for local WordPad
   unlock.
 
-The four classes are issued by different policies and are never substitutable:
+The classes (four under ADR-020, a fifth added by ADR-044) are issued by different policies and are never substitutable:
 the human session audience is a fixed scalar (`atlas-api`); machine and service
 audiences are selected by Identity from a server-controlled per-client
 `allowed_audiences` list; `wordpad-offline` and `key-vault` are separately
@@ -200,7 +201,9 @@ for another class, and it must be refused on class and audience alone, before
 any other check succeeds.
 
 Governed identifiers, claim bindings and offline lifetimes:
-[ADR-020](decisions/ADR-020-token-class-audiences.md). Repositories consume
+[ADR-020](decisions/ADR-020-token-class-audiences.md), amended by
+[ADR-044](decisions/ADR-044-delegated-tokens-by-token-exchange.md), which adds
+the fifth class: delegated access issued by token exchange. Repositories consume
 these identifiers; they never define them.
 
 ## INV-016 — A client renders settled awards; it never infers one
@@ -257,8 +260,8 @@ token satisfying all of:
   general capability, and an operation not named in it is refused.
 - **Valid `iat`, `nbf` and `exp`.**
 
-**No other credential substitutes.** Session, offline, provisioning, machine and
-array-audience tokens are each refused, whatever else about them is valid. This
+**No other credential substitutes.** Session, offline, provisioning, machine,
+delegated (ADR-044) and array-audience tokens are each refused, whatever else about them is valid. This
 is INV-015's cross-class rule applied at the Vault's door, stated separately
 because the Vault is where substitution would be most costly.
 
