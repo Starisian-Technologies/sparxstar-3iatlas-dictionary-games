@@ -1,4 +1,4 @@
-# Platform Decisions — Auto-synced from registry@e40cbdd
+# Platform Decisions — Auto-synced from registry@de40e07
 # DO NOT EDIT — this file is overwritten on every registry change
 
 - ADR-001: Relational canonical record; graph is derived projection only
@@ -46,3 +46,4 @@
 - ADR-043: Device Trust Contracts v1 and v2 Are Both Accepted Until Identity Runs v2 in Production, Plus 30 Days
 - ADR-044: A service acts for a person only through an Identity token exchange that names the service in `act`
 - ADR-045: Identity Node ↔ Device Trust Node Boundary for 3iAtlas SSO
+- ADR-046: Identity's Device Trust End-to-End Tests Run the Real Device Trust Server at a Pinned Commit
