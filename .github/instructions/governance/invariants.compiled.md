@@ -1,4 +1,4 @@
-# Invariants — Auto-synced from registry@de40e07
+# Invariants — Auto-synced from registry@0edbfae
 # DO NOT EDIT
 
 # Platform Invariants
@@ -137,6 +137,12 @@ exists in Helios alone. Computed scores attach only to sessions and artifacts,
 never to persons.
 
 *Source: ADR-012 (founder decision, captured 2026-06-11).*
+
+*Scope amended by [ADR-047](decisions/ADR-047-3iatlas-runs-without-helios-or-sirus.md):
+the Helios-minting clause does not apply to 3iAtlas services, which use no
+Helios and link no identity across platforms until
+[OQ-024](open-questions.md#oq-024--how-if-at-all-is-a-persons-identity-continued-across-wordpress-3iatlas-and-dve-open)
+is decided. The `account_id` and scoring clauses still apply to them.*
 
 ## INV-012 — Governed Artifact Lineage (GAL)
 

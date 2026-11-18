@@ -1,4 +1,4 @@
-# Open Questions — Auto-synced from registry@de40e07
+# Open Questions — Auto-synced from registry@0edbfae
 # DO NOT EDIT
 
 # Open Questions
@@ -418,3 +418,20 @@ far along.
 
 Tracked in the product specification registry as `OI-STARMUS-001`, whose
 resolution points back here.
+
+For 3iAtlas services, item 1 is answered by
+[ADR-047](decisions/ADR-047-3iatlas-runs-without-helios-or-sirus.md): the
+Consent Node owns consent, and Helios is not used. Item 1 stays open for
+WordPress, and items 2 and 3 are unchanged.
+
+## OQ-024 — How, if at all, is a person's identity continued across WordPress, 3iAtlas and DVE? [OPEN]
+
+[ADR-012](decisions/ADR-012-contributor-identity-keystone.md) makes Helios the
+suite-wide minter of contributor identity, but Helios is a WordPress component
+and [ADR-047](decisions/ADR-047-3iatlas-runs-without-helios-or-sirus.md) bars
+every 3iAtlas service from using it. Identity Node is the identity authority for
+3iAtlas. DVE has its own lineage references (ADR-017). Nothing yet says whether
+one person's contributions on WordPress, on 3iAtlas and in DVE are ever joined,
+by which service, under whose consent, or with what protection for minors.
+ADR-047 forbids any such link until this question is decided. Raised by Max
+Barrett on 2026-11-13.
